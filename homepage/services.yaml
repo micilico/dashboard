@@ -1,0 +1,46 @@
+- Services:
+    - qBittorrent:
+        description: Interface ultra.cc via tunnel SSH local au VPS
+        widget:
+          type: qbittorrent
+          url: http://127.0.0.1:16141
+          username: "{{HOMEPAGE_VAR_QBITTORRENT_USERNAME}}"
+          password: "{{HOMEPAGE_VAR_QBITTORRENT_PASSWORD}}"
+          enableLeechProgress: true
+          enableLeechSize: true
+
+    - Prowlarr:
+        description: API ultra.cc via tunnel SSH local au VPS
+        widget:
+          type: prowlarr
+          url: http://127.0.0.1:16124/prowlarr
+          key: "{{HOMEPAGE_VAR_PROWLARR_API_KEY}}"
+
+    - Jellyfin:
+        description: Instance locale du 2e VPS
+        widget:
+          type: jellyfin
+          url: http://127.0.0.1:8096
+          key: "{{HOMEPAGE_VAR_JELLYFIN_API_KEY}}"
+          enableBlocks: true
+          enableNowPlaying: true
+
+- Storage:
+    - rclone mount:
+        description: Statistiques rc du montage /mnt/ultra-media
+        widget:
+          type: customapi
+          url: http://127.0.0.1:5572/core/stats
+          method: POST
+          requestBody: {}
+          refreshInterval: 10000
+          mappings:
+            - field: transfers
+              label: Transfers
+            - field: speed
+              label: Speed
+            - field: bytes
+              label: Bytes
+            - field: errors
+              label: Errors
+

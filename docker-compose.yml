@@ -1,0 +1,18 @@
+services:
+  homepage:
+    image: ghcr.io/gethomepage/homepage:latest
+    container_name: homepage
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      HOMEPAGE_ALLOWED_HOSTS: ${HOMEPAGE_ALLOWED_HOSTS}
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    volumes:
+      - ./homepage:/app/config
+      - /mnt/ultra-media:/mnt/ultra-media:ro
+      - /sys:/sys:ro
+

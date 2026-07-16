@@ -1,0 +1,19 @@
+- datetime:
+    text_size: xl
+    format:
+      dateStyle: short
+      timeStyle: short
+      hourCycle: h23
+
+- search:
+    provider: [duckduckgo, google]
+    focus: true
+    target: _blank
+
+- resources:
+    label: Ultra Media
+    disk: /mnt/ultra-media
+    expanded: true
+    diskUnits: bytes
+    refresh: 10000
+

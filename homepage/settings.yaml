@@ -1,0 +1,23 @@
+title: Dashboard
+language: fr
+target: _blank
+color: slate
+theme: dark
+headerStyle: boxed
+statusStyle: dot
+hideVersion: true
+quicklaunch:
+  searchDescriptions: true
+  hideInternetSearch: true
+  hideVisitURL: false
+layout:
+  Services:
+    style: row
+    columns: 3
+  Storage:
+    style: row
+    columns: 1
+  Liens:
+    style: row
+    columns: 3
+
