@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base href="/torrent-panel/">
     <title>Torrent Panel</title>
     <link rel="stylesheet" href="static/app.css">
   </head>
@@ -14,23 +15,42 @@
           <p class="eyebrow">qBittorrent</p>
           <h1>Torrent Panel</h1>
         </div>
-        <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
+        <div class="topbar-actions">
+          <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
+          <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
+        </div>
       </header>
 
-      <section class="toolbar" aria-labelledby="add-title">
-        <div>
-          <h2 id="add-title">Ajouter un magnet</h2>
-          <p>Le lien est transmis au backend local, jamais directement au navigateur.</p>
-        </div>
+      <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents"></section>
+
+      <details class="toolbar" id="addPanel">
+        <summary>
+          <span>Ajouter des magnets</span>
+          <span class="summary-hint">Panneau repliable</span>
+        </summary>
         <form id="addForm" class="magnet-form">
-          <label for="magnetInput">Lien magnet</label>
-          <div class="input-row">
-            <input id="magnetInput" name="magnet" type="url" inputmode="url" autocomplete="off" placeholder="magnet:?xt=urn:btih:..." required>
-            <button type="submit" class="button primary">Ajouter</button>
+          <label for="magnetInput">Liens magnet</label>
+          <textarea id="magnetInput" name="magnet" inputmode="url" autocomplete="off" placeholder="magnet:?xt=urn:btih:..."></textarea>
+          <div class="form-grid">
+            <label>
+              Catégorie
+              <input id="categoryInput" name="category" autocomplete="off">
+            </label>
+            <label>
+              Tags
+              <input id="tagsInput" name="tags" autocomplete="off" placeholder="film, archive">
+            </label>
+            <label class="check-line">
+              <input id="pausedInput" name="paused" type="checkbox">
+              Démarrer en pause
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <button type="submit" class="button primary" id="addButton">Ajouter</button>
           </div>
           <p class="field-message" id="magnetMessage" aria-live="polite"></p>
         </form>
-      </section>
+      </details>
 
       <section class="content-panel" aria-labelledby="list-title">
         <div class="panel-head">
@@ -38,22 +58,74 @@
             <h2 id="list-title">Torrents</h2>
             <p id="summary">Chargement de la liste...</p>
           </div>
-          <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
+          <div class="refresh-controls">
+            <label class="check-line">
+              <input id="autoRefreshToggle" type="checkbox">
+              Auto
+            </label>
+            <label>
+              Intervalle
+              <select id="refreshInterval">
+                <option value="6000">6 s</option>
+                <option value="10000">10 s</option>
+                <option value="30000">30 s</option>
+                <option value="60000">60 s</option>
+              </select>
+            </label>
+          </div>
         </div>
 
-        <div id="alert" class="alert" role="alert" hidden></div>
+        <div class="filters" aria-label="Recherche et filtres">
+          <label>
+            Recherche
+            <input id="searchInput" type="search" autocomplete="off" placeholder="Nom du torrent">
+          </label>
+          <label>
+            État
+            <select id="statusFilter"></select>
+          </label>
+          <label>
+            Catégorie
+            <select id="categoryFilter"></select>
+          </label>
+          <label>
+            Tag
+            <select id="tagFilter"></select>
+          </label>
+          <label>
+            Tri
+            <select id="sortSelect"></select>
+          </label>
+          <button id="resetFilters" type="button" class="button secondary">Réinitialiser</button>
+        </div>
+
+        <div id="bulkBar" class="bulk-bar" hidden>
+          <strong id="bulkCount">0 sélectionné</strong>
+          <button id="bulkPause" type="button" class="button secondary">Mettre en pause</button>
+          <button id="bulkResume" type="button" class="button secondary">Reprendre</button>
+          <button id="bulkDelete" type="button" class="button danger">Supprimer</button>
+        </div>
+
+        <div id="alert" class="alert" role="alert" hidden>
+          <span id="alertText"></span>
+          <button id="retryButton" type="button" class="button secondary">Réessayer</button>
+        </div>
         <div id="emptyState" class="empty" hidden>Aucun torrent pour le moment.</div>
 
         <table class="torrent-table" aria-describedby="summary">
           <thead>
             <tr>
-              <th scope="col">Nom</th>
-              <th scope="col">Etat</th>
-              <th scope="col">Progression</th>
-              <th scope="col">Telechargement</th>
-              <th scope="col">Envoi</th>
-              <th scope="col">Ratio</th>
-              <th scope="col">Taille</th>
+              <th scope="col" class="select-col">
+                <input id="selectVisible" type="checkbox" aria-label="Sélectionner les résultats affichés">
+              </th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="name">Nom</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="state">État</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="progress">Progression</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="downloadSpeed">Téléchargement</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="uploadSpeed">Envoi</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="ratio">Ratio</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="size">Taille</button></th>
+              <th scope="col"><button type="button" class="sort-head" data-sort="eta">ETA</button></th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
@@ -64,7 +136,7 @@
 
     <dialog id="deleteDialog" class="dialog">
       <form method="dialog" id="deleteForm">
-        <h2>Supprimer le torrent</h2>
+        <h2 id="deleteTitle">Supprimer le torrent</h2>
         <p id="deleteTorrentName" class="dialog-name"></p>
         <fieldset>
           <legend>Mode de suppression</legend>
@@ -85,6 +157,16 @@
           <button value="cancel" class="button secondary" type="submit">Annuler</button>
           <button id="confirmDeleteButton" value="confirm" class="button danger" type="submit">Supprimer</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="detailDialog" class="detail-dialog">
+      <form method="dialog" class="detail-shell">
+        <div class="detail-head">
+          <h2 id="detailTitle">Détails</h2>
+          <button value="close" class="button secondary" type="submit">Fermer</button>
+        </div>
+        <div id="detailBody" class="detail-body"></div>
       </form>
     </dialog>
 

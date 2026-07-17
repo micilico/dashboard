@@ -5,12 +5,12 @@ import secrets
 import time
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Deque
+from typing import Any, Deque
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .qbittorrent import QBittorrentClient, QbitConfig, QbitError
 
@@ -19,26 +19,66 @@ logger = logging.getLogger("torrent_panel")
 
 STATIC_DIR = Path(__file__).parent / "static"
 HASH_RE = re.compile(r"^[A-Fa-f0-9]{40}([A-Fa-f0-9]{24})?$")
+PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
 CSRF_COOKIE = "torrent_panel_csrf"
 CSRF_HEADER = "X-Torrent-Panel-CSRF"
+MAX_RATE_KEYS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_KEYS", "2048"))
+RATE_LIMIT_CALLS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_CALLS", "40"))
+RATE_LIMIT_SECONDS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_SECONDS", "60"))
+TRUSTED_PROXY_IPS = {
+    item.strip()
+    for item in os.getenv("TORRENT_PANEL_TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
+    if item.strip()
+}
+ALLOWED_SAVE_PATHS = {
+    item.strip()
+    for item in os.getenv("TORRENT_PANEL_ALLOWED_SAVE_PATHS", "").split(",")
+    if item.strip()
+}
 
 
 class TorrentAction(BaseModel):
     hash: str = Field(..., min_length=40, max_length=64)
 
 
-class DeleteTorrent(TorrentAction):
+class TorrentHashesAction(BaseModel):
+    hashes: list[str] = Field(default_factory=list, min_length=1, max_length=500)
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_single_hash(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("hash") and not data.get("hashes"):
+            return {**data, "hashes": [data["hash"]]}
+        return data
+
+
+class DeleteTorrent(TorrentHashesAction):
     deleteFiles: bool = False
 
 
 class AddMagnet(BaseModel):
-    magnet: str = Field(..., min_length=20, max_length=8192)
+    magnet: str | None = Field(default=None, max_length=65535)
+    magnets: list[str] = Field(default_factory=list, max_length=50)
+    category: str = Field(default="", max_length=80)
+    tags: str = Field(default="", max_length=200)
+    paused: bool = False
+    savePath: str = Field(default="", max_length=500)
+
+    @model_validator(mode="after")
+    def collect_magnets(self) -> "AddMagnet":
+        collected: list[str] = []
+        if self.magnet:
+            collected.extend(self.magnet.splitlines())
+        collected.extend(self.magnets)
+        self.magnets = [item.strip() for item in collected if item.strip()]
+        return self
 
 
 class RateLimiter:
-    def __init__(self, max_calls: int, period_seconds: int) -> None:
+    def __init__(self, max_calls: int, period_seconds: int, max_keys: int) -> None:
         self._max_calls = max_calls
         self._period_seconds = period_seconds
+        self._max_keys = max_keys
         self._hits: dict[str, Deque[float]] = defaultdict(deque)
 
     def allow(self, key: str) -> bool:
@@ -49,7 +89,22 @@ class RateLimiter:
         if len(hits) >= self._max_calls:
             return False
         hits.append(now)
+        self._cleanup(now)
         return True
+
+    def _cleanup(self, now: float) -> None:
+        if len(self._hits) <= self._max_keys:
+            return
+        for key in list(self._hits.keys()):
+            hits = self._hits[key]
+            while hits and now - hits[0] > self._period_seconds:
+                hits.popleft()
+            if not hits:
+                del self._hits[key]
+            if len(self._hits) <= self._max_keys:
+                return
+        for key in list(self._hits.keys())[: max(0, len(self._hits) - self._max_keys)]:
+            del self._hits[key]
 
 
 def build_client() -> QBittorrentClient:
@@ -64,10 +119,16 @@ def build_client() -> QBittorrentClient:
 
 
 app = FastAPI(title="Torrent Panel", docs_url=None, redoc_url=None, openapi_url=None)
+api_router = APIRouter()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/torrent-panel/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
 app.state.qbit = build_client()
 app.state.csrf_token = secrets.token_urlsafe(32)
-app.state.action_limiter = RateLimiter(max_calls=40, period_seconds=60)
+app.state.action_limiter = RateLimiter(
+    max_calls=RATE_LIMIT_CALLS,
+    period_seconds=RATE_LIMIT_SECONDS,
+    max_keys=MAX_RATE_KEYS,
+)
 
 
 @app.on_event("shutdown")
@@ -77,24 +138,39 @@ async def shutdown() -> None:
 
 def validate_hash(torrent_hash: str) -> str:
     if not HASH_RE.fullmatch(torrent_hash):
-        raise HTTPException(status_code=422, detail="Hash torrent invalide.")
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail("hash_invalid", "Hash torrent invalide.", "Réessayer"),
+        )
     return torrent_hash.lower()
 
 
-def validate_magnet(magnet: str) -> str:
+def validate_hashes(torrent_hashes: list[str]) -> list[str]:
+    cleaned = [validate_hash(item) for item in torrent_hashes]
+    if not cleaned:
+        raise HTTPException(status_code=422, detail=error_detail("hash_invalid", "Aucun torrent sélectionné.", "Réessayer"))
+    return cleaned
+
+
+def validate_magnet(magnet: str) -> tuple[str | None, str | None]:
     candidate = magnet.strip()
     if not candidate.startswith("magnet:?"):
-        raise HTTPException(status_code=422, detail="Lien magnet invalide.")
+        return None, "Lien magnet invalide."
     if "xt=urn:btih:" not in candidate and "xt=urn:btmh:" not in candidate:
-        raise HTTPException(status_code=422, detail="Lien magnet sans identifiant torrent.")
-    return candidate
+        return None, "Lien magnet sans identifiant torrent."
+    return candidate, None
+
+
+def error_detail(code: str, message: str, recovery: str) -> dict[str, str]:
+    return {"code": code, "message": message, "recovery": recovery}
 
 
 def client_key(request: Request) -> str:
+    client_host = request.client.host if request.client else "unknown"
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
+    if forwarded and client_host in TRUSTED_PROXY_IPS:
         return forwarded.split(",", 1)[0].strip()
-    return request.client.host if request.client else "unknown"
+    return client_host
 
 
 def require_action_guard(
@@ -104,41 +180,65 @@ def require_action_guard(
     cookie = request.cookies.get(CSRF_COOKIE)
     token = request.app.state.csrf_token
     if not cookie or not x_torrent_panel_csrf or cookie != token or x_torrent_panel_csrf != token:
-        raise HTTPException(status_code=403, detail="Jeton de protection invalide.")
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
+        )
 
     if not request.app.state.action_limiter.allow(client_key(request)):
-        raise HTTPException(status_code=429, detail="Trop d'actions en peu de temps. Reessayez dans une minute.")
+        raise HTTPException(
+            status_code=429,
+            detail=error_detail("rate_limited", "Trop d'actions en peu de temps.", "Réessayer"),
+        )
 
 
 def qbit_error_response(exc: QbitError) -> HTTPException:
-    return HTTPException(status_code=exc.status_code, detail=exc.public_message)
+    return HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, exc.public_message, exc.recovery))
 
 
-@app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/api/session")
-async def session(request: Request, response: Response) -> dict[str, str]:
+def set_csrf_cookie(request: Request, response: Response) -> str:
     is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+    app.state.csrf_token = secrets.token_urlsafe(32)
     response.set_cookie(
         CSRF_COOKIE,
         app.state.csrf_token,
         secure=is_https,
         httponly=False,
         samesite="strict",
-        path="/",
+        path=f"{PUBLIC_PREFIX}/" if PUBLIC_PREFIX else "/",
     )
-    return {"csrfToken": app.state.csrf_token}
+    return app.state.csrf_token
 
 
-@app.get("/api/torrents")
+@app.get("/")
+@app.get("/torrent-panel")
+@app.get("/torrent-panel/")
+async def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/healthz")
+@app.get("/torrent-panel/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+@app.get("/torrent-panel/readyz")
+async def readyz() -> dict[str, str]:
+    try:
+        await app.state.qbit.ready()
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "ready"}
+
+
+@api_router.get("/session")
+async def session(request: Request, response: Response) -> dict[str, str]:
+    return {"csrfToken": set_csrf_cookie(request, response)}
+
+
+@api_router.get("/torrents")
 async def torrents() -> dict[str, object]:
     try:
         return {"torrents": await app.state.qbit.torrents()}
@@ -146,37 +246,69 @@ async def torrents() -> dict[str, object]:
         raise qbit_error_response(exc) from exc
 
 
-@app.post("/api/torrents/pause", dependencies=[Depends(require_action_guard)])
-async def pause_torrent(payload: TorrentAction) -> dict[str, str]:
+@api_router.post("/torrents/pause", dependencies=[Depends(require_action_guard)])
+async def pause_torrent(payload: TorrentHashesAction) -> dict[str, object]:
     try:
-        await app.state.qbit.pause(validate_hash(payload.hash))
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.pause_many(hashes)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-    return {"status": "paused"}
+    return {"status": "paused", "count": len(hashes)}
 
 
-@app.post("/api/torrents/resume", dependencies=[Depends(require_action_guard)])
-async def resume_torrent(payload: TorrentAction) -> dict[str, str]:
+@api_router.post("/torrents/resume", dependencies=[Depends(require_action_guard)])
+async def resume_torrent(payload: TorrentHashesAction) -> dict[str, object]:
     try:
-        await app.state.qbit.resume(validate_hash(payload.hash))
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.resume_many(hashes)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-    return {"status": "resumed"}
+    return {"status": "resumed", "count": len(hashes)}
 
 
-@app.post("/api/torrents/delete", dependencies=[Depends(require_action_guard)])
-async def delete_torrent(payload: DeleteTorrent) -> dict[str, str]:
+@api_router.post("/torrents/delete", dependencies=[Depends(require_action_guard)])
+async def delete_torrent(payload: DeleteTorrent) -> dict[str, object]:
     try:
-        await app.state.qbit.delete(validate_hash(payload.hash), payload.deleteFiles)
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.delete_many(hashes, payload.deleteFiles)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-    return {"status": "deleted"}
+    return {"status": "deleted", "count": len(hashes)}
 
 
-@app.post("/api/torrents/add", dependencies=[Depends(require_action_guard)])
-async def add_torrent(payload: AddMagnet) -> dict[str, str]:
+@api_router.post("/torrents/add", dependencies=[Depends(require_action_guard)])
+async def add_torrent(payload: AddMagnet) -> dict[str, object]:
+    if payload.savePath and payload.savePath not in ALLOWED_SAVE_PATHS:
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail("save_path_refused", "Chemin de sauvegarde non autorisé.", "Réessayer"),
+        )
+
+    accepted: list[str] = []
+    rejected: list[dict[str, str]] = []
+    for index, magnet in enumerate(payload.magnets, start=1):
+        valid_magnet, reason = validate_magnet(magnet)
+        if valid_magnet:
+            accepted.append(valid_magnet)
+        else:
+            rejected.append({"line": str(index), "reason": reason or "Lien magnet invalide."})
+
+    if not accepted:
+        return {"status": "rejected", "accepted": 0, "rejected": rejected}
+
     try:
-        await app.state.qbit.add_magnet(validate_magnet(payload.magnet))
+        await app.state.qbit.add_magnet(
+            "\n".join(accepted),
+            category=payload.category.strip(),
+            tags=payload.tags.strip(),
+            paused=payload.paused,
+            save_path=payload.savePath.strip(),
+        )
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-    return {"status": "added"}
+    return {"status": "added", "accepted": len(accepted), "rejected": rejected}
+
+
+app.include_router(api_router, prefix="/api")
+if PUBLIC_PREFIX:
+    app.include_router(api_router, prefix=f"{PUBLIC_PREFIX}/api")
