@@ -3,25 +3,25 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Prowlarr Panel</title>
-    <link rel="stylesheet" href="./static/app.css?v=20260717-activity-fix">
+    <title>Prowlarr · Dashboard</title>
+    <link rel="stylesheet" href="./static/app.css?v=20260717-premium">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
     <main id="content" class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Prowlarr</p>
-          <h1>Prowlarr Panel</h1>
+          <p class="eyebrow">Centre de contrôle</p>
+          <h1>Prowlarr</h1>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a id="homeLink" href="/">Accueil</a>
-          <a id="activityLink" href="/activity/">Activité</a>
+          <a id="homeLink" href="/">Vue d’ensemble</a>
           <a id="torrentLink" href="/torrent-panel/">Torrents</a>
           <a id="prowlarrLink" aria-current="page" href="./">Prowlarr</a>
           <a id="storageLink" href="/storage-panel/">Stockage</a>
           <a id="mediaLink" href="/media-panel/">Médias</a>
           <a id="healthLink" href="/health/">Santé</a>
+          <a id="activityLink" href="/activity/">Activité</a>
         </nav>
         <div class="topbar-actions">
           <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
@@ -33,7 +33,7 @@
 
       <section class="content-panel">
         <div class="tabs" role="tablist" aria-label="Vues Prowlarr">
-          <button class="tab" id="indexersTab" type="button" data-view="indexers" role="tab" aria-selected="true" aria-controls="indexersView" tabindex="0">Indexers</button>
+          <button class="tab" id="indexersTab" type="button" data-view="indexers" role="tab" aria-selected="true" aria-controls="indexersView" tabindex="0">Indexeurs</button>
           <button class="tab" id="searchTab" type="button" data-view="search" role="tab" aria-selected="false" aria-controls="searchView" tabindex="-1">Recherche</button>
           <button class="tab" id="applicationsTab" type="button" data-view="applications" role="tab" aria-selected="false" aria-controls="applicationsView" tabindex="-1">Applications</button>
           <button class="tab" id="healthTab" type="button" data-view="health" role="tab" aria-selected="false" aria-controls="healthView" tabindex="-1">Santé</button>
@@ -47,8 +47,8 @@
         <section id="indexersView" class="view" role="tabpanel" aria-labelledby="indexersTab" tabindex="0">
           <div class="panel-head">
             <div>
-              <h2 id="indexers-title">Indexers</h2>
-              <p id="indexersSummary">Chargement des indexers...</p>
+              <h2 id="indexers-title">Indexeurs</h2>
+              <p id="indexersSummary">Chargement des indexeurs...</p>
             </div>
             <button id="testAllButton" type="button" class="button secondary">Tester tous</button>
           </div>
@@ -198,6 +198,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="./config.js?v=20260717-activity-fix"></script>
-    <script src="./static/app.js?v=20260717-activity-fix" defer></script>
+    <script src="./static/app.js?v=20260717-premium" defer></script>
   </body>
 </html>

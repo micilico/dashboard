@@ -966,6 +966,7 @@ function renderMediaAutomation() {
 
 function renderHome() {
   const critical = Number(state.dashboard.criticalCount || 0);
+  els.homeTitle.textContent = critical ? "Une attention est requise." : "Tout fonctionne. Parfaitement.";
   els.homeSummary.textContent = critical
     ? `${critical} alerte(s) critique(s) demandent une attention immédiate.`
     : "Aucune alerte critique. Les services restent surveillés en direct.";
