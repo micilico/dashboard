@@ -12,6 +12,7 @@
 
     - Prowlarr:
         description: API ultra.cc via tunnel SSH local au VPS
+        href: /prowlarr-panel/
         widget:
           type: prowlarr
           url: http://host.docker.internal:16124/prowlarr

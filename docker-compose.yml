@@ -8,7 +8,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - .env
+      - path: ./.env
+        required: false
     environment:
       HOMEPAGE_ALLOWED_HOSTS: ${HOMEPAGE_ALLOWED_HOSTS}
       PUID: ${PUID}
@@ -33,3 +34,18 @@ services:
     environment:
       TORRENT_PANEL_HOST: 0.0.0.0
       TORRENT_PANEL_PORT: ${TORRENT_PANEL_PORT:-3110}
+
+  prowlarr-panel:
+    build: ./prowlarr-panel
+    container_name: prowlarr-panel
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PROWLARR_PANEL_PORT:-3120}:${PROWLARR_PANEL_PORT:-3120}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - path: ./prowlarr-panel/.env
+        required: false
+    environment:
+      PROWLARR_PANEL_HOST: 0.0.0.0
+      PROWLARR_PANEL_PORT: ${PROWLARR_PANEL_PORT:-3120}

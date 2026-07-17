@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base href="/prowlarr-panel/">
+    <title>Prowlarr Panel</title>
+    <link rel="stylesheet" href="static/app.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Aller au contenu</a>
+    <main id="content" class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Prowlarr</p>
+          <h1>Prowlarr Panel</h1>
+        </div>
+        <nav class="nav" aria-label="Navigation principale">
+          <a href="/">Accueil</a>
+          <a href="/torrent-panel/">Torrents</a>
+          <a aria-current="page" href="/prowlarr-panel/">Prowlarr</a>
+        </nav>
+        <div class="topbar-actions">
+          <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
+          <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
+        </div>
+      </header>
+
+      <section class="summary-grid" id="summaryGrid" aria-label="Synthèse Prowlarr"></section>
+
+      <section class="content-panel">
+        <div class="tabs" role="tablist" aria-label="Vues Prowlarr">
+          <button class="tab" type="button" data-view="indexers" aria-selected="true">Indexers</button>
+          <button class="tab" type="button" data-view="search" aria-selected="false">Recherche</button>
+          <button class="tab" type="button" data-view="applications" aria-selected="false">Applications</button>
+          <button class="tab" type="button" data-view="health" aria-selected="false">Santé</button>
+        </div>
+
+        <div id="alert" class="alert" role="alert" hidden>
+          <span id="alertText"></span>
+          <button id="retryButton" type="button" class="button secondary">Réessayer</button>
+        </div>
+
+        <section id="indexersView" class="view" aria-labelledby="indexers-title">
+          <div class="panel-head">
+            <div>
+              <h2 id="indexers-title">Indexers</h2>
+              <p id="indexersSummary">Chargement des indexers...</p>
+            </div>
+            <button id="testAllButton" type="button" class="button secondary">Tester tous</button>
+          </div>
+          <div class="filters" aria-label="Filtres indexers">
+            <label>Recherche <input id="indexerSearch" type="search" autocomplete="off" placeholder="Nom"></label>
+            <label>État <select id="indexerState"></select></label>
+            <label>Protocole <select id="indexerProtocol"></select></label>
+            <label>Tag <select id="indexerTag"></select></label>
+            <label>Tri <select id="indexerSort"></select></label>
+            <button id="resetIndexers" type="button" class="button secondary">Réinitialiser</button>
+          </div>
+          <div id="indexersEmpty" class="empty" hidden>Aucun indexer ne correspond aux filtres.</div>
+          <div class="table-scroll">
+            <table class="data-table" aria-describedby="indexersSummary">
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Protocole</th>
+                  <th>État</th>
+                  <th>Priorité</th>
+                  <th>Tags</th>
+                  <th>Catégories</th>
+                  <th>Dernier test</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="indexerRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="searchView" class="view" aria-labelledby="search-title" hidden>
+          <div class="panel-head">
+            <div>
+              <h2 id="search-title">Recherche de releases</h2>
+              <p id="searchSummary">Saisir une requête pour interroger Prowlarr.</p>
+            </div>
+          </div>
+          <form id="searchForm" class="search-form">
+            <label>Requête <input id="releaseQuery" name="query" type="search" autocomplete="off" required minlength="2"></label>
+            <label>Catégories <input id="releaseCategories" inputmode="numeric" placeholder="2000, 5000"></label>
+            <label>Indexers <select id="releaseIndexers" multiple size="4"></select></label>
+            <button id="searchButton" type="submit" class="button primary">Rechercher</button>
+          </form>
+          <div class="filters" aria-label="Filtres résultats">
+            <label>Dans les résultats <input id="resultSearch" type="search" autocomplete="off"></label>
+            <label>Indexer <select id="resultIndexer"></select></label>
+            <label>Protocole <select id="resultProtocol"></select></label>
+            <label>Catégorie <input id="resultCategory" autocomplete="off"></label>
+            <label>Taille max (Go) <input id="resultMaxSize" type="number" min="0" step="1"></label>
+            <label>Tri <select id="resultSort"></select></label>
+          </div>
+          <div id="resultsEmpty" class="empty">Aucun résultat à afficher.</div>
+          <div class="table-scroll">
+            <table class="data-table" aria-describedby="searchSummary">
+              <thead>
+                <tr>
+                  <th>Titre</th>
+                  <th>Indexer</th>
+                  <th>Catégorie</th>
+                  <th>Taille</th>
+                  <th>Âge</th>
+                  <th>Seed</th>
+                  <th>Leech</th>
+                  <th>Protocole</th>
+                  <th>Ratio</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="resultRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="applicationsView" class="view" aria-labelledby="apps-title" hidden>
+          <div class="panel-head">
+            <div>
+              <h2 id="apps-title">Applications connectées</h2>
+              <p id="appsSummary">Lecture seule.</p>
+            </div>
+          </div>
+          <div id="appsGrid" class="card-grid"></div>
+        </section>
+
+        <section id="healthView" class="view" aria-labelledby="health-title" hidden>
+          <div class="panel-head">
+            <div>
+              <h2 id="health-title">Santé et événements</h2>
+              <p id="healthSummary">Alertes système et historique récent.</p>
+            </div>
+          </div>
+          <div class="split">
+            <div>
+              <h3>Alertes</h3>
+              <div id="alertsList" class="list"></div>
+            </div>
+            <div>
+              <h3>Historique récent</h3>
+              <div id="historyList" class="list"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="confirmDialog" class="dialog">
+      <form method="dialog" id="confirmForm">
+        <h2 id="confirmTitle">Confirmer</h2>
+        <p id="confirmText" class="dialog-name"></p>
+        <div class="dialog-actions">
+          <button id="cancelConfirm" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="acceptConfirm" value="confirm" class="button danger" type="button">Confirmer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="static/app.js" defer></script>
+  </body>
+</html>
