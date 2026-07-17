@@ -274,46 +274,33 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("indexerIds", "7"), calls[1][2]["params"])
 
     async def test_grab_uses_cached_release_download_url_and_torrent_panel(self):
-        self.client = ProwlarrClient(
-            ProwlarrConfig(
-                url="http://127.0.0.1:1/prowlarr",
-                api_key="secret",
-                torrent_panel_internal_url="http://torrent-panel:3110",
-                torrent_panel_internal_token="internal",
-            )
-        )
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
         release_id = "opaque-release-id"
         calls = []
 
         class FakeResponse:
+            content = b"{}"
             status_code = 200
 
             def json(self):
-                return {"status": "added"}
+                return {}
 
-        async def fake_post(path, **kwargs):
-            calls.append((path, kwargs))
+        async def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
             return FakeResponse()
 
-        self.client._torrent_client.post = fake_post
+        self.client._request = fake_request
         self.client._release_cache[release_id] = (
             time.monotonic(),
             {"title": "Ubuntu", "downloadUrl": "https://tracker.test/download?passkey=secret"},
         )
         grab = await self.client.grab(release_id)
         self.assertEqual(grab["status"], "sent")
-        self.assertEqual(calls[-1][0], "/api/internal/torrents/add-url")
-        self.assertEqual(calls[-1][1]["json"]["url"], "https://tracker.test/download?passkey=secret")
+        self.assertEqual(calls[-1][0:2], ("POST", "/api/v1/search"))
+        self.assertEqual(calls[-1][2]["json"]["downloadUrl"], "https://tracker.test/download?passkey=secret")
 
     async def test_grab_requires_cached_release(self):
-        self.client = ProwlarrClient(
-            ProwlarrConfig(
-                url="http://127.0.0.1:1/prowlarr",
-                api_key="secret",
-                torrent_panel_internal_url="http://torrent-panel:3110",
-                torrent_panel_internal_token="internal",
-            )
-        )
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
         with self.assertRaises(ProwlarrError) as context:
             await self.client.grab("missing-release-id")
         self.assertEqual(context.exception.code, "release_expired")

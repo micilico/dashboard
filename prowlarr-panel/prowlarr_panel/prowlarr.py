@@ -39,8 +39,6 @@ class ProwlarrConfig:
     url: str
     api_key: str
     timeout_seconds: float = 8.0
-    torrent_panel_internal_url: str = ""
-    torrent_panel_internal_token: str = ""
     release_cache_ttl_seconds: int = 900
 
 
@@ -126,15 +124,6 @@ class ProwlarrClient:
                 "Accept": "application/json",
             },
         )
-        self._torrent_client = httpx.AsyncClient(
-            base_url=config.torrent_panel_internal_url.rstrip("/"),
-            timeout=httpx.Timeout(config.timeout_seconds),
-            headers={
-                "User-Agent": "prowlarr-panel/1.0",
-                "Accept": "application/json",
-                "X-Torrent-Panel-Internal-Token": config.torrent_panel_internal_token,
-            },
-        )
         self._release_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._capabilities: dict[str, Any] = {
             "detected": False,
@@ -151,7 +140,6 @@ class ProwlarrClient:
 
     async def close(self) -> None:
         await self._client.aclose()
-        await self._torrent_client.aclose()
 
     def _request_error(self, exc: httpx.RequestError) -> ProwlarrError:
         host = urlparse(self._config.url).hostname or ""
@@ -261,7 +249,6 @@ class ProwlarrClient:
             "search": f"{self._api_root}/search",
             "searchRelease": f"{self._api_root}/search/release",
             "downloadClient": f"{self._api_root}/downloadclient",
-            "indexerDownload": f"{self._api_root}/indexer/1/download",
             "application": f"{self._api_root}/applications",
             "health": f"{self._api_root}/health",
             "history": f"{self._api_root}/history",
@@ -276,7 +263,7 @@ class ProwlarrClient:
                 "Les endpoints sont validés au démarrage contre l'instance réelle.",
                 "Les URLs privées, passkeys, tokens et champs de configuration sensibles sont supprimés des réponses.",
                 "L'activation/désactivation est proposée seulement si la mise à jour d'indexer est acceptée par l'API.",
-                "L'envoi vers qBittorrent passe par une API interne Torrent Panel protégée par token.",
+                "L'envoi vers qBittorrent utilise le grab natif Prowlarr avec la release complète côté serveur.",
             ],
             "lastDiscoveryAt": now_iso(),
         }
@@ -383,10 +370,10 @@ class ProwlarrClient:
 
     async def grab(self, release_id: str) -> dict[str, Any]:
         release = self._release_from_cache(release_id)
-        download_url = self._release_download_url(release)
         title = clean_text(first_present(release, "title", "releaseTitle", default="Release"))
-        await self._send_to_torrent_panel(download_url, title=title)
-        return {"status": "sent", "release": {"title": title}}
+        response = await self._request("POST", f"{self._api_root}/search", json=release, acceptable={200, 201, 202})
+        payload = response.json() if response.content else {}
+        return {"status": "sent", "release": {"title": title, "result": scrub(payload)}}
 
     def _cache_and_map_release(self, item: dict[str, Any]) -> dict[str, Any]:
         self._cleanup_release_cache()
@@ -416,66 +403,6 @@ class ProwlarrClient:
                 recovery="Relancer la recherche",
             )
         return entry[1]
-
-    def _release_download_url(self, release: dict[str, Any]) -> str:
-        for key in ("downloadUrl", "downloadTorrentUrl", "magnetUrl", "magnet", "link"):
-            value = release.get(key)
-            if isinstance(value, str) and (value.startswith("magnet:?") or value.startswith("http://") or value.startswith("https://")):
-                return value
-        raise ProwlarrError(
-            502,
-            "Prowlarr n'a pas fourni d'URL de téléchargement pour cette release.",
-            code="release_download_unavailable",
-            recovery="Essayer une autre release ou ouvrir Prowlarr",
-        )
-
-    async def _send_to_torrent_panel(self, download_url: str, *, title: str) -> None:
-        if not self._config.torrent_panel_internal_url or not self._config.torrent_panel_internal_token:
-            raise ProwlarrError(
-                500,
-                "Lien interne vers Torrent Panel non configuré.",
-                code="torrent_panel_internal_missing",
-                recovery="Vérifier la configuration",
-            )
-        try:
-            response = await self._torrent_client.post(
-                "/api/internal/torrents/add-url",
-                json={"url": download_url, "title": title},
-            )
-        except httpx.TimeoutException as exc:
-            logger.warning("Torrent Panel internal request timed out")
-            raise ProwlarrError(
-                504,
-                "Torrent Panel ne répond pas assez vite.",
-                code="torrent_panel_timeout",
-                recovery="Réessayer",
-            ) from exc
-        except httpx.RequestError as exc:
-            logger.warning("Torrent Panel internal request error: %s", exc.__class__.__name__)
-            raise ProwlarrError(
-                502,
-                "Torrent Panel interne est injoignable.",
-                code="torrent_panel_unreachable",
-                recovery="Vérifier les conteneurs",
-            ) from exc
-
-        if response.status_code in {401, 403}:
-            logger.warning("Torrent Panel internal API refused authentication")
-            raise ProwlarrError(
-                502,
-                "Torrent Panel interne a refusé l'authentification.",
-                code="torrent_panel_internal_forbidden",
-                recovery="Vérifier le token interne",
-            )
-        if response.status_code >= 400:
-            message = response_error_message(response)
-            logger.warning("Torrent Panel internal API returned %s", response.status_code)
-            raise ProwlarrError(
-                502,
-                message or "qBittorrent a refusé l'ajout de la release.",
-                code="torrent_panel_add_refused",
-                recovery="Vérifier qBittorrent",
-            )
 
     def _map_indexer(self, item: dict[str, Any]) -> dict[str, Any]:
         fields = item.get("fields") if isinstance(item.get("fields"), list) else []

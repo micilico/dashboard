@@ -106,8 +106,6 @@ def build_client() -> ProwlarrClient:
             url=os.getenv("PROWLARR_URL", "http://127.0.0.1:16124/prowlarr"),
             api_key=os.getenv("PROWLARR_API_KEY", ""),
             timeout_seconds=float(os.getenv("PROWLARR_TIMEOUT_SECONDS", "8")),
-            torrent_panel_internal_url=os.getenv("TORRENT_PANEL_INTERNAL_URL", "http://torrent-panel:3110"),
-            torrent_panel_internal_token=os.getenv("TORRENT_PANEL_INTERNAL_TOKEN", ""),
             release_cache_ttl_seconds=int(os.getenv("PROWLARR_RELEASE_CACHE_TTL_SECONDS", "900")),
         )
     )

@@ -246,23 +246,3 @@ class QBittorrentClient:
         if save_path:
             data["savepath"] = save_path
         await self._request("POST", "/api/v2/torrents/add", data=data)
-
-    async def add_url(
-        self,
-        url: str,
-        *,
-        category: str = "",
-        tags: str = "",
-        paused: bool = False,
-        save_path: str = "",
-    ) -> None:
-        data = {"urls": url}
-        if category:
-            data["category"] = category
-        if tags:
-            data["tags"] = tags
-        if paused:
-            data["paused"] = "true"
-        if save_path:
-            data["savepath"] = save_path
-        await self._request("POST", "/api/v2/torrents/add", data=data)

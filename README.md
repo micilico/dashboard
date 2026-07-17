@@ -35,7 +35,6 @@ HOMEPAGE_ALLOWED_HOSTS=dashboard.example.com
 HOMEPAGE_VAR_QBITTORRENT_USERNAME=change-me
 HOMEPAGE_VAR_QBITTORRENT_PASSWORD=change-me
 TORRENT_PANEL_PORT=3110
-TORRENT_PANEL_INTERNAL_TOKEN=generate-a-long-random-token
 PROWLARR_PANEL_PORT=3120
 HOMEPAGE_VAR_PROWLARR_API_KEY=change-me
 HOMEPAGE_VAR_JELLYFIN_API_KEY=change-me
@@ -48,7 +47,6 @@ QBITTORRENT_URL=http://host.docker.internal:16141
 QBITTORRENT_USERNAME=change-me
 QBITTORRENT_PASSWORD=change-me
 QBITTORRENT_TIMEOUT_SECONDS=8
-TORRENT_PANEL_INTERNAL_TOKEN=generate-a-long-random-token
 ```
 
 Les variables `QBITTORRENT_USERNAME` et `QBITTORRENT_PASSWORD` sont lues uniquement par le backend Torrent Panel. Elles peuvent avoir les memes valeurs que les variables `HOMEPAGE_VAR_QBITTORRENT_*`, mais aucun secret ne doit etre ajoute aux fichiers versionnes.
@@ -60,8 +58,6 @@ PROWLARR_URL=http://host.docker.internal:16124/prowlarr
 PROWLARR_API_KEY=change-me
 PROWLARR_TIMEOUT_SECONDS=8
 PROWLARR_RELEASE_CACHE_TTL_SECONDS=900
-TORRENT_PANEL_INTERNAL_URL=http://torrent-panel:3110
-TORRENT_PANEL_INTERNAL_TOKEN=generate-a-long-random-token
 PROWLARR_PANEL_HOST=0.0.0.0
 PROWLARR_PANEL_PORT=3120
 PROWLARR_PANEL_LOG_LEVEL=INFO
@@ -69,8 +65,6 @@ PROWLARR_PANEL_RATE_LIMIT=search=20/60,test=20/60,modify=10/60,grab=10/60
 ```
 
 `PROWLARR_API_KEY` peut avoir la meme valeur que `HOMEPAGE_VAR_PROWLARR_API_KEY`, mais elle reste fournie uniquement au conteneur `prowlarr-panel`. Le frontend ne recoit jamais la cle, l'URL interne Prowlarr, les passkeys ou les champs sensibles des indexers.
-
-`TORRENT_PANEL_INTERNAL_TOKEN` doit avoir exactement la meme valeur dans `torrent-panel/.env` et `prowlarr-panel/.env`. Il protege l'API interne utilisee par Prowlarr Panel pour envoyer une release a qBittorrent via Torrent Panel.
 
 ## 2. Installer Homepage
 
@@ -109,16 +103,10 @@ Prowlarr Panel est accessible depuis la carte Prowlarr dans Homepage ou directem
 https://dashboard.example.com/prowlarr-panel/
 ```
 
-Flux lecture Prowlarr :
+Flux :
 
 ```text
 Navigateur -> Caddy basic_auth -> Prowlarr Panel -> API Prowlarr via tunnel SSH
-```
-
-Flux envoi vers qBittorrent :
-
-```text
-Navigateur -> Prowlarr Panel -> Torrent Panel API interne -> qBittorrent
 ```
 
 Le navigateur appelle uniquement l'API limitee du backend Prowlarr Panel :
@@ -143,20 +131,17 @@ Endpoints Prowlarr utilises apres decouverte runtime :
 - `POST /api/v1/indexer/test` pour tester un ou tous les indexers
 - `PUT /api/v1/indexer/{id}` pour activer/desactiver lorsque l'API de l'instance l'accepte
 - `POST /api/v1/search` puis fallback `GET /api/v1/search` pour rechercher des releases
+- `POST /api/v1/search` avec la release complete cachee cote serveur pour le grab natif vers le download client configure dans Prowlarr
 - `GET /api/v1/applications` puis fallback `GET /api/v1/application` pour les applications
 - `GET /api/v1/health` pour les alertes systeme
 - `GET /api/v1/history` pour l'historique recent
-
-Endpoints internes utilises entre services :
-
-- `POST /api/internal/torrents/add-url` sur Torrent Panel, protege par `X-Torrent-Panel-Internal-Token`, pour ajouter l'URL privee de release a qBittorrent cote serveur
 
 Compatibilite et limites :
 - au demarrage, le service interroge l'instance reelle et expose les capacites detectees dans `/api/capabilities`
 - si le tunnel SSH est indisponible, la detection reste en attente et l'UI affiche une erreur explicite
 - les endpoints non disponibles retournent une erreur structuree sans secret
 - les reglages avances restent dans l'interface Prowlarr native : creation complete d'indexer, saisie de passkey, proxies, edition avancee des applications, mises a jour et sauvegardes
-- l'envoi vers qBittorrent utilise l'API interne Torrent Panel; aucun lien de telechargement prive n'est renvoye au navigateur
+- l'envoi vers qBittorrent utilise le grab natif Prowlarr; aucun lien de telechargement prive n'est renvoye au navigateur
 
 Note de detection initiale : depuis cet environnement, `curl http://127.0.0.1:16124/prowlarr/...` echoue avec `Failed to connect`, donc la version reelle n'a pas pu etre detectee hors runtime. Une fois le tunnel actif sur le VPS, verifier :
 
