@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from torrent_panel.main import (  # noqa: E402
     RateLimiter,
     app,
+    cleanup_csrf_tokens,
     error_detail,
     validate_hash,
     validate_magnet,
@@ -57,8 +58,10 @@ class BackendTests(unittest.TestCase):
     def setUp(self):
         self.original_qbit = app.state.qbit
         self.original_limiter = app.state.action_limiter
+        self.original_csrf_tokens = dict(app.state.csrf_tokens)
         app.state.qbit = FakeQbit()
         app.state.action_limiter = RateLimiter(max_calls=100, period_seconds=60, max_keys=100)
+        app.state.csrf_tokens = {}
         self.client = TestClient(app)
         session = self.client.get("/torrent-panel/api/session").json()
         self.csrf = session["csrfToken"]
@@ -66,6 +69,7 @@ class BackendTests(unittest.TestCase):
     def tearDown(self):
         app.state.qbit = self.original_qbit
         app.state.action_limiter = self.original_limiter
+        app.state.csrf_tokens = self.original_csrf_tokens
 
     def post_action(self, path, payload):
         return self.client.post(
@@ -89,6 +93,34 @@ class BackendTests(unittest.TestCase):
 
     def test_csrf_error_is_structured(self):
         response = self.client.post("/torrent-panel/api/torrents/pause", json={"hashes": [VALID_HASH]})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["code"], "csrf_expired")
+
+    def test_new_session_does_not_invalidate_previous_tab_token(self):
+        first_token = self.csrf
+        second_token = self.client.get("/torrent-panel/api/session").json()["csrfToken"]
+        self.assertNotEqual(first_token, second_token)
+
+        response = self.client.post(
+            "/torrent-panel/api/torrents/pause",
+            json={"hashes": [VALID_HASH]},
+            headers={"X-Torrent-Panel-CSRF": first_token, "Cookie": f"torrent_panel_csrf={first_token}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app.state.qbit.calls[-1], ("pause", [VALID_HASH]))
+
+    def test_expired_csrf_token_is_rejected(self):
+        token = self.csrf
+        app.state.csrf_tokens[token] = -1_000_000
+        cleanup_csrf_tokens(app, now=1_000_000)
+
+        response = self.client.post(
+            "/torrent-panel/api/torrents/pause",
+            json={"hashes": [VALID_HASH]},
+            headers={"X-Torrent-Panel-CSRF": token, "Cookie": f"torrent_panel_csrf={token}"},
+        )
+
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"]["code"], "csrf_expired")
 

@@ -25,6 +25,8 @@ CSRF_HEADER = "X-Torrent-Panel-CSRF"
 MAX_RATE_KEYS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_KEYS", "2048"))
 RATE_LIMIT_CALLS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_CALLS", "40"))
 RATE_LIMIT_SECONDS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_SECONDS", "60"))
+CSRF_TOKEN_TTL_SECONDS = int(os.getenv("TORRENT_PANEL_CSRF_TOKEN_TTL_SECONDS", "43200"))
+MAX_CSRF_TOKENS = int(os.getenv("TORRENT_PANEL_CSRF_TOKEN_KEYS", "128"))
 TRUSTED_PROXY_IPS = {
     item.strip()
     for item in os.getenv("TORRENT_PANEL_TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
@@ -123,7 +125,7 @@ api_router = APIRouter()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/torrent-panel/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
 app.state.qbit = build_client()
-app.state.csrf_token = secrets.token_urlsafe(32)
+app.state.csrf_tokens = {}
 app.state.action_limiter = RateLimiter(
     max_calls=RATE_LIMIT_CALLS,
     period_seconds=RATE_LIMIT_SECONDS,
@@ -178,8 +180,7 @@ def require_action_guard(
     x_torrent_panel_csrf: str | None = Header(default=None),
 ) -> None:
     cookie = request.cookies.get(CSRF_COOKIE)
-    token = request.app.state.csrf_token
-    if not cookie or not x_torrent_panel_csrf or cookie != token or x_torrent_panel_csrf != token:
+    if not cookie or not x_torrent_panel_csrf or cookie != x_torrent_panel_csrf or not csrf_token_is_valid(request.app, cookie):
         raise HTTPException(
             status_code=403,
             detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
@@ -196,18 +197,37 @@ def qbit_error_response(exc: QbitError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, exc.public_message, exc.recovery))
 
 
+def cleanup_csrf_tokens(app_instance: FastAPI, now: float | None = None) -> None:
+    current = now if now is not None else time.monotonic()
+    tokens: dict[str, float] = app_instance.state.csrf_tokens
+    for token, created_at in list(tokens.items()):
+        if current - created_at > CSRF_TOKEN_TTL_SECONDS:
+            del tokens[token]
+    if len(tokens) <= MAX_CSRF_TOKENS:
+        return
+    for token, _created_at in sorted(tokens.items(), key=lambda item: item[1])[: len(tokens) - MAX_CSRF_TOKENS]:
+        del tokens[token]
+
+
+def csrf_token_is_valid(app_instance: FastAPI, token: str) -> bool:
+    cleanup_csrf_tokens(app_instance)
+    return token in app_instance.state.csrf_tokens
+
+
 def set_csrf_cookie(request: Request, response: Response) -> str:
     is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
-    app.state.csrf_token = secrets.token_urlsafe(32)
+    cleanup_csrf_tokens(app)
+    token = secrets.token_urlsafe(32)
+    app.state.csrf_tokens[token] = time.monotonic()
     response.set_cookie(
         CSRF_COOKIE,
-        app.state.csrf_token,
+        token,
         secure=is_https,
         httponly=False,
         samesite="strict",
         path=f"{PUBLIC_PREFIX}/" if PUBLIC_PREFIX else "/",
     )
-    return app.state.csrf_token
+    return token
 
 
 @app.get("/")
