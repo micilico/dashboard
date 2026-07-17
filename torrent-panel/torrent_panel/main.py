@@ -34,8 +34,6 @@ CONSOLE_PREFIXES = [ACTIVITY_PUBLIC_PREFIX, STORAGE_PUBLIC_PREFIX, MEDIA_PUBLIC_
 PROWLARR_PANEL_PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")
 CSRF_COOKIE = "torrent_panel_csrf"
 CSRF_HEADER = "X-Torrent-Panel-CSRF"
-INTERNAL_AUTH_HEADER = "X-Dashboard-Internal-Auth"
-INTERNAL_AUTH_SECRET = os.getenv("TORRENT_PANEL_INTERNAL_AUTH_SECRET", "")
 PROWLARR_PANEL_INTERNAL_AUTH_SECRET = os.getenv("PROWLARR_PANEL_INTERNAL_AUTH_SECRET", "")
 MAX_RATE_KEYS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_KEYS", "2048"))
 RATE_LIMIT_CALLS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_CALLS", "40"))
@@ -991,19 +989,6 @@ app.state.service_checks = {}
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    if INTERNAL_AUTH_SECRET and request.method != "OPTIONS":
-        protected_prefixes = ["/api"]
-        if PUBLIC_PREFIX:
-            protected_prefixes.append(f"{PUBLIC_PREFIX}/api")
-        protected_prefixes.extend(f"{prefix}/api" for prefix in CONSOLE_PREFIXES if prefix)
-        ready_paths = {"/readyz"}
-        if PUBLIC_PREFIX:
-            ready_paths.add(f"{PUBLIC_PREFIX}/readyz")
-        if request.url.path in ready_paths or any(request.url.path.startswith(prefix) for prefix in protected_prefixes):
-            received = request.headers.get(INTERNAL_AUTH_HEADER, "")
-            if not received or not secrets.compare_digest(received, INTERNAL_AUTH_SECRET):
-                return PlainTextResponse("Forbidden", status_code=403)
-
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = build_csp()
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -1144,9 +1129,8 @@ async def http_service_status(
     action: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
-        headers = {INTERNAL_AUTH_HEADER: PROWLARR_PANEL_INTERNAL_AUTH_SECRET} if PROWLARR_PANEL_INTERNAL_AUTH_SECRET and "host.docker.internal:3120" in url else None
         async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True) as client:
-            response = await client.get(url, headers=headers)
+            response = await client.get(url)
         allowed = ok_statuses or {200}
         if response.status_code in allowed:
             return service_payload(
@@ -1227,11 +1211,10 @@ def build_alert(
 
 async def prowlarr_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     try:
-        headers = {INTERNAL_AUTH_HEADER: PROWLARR_PANEL_INTERNAL_AUTH_SECRET} if PROWLARR_PANEL_INTERNAL_AUTH_SECRET else None
         async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
             overview_response, health_response = await asyncio.gather(
-                client.get(PROWLARR_PANEL_OVERVIEW_URL, headers=headers),
-                client.get(PROWLARR_PANEL_HEALTH_URL, headers=headers),
+                client.get(PROWLARR_PANEL_OVERVIEW_URL),
+                client.get(PROWLARR_PANEL_HEALTH_URL),
             )
         overview = overview_response.json() if overview_response.status_code == 200 else {}
         health_payload = health_response.json() if health_response.status_code == 200 else {}

@@ -1,6 +1,5 @@
 import logging
 import os
-import secrets
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -21,8 +20,6 @@ PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rst
 TORRENT_PANEL_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
 CSRF_COOKIE = "prowlarr_panel_csrf"
 CSRF_HEADER = "X-Prowlarr-Panel-CSRF"
-INTERNAL_AUTH_HEADER = "X-Dashboard-Internal-Auth"
-INTERNAL_AUTH_SECRET = os.getenv("PROWLARR_PANEL_INTERNAL_AUTH_SECRET", "")
 MAX_RATE_KEYS = int(os.getenv("PROWLARR_PANEL_RATE_LIMIT_KEYS", "2048"))
 CSRF_TOKEN_TTL_SECONDS = int(os.getenv("PROWLARR_PANEL_CSRF_TOKEN_TTL_SECONDS", "43200"))
 MAX_CSRF_TOKENS = int(os.getenv("PROWLARR_PANEL_CSRF_TOKEN_KEYS", "128"))
@@ -155,17 +152,6 @@ app.state.limiters = {
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    if INTERNAL_AUTH_SECRET and request.method != "OPTIONS":
-        protected_prefixes = ["/api"]
-        if PUBLIC_PREFIX:
-            protected_prefixes.append(f"{PUBLIC_PREFIX}/api")
-        if request.url.path in {"/readyz", f"{PUBLIC_PREFIX}/readyz" if PUBLIC_PREFIX else "/readyz"} or any(
-            request.url.path.startswith(prefix) for prefix in protected_prefixes
-        ):
-            received = request.headers.get(INTERNAL_AUTH_HEADER, "")
-            if not received or not secrets.compare_digest(received, INTERNAL_AUTH_SECRET):
-                return PlainTextResponse("Forbidden", status_code=403)
-
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = build_csp()
     response.headers["X-Content-Type-Options"] = "nosniff"
