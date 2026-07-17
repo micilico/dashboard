@@ -65,6 +65,7 @@ const els = {
   deleteTorrentName: document.querySelector("#deleteTorrentName"),
   strongConfirm: document.querySelector("#strongConfirm"),
   confirmText: document.querySelector("#confirmText"),
+  cancelDeleteButton: document.querySelector("#cancelDeleteButton"),
   confirmDeleteButton: document.querySelector("#confirmDeleteButton"),
   detailDialog: document.querySelector("#detailDialog"),
   detailTitle: document.querySelector("#detailTitle"),
@@ -619,6 +620,10 @@ async function runTorrentAction(hashes, action, options = {}) {
 }
 
 function openDeleteDialog(torrents, trigger) {
+  if (!torrents.length) {
+    showToast("Aucun torrent sélectionné.");
+    return;
+  }
   state.lastFocus = trigger || document.activeElement;
   state.pendingDelete = torrents;
   els.deleteTitle.textContent = torrents.length > 1 ? "Supprimer les torrents" : "Supprimer le torrent";
@@ -641,8 +646,22 @@ async function confirmDelete() {
   const torrents = state.pendingDelete || [];
   if (!torrents.length) return;
   const deleteFiles = els.deleteForm.deleteMode.value === "files";
-  await runTorrentAction(torrents.map((torrent) => torrent.hash), "delete", { deleteFiles });
-  state.pendingDelete = null;
+  if (deleteFiles && els.confirmText.value.trim() !== "SUPPRIMER") {
+    els.confirmText.focus();
+    return;
+  }
+  els.confirmDeleteButton.disabled = true;
+  els.cancelDeleteButton.disabled = true;
+  els.confirmDeleteButton.textContent = "Suppression…";
+  els.deleteDialog.close();
+  try {
+    await runTorrentAction(torrents.map((torrent) => torrent.hash), "delete", { deleteFiles });
+    state.pendingDelete = null;
+  } finally {
+    els.confirmDeleteButton.disabled = false;
+    els.cancelDeleteButton.disabled = false;
+    els.confirmDeleteButton.textContent = "Supprimer";
+  }
 }
 
 function detailRows(torrent) {
@@ -806,10 +825,15 @@ function bindEvents() {
   els.addForm.addEventListener("submit", submitMagnets);
   els.deleteForm.addEventListener("change", updateDeleteConfirm);
   els.confirmText.addEventListener("input", updateDeleteConfirm);
-  els.deleteForm.addEventListener("submit", (event) => {
-    if (event.submitter?.value !== "confirm") return;
-    event.preventDefault();
+  els.cancelDeleteButton.addEventListener("click", () => {
+    state.pendingDelete = null;
     els.deleteDialog.close();
+  });
+  els.confirmDeleteButton.addEventListener("click", () => {
+    confirmDelete();
+  });
+  els.deleteForm.addEventListener("submit", (event) => {
+    event.preventDefault();
     confirmDelete();
   });
   els.deleteDialog.addEventListener("close", () => state.lastFocus?.focus?.());
