@@ -396,13 +396,15 @@ td input[type="checkbox"] {
 }
 
 .alert-list,
-.services-grid {
+.services-grid,
+.media-list {
   display: grid;
   gap: 12px;
 }
 
 .alert-item,
-.service-item {
+.service-item,
+.media-item {
   display: grid;
   gap: 8px;
   border: 1px solid var(--border);
@@ -467,6 +469,30 @@ td input[type="checkbox"] {
 .service-meta {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.media-notice {
+  margin: 0 20px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(96, 165, 250, 0.12);
+}
+
+.media-notice.warning {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.media-notice.critical {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.media-steps {
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .service-item p,

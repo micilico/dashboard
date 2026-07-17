@@ -1,4 +1,5 @@
 import asyncio
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -8,6 +9,9 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from torrent_panel.main import (  # noqa: E402
+    MediaAutomationConfig,
+    MediaAutomationError,
+    MediaAutomationManager,
     RateLimiter,
     app,
     cleanup_csrf_tokens,
@@ -34,9 +38,10 @@ class FakeResponse:
 class FakeQbit:
     def __init__(self):
         self.calls = []
+        self.torrents_payload = []
 
     async def torrents(self):
-        return []
+        return list(self.torrents_payload)
 
     async def pause_many(self, hashes):
         self.calls.append(("pause", hashes))
@@ -56,13 +61,42 @@ class FakeQbit:
     async def ready(self):
         return True
 
+    async def close(self):
+        return None
+
 
 class BackendTests(unittest.TestCase):
     def setUp(self):
         self.original_qbit = app.state.qbit
+        self.original_media = app.state.media_automation
         self.original_limiter = app.state.action_limiter
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
         app.state.qbit = FakeQbit()
+        temp_state = Path(tempfile.mkdtemp()) / "media.json"
+        app.state.media_automation = MediaAutomationManager(
+            app.state.qbit,
+            MediaAutomationConfig(
+                enabled=False,
+                poll_seconds=8,
+                debounce_seconds=5,
+                jellyfin_delay_seconds=0,
+                max_rclone_retries=1,
+                max_mount_retries=1,
+                max_jellyfin_retries=1,
+                history_limit=10,
+                state_path=temp_state,
+                mount_path="/tmp",
+                rclone_refresh_mode="rc",
+                rclone_rc_refresh_url="http://127.0.0.1:5572/vfs/refresh",
+                rclone_rc_refresh_dir="",
+                rclone_systemd_unit="",
+                rclone_systemd_restart_cmd="",
+                jellyfin_api_url="http://127.0.0.1:8096",
+                jellyfin_api_key="token",
+                jellyfin_library_map={},
+                jellyfin_global_fallback=True,
+            ),
+        )
         app.state.action_limiter = RateLimiter(max_calls=100, period_seconds=60, max_keys=100)
         app.state.csrf_tokens = {}
         self.client = TestClient(app)
@@ -70,7 +104,9 @@ class BackendTests(unittest.TestCase):
         self.csrf = session["csrfToken"]
 
     def tearDown(self):
+        self.client.close()
         app.state.qbit = self.original_qbit
+        app.state.media_automation = self.original_media
         app.state.action_limiter = self.original_limiter
         app.state.csrf_tokens = self.original_csrf_tokens
 
@@ -264,6 +300,117 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         await self.client.set_force_start_many([VALID_HASH], True)
         self.assertEqual(calls[-1][1], "/api/v2/torrents/setForceStart")
         self.assertEqual(calls[-1][2]["value"], "true")
+
+
+class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
+    def build_manager(self):
+        temp_dir = Path(tempfile.mkdtemp())
+        qbit = FakeQbit()
+        manager = MediaAutomationManager(
+            qbit,
+            MediaAutomationConfig(
+                enabled=True,
+                poll_seconds=8,
+                debounce_seconds=1,
+                jellyfin_delay_seconds=0,
+                max_rclone_retries=1,
+                max_mount_retries=1,
+                max_jellyfin_retries=1,
+                history_limit=10,
+                state_path=temp_dir / "state.json",
+                mount_path=str(temp_dir),
+                rclone_refresh_mode="rc",
+                rclone_rc_refresh_url="http://127.0.0.1:5572/vfs/refresh",
+                rclone_rc_refresh_dir="",
+                rclone_systemd_unit="",
+                rclone_systemd_restart_cmd="",
+                jellyfin_api_url="http://127.0.0.1:8096",
+                jellyfin_api_key="token",
+                jellyfin_library_map={"films": "lib-films", "series": "lib-series"},
+                jellyfin_global_fallback=True,
+            ),
+        )
+        return qbit, manager
+
+    async def test_bootstrap_does_not_enqueue_existing_completed_torrent(self):
+        qbit, manager = self.build_manager()
+        qbit.torrents_payload = [{"hash": VALID_HASH, "name": "Done", "progress": 1, "completionOn": 123, "category": "films"}]
+        await manager.bootstrap()
+        self.assertEqual(manager.observe_torrents(qbit.torrents_payload, allow_enqueue=True), [])
+        self.assertEqual(manager.snapshot()["entries"], [])
+
+    async def test_detects_real_transition_to_complete_once(self):
+        _qbit, manager = self.build_manager()
+        manager.observe_torrents([{"hash": VALID_HASH, "name": "Movie", "progress": 0.5, "completionOn": 0, "category": "films"}], allow_enqueue=False)
+        completed = manager.observe_torrents([{"hash": VALID_HASH, "name": "Movie", "progress": 1, "completionOn": 10, "category": "films"}], allow_enqueue=True)
+        self.assertEqual(completed, [VALID_HASH])
+        completed_again = manager.observe_torrents([{"hash": VALID_HASH, "name": "Movie", "progress": 1, "completionOn": 10, "category": "films"}], allow_enqueue=True)
+        self.assertEqual(completed_again, [])
+
+    async def test_groups_multiple_completions_into_single_batch(self):
+        _qbit, manager = self.build_manager()
+        calls = []
+
+        async def fake_refresh():
+            calls.append("rclone")
+
+        async def fake_mount():
+            calls.append("mount")
+
+        async def fake_scan(library_ids):
+            calls.append(("jellyfin", tuple(library_ids)))
+            return {"scope": "targeted"}
+
+        manager.refresh_rclone = fake_refresh
+        manager.wait_for_mount = fake_mount
+        manager.trigger_jellyfin_scan = fake_scan
+        manager.observe_torrents(
+            [
+                {"hash": VALID_HASH, "name": "Movie", "progress": 0.2, "completionOn": 0, "category": "films"},
+                {"hash": "b" * 40, "name": "Series", "progress": 0.2, "completionOn": 0, "category": "series"},
+            ],
+            allow_enqueue=False,
+        )
+        manager.observe_torrents(
+            [
+                {"hash": VALID_HASH, "name": "Movie", "progress": 1, "completionOn": 10, "category": "films"},
+                {"hash": "b" * 40, "name": "Series", "progress": 1, "completionOn": 11, "category": "series"},
+            ],
+            allow_enqueue=True,
+        )
+        entries = await manager.process_pending_batch()
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(calls[0], "rclone")
+        self.assertEqual(calls[1], "mount")
+        self.assertEqual(calls[2], ("jellyfin", ("lib-films", "lib-series")))
+
+    async def test_retry_jellyfin_only_after_partial_failure(self):
+        _qbit, manager = self.build_manager()
+
+        async def fake_refresh():
+            return None
+
+        async def fake_mount():
+            return None
+
+        attempts = {"count": 0}
+
+        manager.refresh_rclone = fake_refresh
+        manager.wait_for_mount = fake_mount
+
+        async def failing_then_success(library_ids):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise MediaAutomationError("Jellyfin down")
+            return {"scope": "targeted"}
+
+        manager.trigger_jellyfin_scan = failing_then_success
+        manager.observe_torrents([{"hash": VALID_HASH, "name": "Movie", "progress": 0.5, "completionOn": 0, "category": "films"}], allow_enqueue=False)
+        manager.observe_torrents([{"hash": VALID_HASH, "name": "Movie", "progress": 1, "completionOn": 10, "category": "films"}], allow_enqueue=True)
+        entries = await manager.process_pending_batch()
+        self.assertEqual(entries[0]["state"], "partial_failure")
+        retried = await manager.retry(entries[0]["id"], "jellyfin")
+        self.assertEqual(retried["state"], "completed")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ const state = {
   csrfToken: "",
   activeView: "home",
   torrents: [],
-  dashboard: { alerts: [], criticalCount: 0, quickActions: [], services: [] },
+  dashboard: { alerts: [], criticalCount: 0, quickActions: [], services: [], mediaAutomation: { enabled: false, entries: [], notification: null } },
   selected: new Set(),
   rowErrors: new Map(),
   rowBusy: new Map(),
@@ -41,6 +41,9 @@ const els = {
   alertsSummary: document.querySelector("#alertsSummary"),
   servicesGrid: document.querySelector("#servicesGrid"),
   servicesSummary: document.querySelector("#servicesSummary"),
+  mediaAutomationSummary: document.querySelector("#mediaAutomationSummary"),
+  mediaAutomationNotice: document.querySelector("#mediaAutomationNotice"),
+  mediaAutomationList: document.querySelector("#mediaAutomationList"),
   homeNavLink: document.querySelector("#homeNavLink"),
   torrentsNavLink: document.querySelector("#torrentsNavLink"),
   navAlertCount: document.querySelector("#navAlertCount"),
@@ -804,6 +807,97 @@ function renderServices() {
   );
 }
 
+function workflowBadge(status) {
+  const mapping = {
+    pending: { group: "waiting", text: "En attente", icon: "…" },
+    rclone_refresh: { group: "checking", text: "Actualisation rclone", icon: "…" },
+    mount_wait: { group: "checking", text: "Attente du montage", icon: "…" },
+    jellyfin_requested: { group: "checking", text: "Scan Jellyfin demandé", icon: "…" },
+    completed: { group: "complete", text: "Terminé", icon: "✓" },
+    partial_failure: { group: "error", text: "Échec partiel", icon: "!" },
+    failed: { group: "error", text: "Échec définitif", icon: "!" },
+  };
+  return renderBadge(mapping[status] || mapping.pending);
+}
+
+function retryWorkflow(entryId, scope, trigger) {
+  if (trigger) {
+    trigger.disabled = true;
+    trigger.textContent = "Relance…";
+  }
+  return api(`api/media-workflows/${entryId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({ scope }),
+  }).then(async () => {
+    showToast(scope === "jellyfin" ? "Scan Jellyfin relancé." : "Workflow relancé.");
+    await loadTorrents({ silent: true, force: true });
+  }).catch((error) => {
+    showError(error);
+  }).finally(() => {
+    if (trigger) {
+      trigger.disabled = false;
+      trigger.textContent = scope === "jellyfin" ? "Relancer Jellyfin" : "Réessayer";
+    }
+  });
+}
+
+function renderMediaAutomation() {
+  const payload = state.dashboard.mediaAutomation || { enabled: false, entries: [], notification: null };
+  const entries = Array.isArray(payload.entries) ? payload.entries : [];
+  if (!payload.enabled) {
+    els.mediaAutomationSummary.textContent = "Workflow désactivé côté backend.";
+    els.mediaAutomationNotice.hidden = true;
+    els.mediaAutomationList.replaceChildren();
+    return;
+  }
+  els.mediaAutomationSummary.textContent = entries.length
+    ? `${entries.length} événement(s) conservé(s) dans l'historique récent.`
+    : "Aucun téléchargement terminé détecté récemment.";
+  const notice = payload.notification;
+  if (notice?.message) {
+    els.mediaAutomationNotice.hidden = false;
+    els.mediaAutomationNotice.className = `media-notice ${notice.severity || "info"}`;
+    els.mediaAutomationNotice.textContent = `${notice.message} · ${formatIsoDate(notice.date)}`;
+  } else {
+    els.mediaAutomationNotice.hidden = true;
+  }
+  els.mediaAutomationList.replaceChildren(
+    ...entries.map((entry) => {
+      const article = document.createElement("article");
+      article.className = "media-item";
+      const head = document.createElement("div");
+      head.className = "service-head";
+      const title = document.createElement("strong");
+      title.textContent = entry.torrentName || "Torrent";
+      head.append(title, workflowBadge(entry.state));
+      const meta = document.createElement("div");
+      meta.className = "service-meta";
+      meta.textContent = `Fin: ${formatIsoDate(entry.completedAt)} · Catégorie: ${entry.category || "—"}`;
+      const details = document.createElement("div");
+      details.className = "media-steps";
+      const lines = [
+        `rclone: ${entry.rclone?.result || "—"}`,
+        `montage: ${entry.mount?.result || "—"}`,
+        `Jellyfin: ${entry.jellyfin?.result || "—"}`,
+        `bibliothèque: ${entry.jellyfin?.library || (entry.jellyfin?.scope === "global" ? "globale" : "—")}`,
+      ];
+      if (entry.errorMessage) lines.push(`erreur: ${entry.errorMessage}`);
+      details.textContent = lines.join(" · ");
+      const actions = document.createElement("div");
+      actions.className = "action-row";
+      if (entry.retry?.full) {
+        actions.append(button("Réessayer", "secondary", (event) => retryWorkflow(entry.id, "full", event.currentTarget)));
+      }
+      if (entry.retry?.jellyfin) {
+        actions.append(button("Relancer Jellyfin", "secondary", (event) => retryWorkflow(entry.id, "jellyfin", event.currentTarget)));
+      }
+      article.append(head, meta, details);
+      if (actions.childNodes.length) article.append(actions);
+      return article;
+    }),
+  );
+}
+
 function renderHome() {
   const critical = Number(state.dashboard.criticalCount || 0);
   els.homeSummary.textContent = critical
@@ -812,6 +906,7 @@ function renderHome() {
   renderQuickActions();
   renderAlerts();
   renderServices();
+  renderMediaAutomation();
 }
 
 function render() {
@@ -836,6 +931,9 @@ async function loadDashboard() {
     criticalCount: Number(payload.criticalCount) || 0,
     quickActions: Array.isArray(payload.quickActions) ? payload.quickActions : [],
     services: Array.isArray(payload.services) ? payload.services : [],
+    mediaAutomation: payload.mediaAutomation && typeof payload.mediaAutomation === "object"
+      ? payload.mediaAutomation
+      : { enabled: false, entries: [], notification: null },
   };
 }
 
@@ -855,6 +953,9 @@ async function loadTorrents({ silent = false, force = false } = {}) {
         criticalCount: Number(dashboardPayload.criticalCount) || 0,
         quickActions: Array.isArray(dashboardPayload.quickActions) ? dashboardPayload.quickActions : [],
         services: Array.isArray(dashboardPayload.services) ? dashboardPayload.services : [],
+        mediaAutomation: dashboardPayload.mediaAutomation && typeof dashboardPayload.mediaAutomation === "object"
+          ? dashboardPayload.mediaAutomation
+          : { enabled: false, entries: [], notification: null },
       };
       const torrents = Array.isArray(torrentPayload.torrents) ? torrentPayload.torrents : [];
       const signature = JSON.stringify(torrents);

@@ -47,9 +47,25 @@ QBITTORRENT_URL=http://host.docker.internal:16141
 QBITTORRENT_USERNAME=change-me
 QBITTORRENT_PASSWORD=change-me
 QBITTORRENT_TIMEOUT_SECONDS=8
+TORRENT_PANEL_MEDIA_AUTOMATION_ENABLED=true
+TORRENT_PANEL_MEDIA_AUTOMATION_DEBOUNCE_SECONDS=45
+TORRENT_PANEL_MEDIA_MOUNT_PATH=/mnt/ultra-media
+TORRENT_PANEL_RCLONE_REFRESH_MODE=auto
+TORRENT_PANEL_RCLONE_RC_REFRESH_URL=http://host.docker.internal:5572/vfs/refresh
+TORRENT_PANEL_RCLONE_SYSTEMD_RESTART_CMD=
+TORRENT_PANEL_JELLYFIN_API_URL=http://host.docker.internal:8096
+TORRENT_PANEL_JELLYFIN_API_KEY=change-me
+TORRENT_PANEL_JELLYFIN_LIBRARY_MAP=films=<jellyfin-id>,series=<jellyfin-id>,musique=<jellyfin-id>
+TORRENT_PANEL_JELLYFIN_GLOBAL_FALLBACK=true
 ```
 
 Les variables `QBITTORRENT_USERNAME` et `QBITTORRENT_PASSWORD` sont lues uniquement par le backend Torrent Panel. Elles peuvent avoir les memes valeurs que les variables `HOMEPAGE_VAR_QBITTORRENT_*`, mais aucun secret ne doit etre ajoute aux fichiers versionnes.
+
+Pour l'automatisation medias :
+- `TORRENT_PANEL_RCLONE_REFRESH_MODE=auto` tente d'abord `rclone rc vfs/refresh`, puis une commande systemd fixe si `TORRENT_PANEL_RCLONE_SYSTEMD_RESTART_CMD` est definie
+- verifier sur le serveur reel le nom exact de l'unite systemd avant de remplir une commande de secours
+- `TORRENT_PANEL_JELLYFIN_LIBRARY_MAP` mappe les categories qBittorrent vers des identifiants Jellyfin fournis uniquement au backend
+- si la categorie n'est pas mappee, `TORRENT_PANEL_JELLYFIN_GLOBAL_FALLBACK=true` autorise un scan global
 
 Creer aussi `prowlarr-panel/.env` a partir de [prowlarr-panel/.env.example](/Users/corentinkern/Documents/Dashboard/prowlarr-panel/.env.example:1) :
 
