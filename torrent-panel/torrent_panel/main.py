@@ -543,12 +543,12 @@ class MediaAutomationManager:
     async def _refresh_rclone_rc(self) -> None:
         if not self._config.rclone_rc_refresh_url:
             raise MediaAutomationError("Endpoint RC rclone non configuré.")
-        payload = {"_async": False}
+        params: dict[str, str] = {}
         if self._config.rclone_rc_refresh_dir:
-            payload["dir"] = self._config.rclone_rc_refresh_dir
+            params["dir"] = self._config.rclone_rc_refresh_dir
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
-                response = await client.post(self._config.rclone_rc_refresh_url, json=payload)
+                response = await client.post(self._config.rclone_rc_refresh_url, params=params)
         except httpx.HTTPError as exc:
             raise MediaAutomationError("Endpoint RC rclone inaccessible.") from exc
         if response.status_code >= 400:
