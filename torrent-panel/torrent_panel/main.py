@@ -601,7 +601,10 @@ class MediaAutomationManager:
         if not self._config.jellyfin_api_key:
             raise MediaAutomationError("Clé API Jellyfin absente côté backend.")
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS),
+                trust_env=False,
+            ) as client:
                 if library_ids:
                     for library_id in library_ids:
                         response = await self._jellyfin_post(client, f"/Items/{library_id}/Refresh")
