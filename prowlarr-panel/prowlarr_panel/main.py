@@ -9,7 +9,7 @@ from typing import Any, Deque
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .prowlarr import ProwlarrClient, ProwlarrConfig, ProwlarrError
 
@@ -34,6 +34,11 @@ class SearchPayload(BaseModel):
     query: str = Field(..., min_length=2, max_length=200)
     categories: list[int] = Field(default_factory=list, max_length=20)
     indexerIds: list[int] = Field(default_factory=list, max_length=100)
+
+    @field_validator("categories", "indexerIds")
+    @classmethod
+    def keep_positive_ids(cls, values: list[int]) -> list[int]:
+        return [value for value in values if value > 0]
 
 
 class IndexerAction(BaseModel):

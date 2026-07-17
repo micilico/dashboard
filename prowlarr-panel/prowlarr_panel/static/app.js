@@ -376,7 +376,7 @@ async function runSearch(event) {
   event.preventDefault();
   if (state.searchAbort) state.searchAbort.abort();
   state.searchAbort = new AbortController();
-  const categories = els.releaseCategories.value.split(",").map((item) => Number(item.trim())).filter(Number.isFinite);
+  const categories = els.releaseCategories.value.split(",").map((item) => Number(item.trim())).filter((value) => Number.isInteger(value) && value > 0);
   const indexerIds = [...els.releaseIndexers.selectedOptions].map((option) => Number(option.value)).filter(Number.isFinite);
   els.searchButton.disabled = true;
   els.searchButton.textContent = "Recherche...";

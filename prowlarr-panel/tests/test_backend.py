@@ -103,6 +103,11 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(second.status_code, 429)
         self.assertEqual(test.status_code, 200)
 
+    def test_search_drops_zero_category_from_stale_frontend(self):
+        response = self.post_action("/prowlarr-panel/api/search", {"query": "dragon", "categories": [0, 2000], "indexerIds": [0, 7]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app.state.prowlarr.calls[-1], ("search", "dragon", [2000], [7]))
+
     def test_indexer_actions_are_validated(self):
         response = self.post_action("/prowlarr-panel/api/indexers/test", {"id": 0})
         self.assertEqual(response.status_code, 422)
