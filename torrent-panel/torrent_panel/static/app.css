@@ -1280,3 +1280,198 @@ th { color: var(--text-subtle); letter-spacing: .04em; }
   .filters { margin: 12px; padding: 14px; }
   .torrent-table tr { border-color: var(--border); border-radius: var(--radius-panel); background: var(--surface-2); }
 }
+
+/* Torrent list density: preserve readable columns, then switch to structured cards. */
+@media (min-width: 1561px) {
+  .torrent-table {
+    table-layout: fixed;
+  }
+
+  .torrent-table th:nth-child(1),
+  .torrent-table td:nth-child(1) { width: 52px; }
+  .torrent-table th:nth-child(2),
+  .torrent-table td:nth-child(2) { width: 20%; }
+  .torrent-table th:nth-child(3),
+  .torrent-table td:nth-child(3) { width: 154px; }
+  .torrent-table th:nth-child(4),
+  .torrent-table td:nth-child(4) { width: 180px; }
+  .torrent-table th:nth-child(5),
+  .torrent-table td:nth-child(5) { width: 142px; }
+  .torrent-table th:nth-child(6),
+  .torrent-table td:nth-child(6) { width: 104px; }
+  .torrent-table th:nth-child(7),
+  .torrent-table td:nth-child(7) { width: 80px; }
+  .torrent-table th:nth-child(8),
+  .torrent-table td:nth-child(8) { width: 96px; }
+  .torrent-table th:nth-child(9),
+  .torrent-table td:nth-child(9) { width: 76px; }
+  .torrent-table th:nth-child(10),
+  .torrent-table td:nth-child(10) { width: 244px; }
+
+  .torrent-table .name-button {
+    width: 100%;
+    display: -webkit-box;
+    overflow: hidden;
+    overflow-wrap: break-word;
+    word-break: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .torrent-table .action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .torrent-table .action-row .button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px 10px;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 1560px) {
+  .torrent-table,
+  .torrent-table thead,
+  .torrent-table tbody,
+  .torrent-table tr,
+  .torrent-table th,
+  .torrent-table td {
+    display: block;
+  }
+
+  .torrent-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .torrent-table tbody {
+    display: grid;
+    gap: 16px;
+    padding: 0 20px 24px;
+  }
+
+  .torrent-table tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 24px;
+    margin: 0;
+    padding: 22px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    background: linear-gradient(145deg, rgba(255,255,255,.024), transparent 65%), var(--surface-2);
+  }
+
+  .torrent-table td {
+    min-width: 0;
+    height: auto;
+    padding: 0;
+    border: 0;
+  }
+
+  .torrent-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-subtle);
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .045em;
+    line-height: 1.35;
+    text-transform: uppercase;
+  }
+
+  .torrent-table td:nth-child(1) {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1;
+  }
+
+  .torrent-table td:nth-child(1)::before,
+  .torrent-table td:nth-child(2)::before {
+    display: none;
+  }
+
+  .torrent-table td:nth-child(2),
+  .torrent-table td:nth-child(4),
+  .torrent-table td:nth-child(10) {
+    grid-column: 1 / -1;
+  }
+
+  .torrent-table td:nth-child(2) {
+    padding-right: 56px;
+  }
+
+  .torrent-table .name-button {
+    width: 100%;
+    max-width: none;
+    min-height: 44px;
+    padding: 0;
+    font-size: 1.05rem;
+    line-height: 1.45;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  .torrent-table .badge {
+    width: fit-content;
+    white-space: normal;
+  }
+
+  .torrent-table .progress-cell {
+    min-width: 0;
+  }
+
+  .torrent-table .action-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .torrent-table .action-row .button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 9px 10px;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 900px) {
+  .torrent-table .action-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .torrent-table tbody {
+    gap: 12px;
+    padding: 0 12px 16px;
+  }
+
+  .torrent-table tr {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .torrent-table td,
+  .torrent-table td:nth-child(2),
+  .torrent-table td:nth-child(4),
+  .torrent-table td:nth-child(10) {
+    grid-column: 1;
+  }
+
+  .torrent-table td:nth-child(2) {
+    padding-right: 48px;
+  }
+}
