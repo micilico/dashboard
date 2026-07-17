@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Torrent Panel</title>
+    <link rel="stylesheet" href="static/app.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Aller au contenu</a>
+    <main id="content" class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">qBittorrent</p>
+          <h1>Torrent Panel</h1>
+        </div>
+        <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
+      </header>
+
+      <section class="toolbar" aria-labelledby="add-title">
+        <div>
+          <h2 id="add-title">Ajouter un magnet</h2>
+          <p>Le lien est transmis au backend local, jamais directement au navigateur.</p>
+        </div>
+        <form id="addForm" class="magnet-form">
+          <label for="magnetInput">Lien magnet</label>
+          <div class="input-row">
+            <input id="magnetInput" name="magnet" type="url" inputmode="url" autocomplete="off" placeholder="magnet:?xt=urn:btih:..." required>
+            <button type="submit" class="button primary">Ajouter</button>
+          </div>
+          <p class="field-message" id="magnetMessage" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="content-panel" aria-labelledby="list-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="list-title">Torrents</h2>
+            <p id="summary">Chargement de la liste...</p>
+          </div>
+          <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
+        </div>
+
+        <div id="alert" class="alert" role="alert" hidden></div>
+        <div id="emptyState" class="empty" hidden>Aucun torrent pour le moment.</div>
+
+        <table class="torrent-table" aria-describedby="summary">
+          <thead>
+            <tr>
+              <th scope="col">Nom</th>
+              <th scope="col">Etat</th>
+              <th scope="col">Progression</th>
+              <th scope="col">Telechargement</th>
+              <th scope="col">Envoi</th>
+              <th scope="col">Ratio</th>
+              <th scope="col">Taille</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="torrentRows"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <dialog id="deleteDialog" class="dialog">
+      <form method="dialog" id="deleteForm">
+        <h2>Supprimer le torrent</h2>
+        <p id="deleteTorrentName" class="dialog-name"></p>
+        <fieldset>
+          <legend>Mode de suppression</legend>
+          <label class="radio-line">
+            <input type="radio" name="deleteMode" value="torrent" checked>
+            Torrent seul
+          </label>
+          <label class="radio-line danger">
+            <input type="radio" name="deleteMode" value="files">
+            Torrent et fichiers
+          </label>
+        </fieldset>
+        <div id="strongConfirm" class="strong-confirm" hidden>
+          <label for="confirmText">Tapez SUPPRIMER pour confirmer la suppression des fichiers</label>
+          <input id="confirmText" autocomplete="off">
+        </div>
+        <div class="dialog-actions">
+          <button value="cancel" class="button secondary" type="submit">Annuler</button>
+          <button id="confirmDeleteButton" value="confirm" class="button danger" type="submit">Supprimer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="static/app.js" defer></script>
+  </body>
+</html>

@@ -16,3 +16,14 @@ services:
       - /mnt/ultra-media:/mnt/ultra-media:ro
       - /sys:/sys:ro
 
+  torrent-panel:
+    build: ./torrent-panel
+    container_name: torrent-panel
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - path: ./torrent-panel/.env
+        required: false
+    environment:
+      TORRENT_PANEL_HOST: 127.0.0.1
+      TORRENT_PANEL_PORT: ${TORRENT_PANEL_PORT:-3110}

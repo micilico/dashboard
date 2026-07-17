@@ -1,6 +1,7 @@
 - Services:
     - qBittorrent:
         description: Interface ultra.cc via tunnel SSH local au VPS
+        href: /torrent-panel/
         widget:
           type: qbittorrent
           url: http://127.0.0.1:16141
@@ -43,4 +44,3 @@
               label: Bytes
             - field: errors
               label: Errors
-
