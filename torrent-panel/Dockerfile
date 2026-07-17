@@ -9,6 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY torrent_panel ./torrent_panel
+RUN mkdir -p /app/data && chown nobody:nogroup /app/data
 
 USER nobody
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Deque
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -18,8 +18,11 @@ logger = logging.getLogger("prowlarr_panel")
 
 STATIC_DIR = Path(__file__).parent / "static"
 PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")
+TORRENT_PANEL_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
 CSRF_COOKIE = "prowlarr_panel_csrf"
 CSRF_HEADER = "X-Prowlarr-Panel-CSRF"
+INTERNAL_AUTH_HEADER = "X-Dashboard-Internal-Auth"
+INTERNAL_AUTH_SECRET = os.getenv("PROWLARR_PANEL_INTERNAL_AUTH_SECRET", "")
 MAX_RATE_KEYS = int(os.getenv("PROWLARR_PANEL_RATE_LIMIT_KEYS", "2048"))
 CSRF_TOKEN_TTL_SECONDS = int(os.getenv("PROWLARR_PANEL_CSRF_TOKEN_TTL_SECONDS", "43200"))
 MAX_CSRF_TOKENS = int(os.getenv("PROWLARR_PANEL_CSRF_TOKEN_KEYS", "128"))
@@ -119,16 +122,57 @@ def prowlarr_error_response(exc: ProwlarrError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, exc.public_message, exc.recovery))
 
 
+def build_csp() -> str:
+    return "; ".join(
+        [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self'",
+            "img-src 'self' data:",
+            "font-src 'self'",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "upgrade-insecure-requests",
+        ]
+    )
+
+
 app = FastAPI(title="Prowlarr Panel", docs_url=None, redoc_url=None, openapi_url=None)
 api_router = APIRouter()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/prowlarr-panel/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
+if PUBLIC_PREFIX:
+    app.mount(f"{PUBLIC_PREFIX}/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
 app.state.prowlarr = build_client()
 app.state.csrf_tokens = {}
 app.state.limiters = {
     name: RateLimiter(max_calls=count, period_seconds=seconds, max_keys=MAX_RATE_KEYS)
     for name, (count, seconds) in parse_rate_limits(os.getenv("PROWLARR_PANEL_RATE_LIMIT", "")).items()
 }
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    if INTERNAL_AUTH_SECRET and request.method != "OPTIONS":
+        protected_prefixes = ["/api"]
+        if PUBLIC_PREFIX:
+            protected_prefixes.append(f"{PUBLIC_PREFIX}/api")
+        if request.url.path in {"/readyz", f"{PUBLIC_PREFIX}/readyz" if PUBLIC_PREFIX else "/readyz"} or any(
+            request.url.path.startswith(prefix) for prefix in protected_prefixes
+        ):
+            received = request.headers.get(INTERNAL_AUTH_HEADER, "")
+            if not received or not secrets.compare_digest(received, INTERNAL_AUTH_SECRET):
+                return PlainTextResponse("Forbidden", status_code=403)
+
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = build_csp()
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    return response
 
 
 @app.on_event("startup")
@@ -217,26 +261,68 @@ def require_action_guard(kind: str):
 
 
 @app.get("/")
-@app.get("/prowlarr-panel")
-@app.get("/prowlarr-panel/")
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/config.js")
+async def config_js() -> PlainTextResponse:
+    return PlainTextResponse(
+        "\n".join(
+            [
+                "window.__PROWLARR_PANEL_CONFIG__ = {",
+                f'  publicPrefix: "{PUBLIC_PREFIX or ""}",',
+                f'  torrentPanelPrefix: "{TORRENT_PANEL_PUBLIC_PREFIX or ""}",',
+                "};",
+            ]
+        ),
+        media_type="application/javascript",
+    )
+
+
+if PUBLIC_PREFIX:
+
+    @app.get(PUBLIC_PREFIX)
+    async def prefixed_index_redirect() -> RedirectResponse:
+        return RedirectResponse(url=f"{PUBLIC_PREFIX}/", status_code=308)
+
+
+    @app.get(f"{PUBLIC_PREFIX}/")
+    async def prefixed_index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+
+    @app.get(f"{PUBLIC_PREFIX}/config.js")
+    async def prefixed_config_js() -> PlainTextResponse:
+        return await config_js()
+
+
 @app.get("/healthz")
-@app.get("/prowlarr-panel/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+if PUBLIC_PREFIX:
+
+    @app.get(f"{PUBLIC_PREFIX}/healthz")
+    async def prefixed_healthz() -> dict[str, str]:
+        return await healthz()
+
+
 @app.get("/readyz")
-@app.get("/prowlarr-panel/readyz")
 async def readyz() -> dict[str, str]:
     try:
         await app.state.prowlarr.ready()
     except ProwlarrError as exc:
         raise prowlarr_error_response(exc) from exc
     return {"status": "ready"}
+
+
+if PUBLIC_PREFIX:
+
+    @app.get(f"{PUBLIC_PREFIX}/readyz")
+    async def prefixed_readyz() -> dict[str, str]:
+        return await readyz()
 
 
 @api_router.get("/session")

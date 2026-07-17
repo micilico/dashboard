@@ -3,9 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <base href="/prowlarr-panel/">
     <title>Prowlarr Panel</title>
-    <link rel="stylesheet" href="static/app.css">
+    <link rel="stylesheet" href="./static/app.css">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -16,9 +15,9 @@
           <h1>Prowlarr Panel</h1>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a href="/">Accueil</a>
-          <a href="/torrent-panel/">Torrents</a>
-          <a aria-current="page" href="/prowlarr-panel/">Prowlarr</a>
+          <a id="homeLink" href="/">Accueil</a>
+          <a id="torrentLink" href="/torrent-panel/">Torrents</a>
+          <a id="prowlarrLink" aria-current="page" href="./">Prowlarr</a>
         </nav>
         <div class="topbar-actions">
           <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
@@ -30,10 +29,10 @@
 
       <section class="content-panel">
         <div class="tabs" role="tablist" aria-label="Vues Prowlarr">
-          <button class="tab" type="button" data-view="indexers" aria-selected="true">Indexers</button>
-          <button class="tab" type="button" data-view="search" aria-selected="false">Recherche</button>
-          <button class="tab" type="button" data-view="applications" aria-selected="false">Applications</button>
-          <button class="tab" id="healthTab" type="button" data-view="health" aria-selected="false">Santé</button>
+          <button class="tab" id="indexersTab" type="button" data-view="indexers" role="tab" aria-selected="true" aria-controls="indexersView" tabindex="0">Indexers</button>
+          <button class="tab" id="searchTab" type="button" data-view="search" role="tab" aria-selected="false" aria-controls="searchView" tabindex="-1">Recherche</button>
+          <button class="tab" id="applicationsTab" type="button" data-view="applications" role="tab" aria-selected="false" aria-controls="applicationsView" tabindex="-1">Applications</button>
+          <button class="tab" id="healthTab" type="button" data-view="health" role="tab" aria-selected="false" aria-controls="healthView" tabindex="-1">Santé</button>
         </div>
 
         <div id="alert" class="alert" role="alert" hidden>
@@ -41,13 +40,17 @@
           <button id="retryButton" type="button" class="button secondary">Réessayer</button>
         </div>
 
-        <section id="indexersView" class="view" aria-labelledby="indexers-title">
+        <section id="indexersView" class="view" role="tabpanel" aria-labelledby="indexersTab" tabindex="0">
           <div class="panel-head">
             <div>
               <h2 id="indexers-title">Indexers</h2>
               <p id="indexersSummary">Chargement des indexers...</p>
             </div>
             <button id="testAllButton" type="button" class="button secondary">Tester tous</button>
+          </div>
+          <div id="indexersError" class="alert section-alert" hidden>
+            <span></span>
+            <button type="button" class="button secondary" data-section-retry="indexers">Réessayer</button>
           </div>
           <div class="filters" aria-label="Filtres indexers">
             <label>Recherche <input id="indexerSearch" type="search" autocomplete="off" placeholder="Nom"></label>
@@ -77,7 +80,7 @@
           </div>
         </section>
 
-        <section id="searchView" class="view" aria-labelledby="search-title" hidden>
+        <section id="searchView" class="view" role="tabpanel" aria-labelledby="searchTab" tabindex="-1" hidden>
           <div class="panel-head">
             <div>
               <h2 id="search-title">Recherche de releases</h2>
@@ -135,22 +138,30 @@
           </div>
         </section>
 
-        <section id="applicationsView" class="view" aria-labelledby="apps-title" hidden>
+        <section id="applicationsView" class="view" role="tabpanel" aria-labelledby="applicationsTab" tabindex="-1" hidden>
           <div class="panel-head">
             <div>
               <h2 id="apps-title">Applications connectées</h2>
               <p id="appsSummary">Lecture seule.</p>
             </div>
           </div>
+          <div id="appsError" class="alert section-alert" hidden>
+            <span></span>
+            <button type="button" class="button secondary" data-section-retry="applications">Réessayer</button>
+          </div>
           <div id="appsGrid" class="card-grid"></div>
         </section>
 
-        <section id="healthView" class="view" aria-labelledby="health-title" hidden>
+        <section id="healthView" class="view" role="tabpanel" aria-labelledby="healthTab" tabindex="-1" hidden>
           <div class="panel-head">
             <div>
               <h2 id="health-title">Santé et événements</h2>
               <p id="healthSummary">Alertes système et historique récent.</p>
             </div>
+          </div>
+          <div id="healthError" class="alert section-alert" hidden>
+            <span></span>
+            <button type="button" class="button secondary" data-section-retry="health">Réessayer</button>
           </div>
           <div class="split">
             <div>
@@ -178,6 +189,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="static/app.js" defer></script>
+    <script src="./config.js"></script>
+    <script src="./static/app.js" defer></script>
   </body>
 </html>

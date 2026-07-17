@@ -14,7 +14,7 @@ from typing import Any, Deque
 
 import httpx
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
@@ -26,8 +26,12 @@ logger = logging.getLogger("torrent_panel")
 STATIC_DIR = Path(__file__).parent / "static"
 HASH_RE = re.compile(r"^[A-Fa-f0-9]{40}([A-Fa-f0-9]{24})?$")
 PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
+PROWLARR_PANEL_PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")
 CSRF_COOKIE = "torrent_panel_csrf"
 CSRF_HEADER = "X-Torrent-Panel-CSRF"
+INTERNAL_AUTH_HEADER = "X-Dashboard-Internal-Auth"
+INTERNAL_AUTH_SECRET = os.getenv("TORRENT_PANEL_INTERNAL_AUTH_SECRET", "")
+PROWLARR_PANEL_INTERNAL_AUTH_SECRET = os.getenv("PROWLARR_PANEL_INTERNAL_AUTH_SECRET", "")
 MAX_RATE_KEYS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_KEYS", "2048"))
 RATE_LIMIT_CALLS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_CALLS", "40"))
 RATE_LIMIT_SECONDS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_SECONDS", "60"))
@@ -50,11 +54,15 @@ MONITOR_DISK_CRITICAL_PERCENT = float(os.getenv("TORRENT_PANEL_MONITOR_DISK_CRIT
 HOMEPAGE_STATUS_URL = os.getenv("TORRENT_PANEL_HOMEPAGE_STATUS_URL", "http://host.docker.internal:3001/")
 PROWLARR_PANEL_READY_URL = os.getenv(
     "TORRENT_PANEL_PROWLARR_PANEL_READY_URL",
-    "http://host.docker.internal:3120/prowlarr-panel/readyz",
+    f"http://host.docker.internal:3120{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/readyz",
 )
 PROWLARR_PANEL_OVERVIEW_URL = os.getenv(
     "TORRENT_PANEL_PROWLARR_PANEL_OVERVIEW_URL",
-    "http://host.docker.internal:3120/prowlarr-panel/api/overview",
+    f"http://host.docker.internal:3120{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/api/overview",
+)
+PROWLARR_PANEL_HEALTH_URL = os.getenv(
+    "TORRENT_PANEL_PROWLARR_PANEL_HEALTH_URL",
+    f"http://host.docker.internal:3120{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/api/health",
 )
 JELLYFIN_STATUS_URL = os.getenv("TORRENT_PANEL_JELLYFIN_STATUS_URL", "http://host.docker.internal:8096/health")
 JELLYFIN_PUBLIC_URL = os.getenv("TORRENT_PANEL_JELLYFIN_PUBLIC_URL", "http://127.0.0.1:8096")
@@ -332,6 +340,7 @@ class MediaAutomationManager:
             temp_path.replace(self._config.state_path)
         except OSError as exc:
             logger.warning("Unable to persist media automation state: %s", exc.__class__.__name__)
+            raise MediaAutomationError("La persistance de l'automatisation medias est indisponible.") from exc
 
     def observe_torrents(self, torrents: list[dict[str, Any]], *, allow_enqueue: bool) -> list[str]:
         completed_now: list[str] = []
@@ -555,17 +564,28 @@ class MediaAutomationManager:
             raise MediaAutomationError(f"Rclone RC a refusé l'actualisation ({response.status_code}).")
 
     async def _refresh_rclone_systemd(self) -> None:
-        cmd = self._config.rclone_systemd_restart_cmd.strip()
-        if not cmd:
+        raw_cmd = self._config.rclone_systemd_restart_cmd.strip()
+        if not raw_cmd:
             raise MediaAutomationError("Commande systemd rclone non configurée.")
-        process = await asyncio.create_subprocess_shell(
-            cmd,
+        command = [part for part in raw_cmd.split() if part]
+        if command[:2] != ["systemctl", "restart"] or len(command) != 3:
+            raise MediaAutomationError("Commande systemd rclone refusee.")
+        process = await asyncio.create_subprocess_exec(
+            *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
+        except TimeoutError as exc:
+            process.kill()
+            with contextlib.suppress(ProcessLookupError):
+                await process.wait()
+            raise MediaAutomationError("Commande systemd rclone expiree.") from exc
+        if len(stdout) > 4096 or len(stderr) > 4096:
+            raise MediaAutomationError("Sortie systemd rclone excessive.")
         if process.returncode != 0:
-            raise MediaAutomationError(stderr.decode("utf-8", errors="ignore") or "Commande systemd refusée.")
+            raise MediaAutomationError("Commande systemd rclone refusee.")
 
     async def wait_for_mount(self) -> None:
         mount_path = Path(self._config.mount_path)
@@ -637,7 +657,7 @@ class MediaAutomationManager:
                         "critical" if entry["state"] == "failed" else "warning",
                         "Automatisation médias",
                         f"{entry['torrentName']} : {entry['errorMessage'] or entry['stateLabel']}",
-                        action={"kind": "open", "label": "Afficher", "url": "/torrent-panel/?view=home#mediaAutomation"},
+                        action={"kind": "open", "label": "Afficher", "url": f"{PUBLIC_PREFIX or ''}/?view=home#mediaAutomation"},
                         code=f"media_{entry['id']}",
                     )
                 )
@@ -687,7 +707,8 @@ class MediaAutomationManager:
 app = FastAPI(title="Torrent Panel", docs_url=None, redoc_url=None, openapi_url=None)
 api_router = APIRouter()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-app.mount("/torrent-panel/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
+if PUBLIC_PREFIX:
+    app.mount(f"{PUBLIC_PREFIX}/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
 app.state.qbit = build_client()
 app.state.media_automation = MediaAutomationManager(app.state.qbit, build_media_automation_config())
 app.state.csrf_tokens = {}
@@ -697,6 +718,29 @@ app.state.action_limiter = RateLimiter(
     max_keys=MAX_RATE_KEYS,
 )
 app.state.service_checks = {}
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    if INTERNAL_AUTH_SECRET and request.method != "OPTIONS":
+        protected_prefixes = ["/api"]
+        if PUBLIC_PREFIX:
+            protected_prefixes.append(f"{PUBLIC_PREFIX}/api")
+        ready_paths = {"/readyz"}
+        if PUBLIC_PREFIX:
+            ready_paths.add(f"{PUBLIC_PREFIX}/readyz")
+        if request.url.path in ready_paths or any(request.url.path.startswith(prefix) for prefix in protected_prefixes):
+            received = request.headers.get(INTERNAL_AUTH_HEADER, "")
+            if not received or not secrets.compare_digest(received, INTERNAL_AUTH_SECRET):
+                return PlainTextResponse("Forbidden", status_code=403)
+
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = build_csp()
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    return response
 
 
 @app.on_event("startup")
@@ -737,6 +781,24 @@ def validate_magnet(magnet: str) -> tuple[str | None, str | None]:
 
 def error_detail(code: str, message: str, recovery: str) -> dict[str, str]:
     return {"code": code, "message": message, "recovery": recovery}
+
+
+def build_csp() -> str:
+    return "; ".join(
+        [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self'",
+            "img-src 'self' data:",
+            "font-src 'self'",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "upgrade-insecure-requests",
+        ]
+    )
 
 
 def client_key(request: Request) -> str:
@@ -812,8 +874,9 @@ async def http_service_status(
     action: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
+        headers = {INTERNAL_AUTH_HEADER: PROWLARR_PANEL_INTERNAL_AUTH_SECRET} if PROWLARR_PANEL_INTERNAL_AUTH_SECRET and "host.docker.internal:3120" in url else None
         async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True) as client:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
         allowed = ok_statuses or {200}
         if response.status_code in allowed:
             return service_payload(
@@ -829,7 +892,7 @@ async def http_service_status(
             "degraded",
             f"Réponse HTTP {response.status_code}.",
             service=service,
-            action=action or {"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
+            action=action or {"kind": "retry", "label": "Réessayer", "url": f"{PUBLIC_PREFIX or ''}/?view=home"},
             details={"url": url, "httpStatus": response.status_code},
         )
     except httpx.HTTPError:
@@ -838,7 +901,7 @@ async def http_service_status(
             "unavailable",
             "Service injoignable.",
             service=service,
-            action=action or {"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
+            action=action or {"kind": "retry", "label": "Réessayer", "url": f"{PUBLIC_PREFIX or ''}/?view=home"},
             details={"url": url},
         )
 
@@ -860,7 +923,7 @@ async def socket_service_status(
             "operational",
             "Port accessible.",
             service=service,
-            action=action or {"kind": "open", "label": "Afficher", "url": "/torrent-panel/?view=home"},
+            action=action or {"kind": "open", "label": "Afficher", "url": f"{PUBLIC_PREFIX or ''}/?view=home"},
             details={"host": host, "port": port},
         )
     except (OSError, TimeoutError):
@@ -869,7 +932,7 @@ async def socket_service_status(
             "unavailable",
             "Port inaccessible.",
             service=service,
-            action=action or {"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
+            action=action or {"kind": "retry", "label": "Réessayer", "url": f"{PUBLIC_PREFIX or ''}/?view=home"},
             details={"host": host, "port": port},
         )
 
@@ -894,10 +957,11 @@ def build_alert(
 
 async def prowlarr_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     try:
+        headers = {INTERNAL_AUTH_HEADER: PROWLARR_PANEL_INTERNAL_AUTH_SECRET} if PROWLARR_PANEL_INTERNAL_AUTH_SECRET else None
         async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
             overview_response, health_response = await asyncio.gather(
-                client.get(PROWLARR_PANEL_OVERVIEW_URL),
-                client.get("http://host.docker.internal:3120/prowlarr-panel/api/health"),
+                client.get(PROWLARR_PANEL_OVERVIEW_URL, headers=headers),
+                client.get(PROWLARR_PANEL_HEALTH_URL, headers=headers),
             )
         overview = overview_response.json() if overview_response.status_code == 200 else {}
         health_payload = health_response.json() if health_response.status_code == 200 else {}
@@ -917,6 +981,11 @@ async def dashboard_snapshot() -> dict[str, Any]:
     service_results: dict[str, dict[str, Any]] = {
         "Homepage": await http_service_status("Homepage", HOMEPAGE_STATUS_URL, action={"kind": "open", "label": "Ouvrir le service", "url": "/"}),
     }
+    home_url = f"{PUBLIC_PREFIX or ''}/?view=home"
+    torrents_url = f"{PUBLIC_PREFIX or ''}/?view=torrents"
+    prowlarr_search_url = f"{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/?view=search"
+    prowlarr_health_url = f"{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/?view=health"
+    prowlarr_indexers_url = f"{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/?view=indexers"
 
     torrent_panel_checked_at, torrent_panel_last_success = remember_service_check("Torrent Panel", True)
     service_results["Torrent Panel"] = {
@@ -926,7 +995,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
         "message": "Interface active.",
         "checkedAt": torrent_panel_checked_at,
         "lastSuccessfulCheckAt": torrent_panel_last_success,
-        "action": {"kind": "open", "label": "Afficher", "url": "/torrent-panel/?view=torrents"},
+        "action": {"kind": "open", "label": "Afficher", "url": torrents_url},
         "details": {},
     }
 
@@ -936,7 +1005,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
             "qBittorrent",
             "operational",
             f"{len(torrents)} torrent(s) récupéré(s).",
-            action={"kind": "open", "label": "Ouvrir le service", "url": "/torrent-panel/?view=torrents"},
+            action={"kind": "open", "label": "Ouvrir le service", "url": torrents_url},
             details={"torrentCount": len(torrents)},
         )
     except QbitError as exc:
@@ -945,7 +1014,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
             "qBittorrent",
             "unavailable",
             exc.public_message,
-            action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
+            action={"kind": "retry", "label": "Réessayer", "url": home_url},
             details={"code": exc.code},
         )
     service_results["qBittorrent"] = qbit_status
@@ -953,7 +1022,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
     service_results["Prowlarr Panel"] = await http_service_status(
         "Prowlarr Panel",
         PROWLARR_PANEL_READY_URL,
-        action={"kind": "open", "label": "Ouvrir le service", "url": "/prowlarr-panel/?view=indexers"},
+        action={"kind": "open", "label": "Ouvrir le service", "url": prowlarr_indexers_url},
     )
     prowlarr_overview, prowlarr_health_alerts = await prowlarr_snapshot()
     prowlarr_status = "operational" if prowlarr_overview.get("connection") == "ready" else "unavailable"
@@ -961,7 +1030,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
         "Prowlarr",
         prowlarr_status,
         "Connexion confirmée." if prowlarr_status == "operational" else "État non confirmé par Prowlarr Panel.",
-        action={"kind": "open", "label": "Afficher", "url": "/prowlarr-panel/?view=health"},
+        action={"kind": "open", "label": "Afficher", "url": prowlarr_health_url},
         details={
             "lastSuccessfulRefresh": prowlarr_overview.get("lastSuccessfulRefresh"),
             "indexersError": prowlarr_overview.get("indexersError", 0),
@@ -1050,7 +1119,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
                 "critical",
                 "qBittorrent",
                 f"{len(blocked_torrents)} torrent(s) bloqué(s) ou en erreur.",
-                action={"kind": "open", "label": "Afficher", "url": "/torrent-panel/?view=torrents&status=error"},
+                action={"kind": "open", "label": "Afficher", "url": f"{torrents_url}&status=error"},
                 code="qbit_blocked",
             )
         )
@@ -1061,7 +1130,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
                 "critical",
                 "Prowlarr",
                 f"{indexer_errors} indexeur(s) indisponible(s).",
-                action={"kind": "open", "label": "Afficher", "url": "/prowlarr-panel/?view=health"},
+                action={"kind": "open", "label": "Afficher", "url": prowlarr_health_url},
                 code="prowlarr_indexers_error",
             )
         )
@@ -1071,7 +1140,7 @@ async def dashboard_snapshot() -> dict[str, Any]:
                 "warning",
                 "Prowlarr",
                 str(item.get("message") or item.get("type") or "Alerte Prowlarr."),
-                action={"kind": "open", "label": "Afficher", "url": "/prowlarr-panel/?view=health"},
+                action={"kind": "open", "label": "Afficher", "url": prowlarr_health_url},
                 code=f"prowlarr_health_{item.get('type', 'warning')}",
             )
         )
@@ -1131,10 +1200,10 @@ async def dashboard_snapshot() -> dict[str, Any]:
         "services": list(service_results.values()),
         "mediaAutomation": app.state.media_automation.snapshot(),
         "quickActions": [
-            {"id": "add-torrent", "label": "Ajouter un torrent", "url": "/torrent-panel/?view=torrents&add=1"},
-            {"id": "search-release", "label": "Rechercher une release", "url": "/prowlarr-panel/?view=search"},
-            {"id": "blocked-torrents", "label": "Voir les torrents bloqués", "url": "/torrent-panel/?view=torrents&status=error"},
-            {"id": "test-indexers", "label": "Tester les indexeurs", "url": "/prowlarr-panel/?view=indexers&test=all"},
+            {"id": "add-torrent", "label": "Ajouter un torrent", "url": f"{torrents_url}&add=1"},
+            {"id": "search-release", "label": "Rechercher une release", "url": prowlarr_search_url},
+            {"id": "blocked-torrents", "label": "Voir les torrents bloqués", "url": f"{torrents_url}&status=error"},
+            {"id": "test-indexers", "label": "Tester les indexeurs", "url": f"{prowlarr_indexers_url}&confirm=test-all"},
             {"id": "open-jellyfin", "label": "Ouvrir Jellyfin", "url": JELLYFIN_PUBLIC_URL},
             {
                 "id": "refresh-rclone-manual",
@@ -1150,8 +1219,8 @@ async def dashboard_snapshot() -> dict[str, Any]:
                 "actionId": "jellyfin-refresh",
                 "description": "Déclenche un scan manuel des bibliothèques Jellyfin.",
             },
-            {"id": "media-history", "label": "Historique médias", "url": "/torrent-panel/?view=home#mediaAutomation"},
-            {"id": "refresh-all", "label": "Actualiser tous les services", "url": "/torrent-panel/?view=home&refresh=1"},
+            {"id": "media-history", "label": "Historique médias", "url": f"{home_url}#mediaAutomation"},
+            {"id": "refresh-all", "label": "Actualiser tous les services", "url": f"{home_url}&refresh=1"},
         ],
     }
 
@@ -1220,26 +1289,68 @@ def set_csrf_cookie(request: Request, response: Response) -> str:
 
 
 @app.get("/")
-@app.get("/torrent-panel")
-@app.get("/torrent-panel/")
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/config.js")
+async def config_js() -> PlainTextResponse:
+    return PlainTextResponse(
+        "\n".join(
+            [
+                "window.__TORRENT_PANEL_CONFIG__ = {",
+                f'  publicPrefix: "{PUBLIC_PREFIX or ""}",',
+                f'  prowlarrPanelPrefix: "{PROWLARR_PANEL_PUBLIC_PREFIX or ""}",',
+                "};",
+            ]
+        ),
+        media_type="application/javascript",
+    )
+
+
+if PUBLIC_PREFIX:
+
+    @app.get(PUBLIC_PREFIX)
+    async def prefixed_index_redirect() -> RedirectResponse:
+        return RedirectResponse(url=f"{PUBLIC_PREFIX}/", status_code=308)
+
+
+    @app.get(f"{PUBLIC_PREFIX}/")
+    async def prefixed_index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+
+    @app.get(f"{PUBLIC_PREFIX}/config.js")
+    async def prefixed_config_js() -> PlainTextResponse:
+        return await config_js()
+
+
 @app.get("/healthz")
-@app.get("/torrent-panel/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+if PUBLIC_PREFIX:
+
+    @app.get(f"{PUBLIC_PREFIX}/healthz")
+    async def prefixed_healthz() -> dict[str, str]:
+        return await healthz()
+
+
 @app.get("/readyz")
-@app.get("/torrent-panel/readyz")
 async def readyz() -> dict[str, str]:
     try:
         await app.state.qbit.ready()
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
     return {"status": "ready"}
+
+
+if PUBLIC_PREFIX:
+
+    @app.get(f"{PUBLIC_PREFIX}/readyz")
+    async def prefixed_readyz() -> dict[str, str]:
+        return await readyz()
 
 
 @api_router.get("/session")

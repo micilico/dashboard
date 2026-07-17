@@ -1,6 +1,6 @@
 services:
   homepage:
-    image: ghcr.io/gethomepage/homepage:latest
+    image: ghcr.io/gethomepage/homepage:v1.13.1
     container_name: homepage
     restart: unless-stopped
     ports:
@@ -15,10 +15,19 @@ services:
       PUID: ${PUID}
       PGID: ${PGID}
       TZ: ${TZ}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
       - ./homepage:/app/config
       - /mnt/ultra-media:/mnt/ultra-media:ro
       - /sys:/sys:ro
+    mem_limit: 512m
+    cpus: 1.0
 
   torrent-panel:
     build: ./torrent-panel
@@ -34,6 +43,26 @@ services:
     environment:
       TORRENT_PANEL_HOST: 0.0.0.0
       TORRENT_PANEL_PORT: ${TORRENT_PANEL_PORT:-3110}
+      TORRENT_PANEL_MEDIA_AUTOMATION_STATE_PATH: /app/data/media-automation-state.json
+      TORRENT_PANEL_INTERNAL_AUTH_SECRET: ${TORRENT_PANEL_INTERNAL_AUTH_SECRET}
+      PROWLARR_PANEL_INTERNAL_AUTH_SECRET: ${PROWLARR_PANEL_INTERNAL_AUTH_SECRET}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - torrent-panel-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3110/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 512m
+    cpus: 1.0
 
   prowlarr-panel:
     build: ./prowlarr-panel
@@ -49,3 +78,22 @@ services:
     environment:
       PROWLARR_PANEL_HOST: 0.0.0.0
       PROWLARR_PANEL_PORT: ${PROWLARR_PANEL_PORT:-3120}
+      PROWLARR_PANEL_INTERNAL_AUTH_SECRET: ${PROWLARR_PANEL_INTERNAL_AUTH_SECRET}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3120/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    mem_limit: 384m
+    cpus: 1.0
+
+volumes:
+  torrent-panel-data:

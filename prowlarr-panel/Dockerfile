@@ -9,6 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY prowlarr_panel ./prowlarr_panel
+RUN chown -R nobody:nogroup /app
 
 USER nobody
 

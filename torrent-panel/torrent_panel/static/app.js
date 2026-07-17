@@ -1,3 +1,4 @@
+const panelConfig = window.__TORRENT_PANEL_CONFIG__ || {};
 const STORAGE_KEY = "torrent-panel-preferences";
 const DEFAULT_PREFS = {
   search: "",
@@ -13,6 +14,8 @@ const DEFAULT_PREFS = {
 };
 
 const state = {
+  publicPrefix: String(panelConfig.publicPrefix || "/torrent-panel").replace(/\/$/, ""),
+  prowlarrPanelPrefix: String(panelConfig.prowlarrPanelPrefix || "/prowlarr-panel").replace(/\/$/, ""),
   csrfToken: "",
   activeView: "home",
   torrents: [],
@@ -46,6 +49,7 @@ const els = {
   mediaAutomationList: document.querySelector("#mediaAutomationList"),
   homeNavLink: document.querySelector("#homeNavLink"),
   torrentsNavLink: document.querySelector("#torrentsNavLink"),
+  prowlarrNavLink: document.querySelector("#prowlarrNavLink"),
   navAlertCount: document.querySelector("#navAlertCount"),
   rows: document.querySelector("#torrentRows"),
   summary: document.querySelector("#summary"),
@@ -265,6 +269,11 @@ function clearError() {
   els.alertText.textContent = "";
 }
 
+function route(path = "/") {
+  if (path === "/") return `${state.publicPrefix || ""}/`;
+  return `${state.publicPrefix}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 async function api(path, options = {}, retryCsrf = true) {
   const headers = new Headers(options.headers || {});
   headers.set("Accept", "application/json");
@@ -288,12 +297,12 @@ async function api(path, options = {}, retryCsrf = true) {
 }
 
 async function refreshSession() {
-  const session = await api("api/session", { cache: "no-store" }, false);
+  const session = await api(route("/api/session"), { cache: "no-store" }, false);
   state.csrfToken = session.csrfToken;
 }
 
 function currentUrl() {
-  const href = window.location?.href || "http://localhost/torrent-panel/";
+  const href = window.location?.href || `http://localhost${route("/")}`;
   if (typeof URL !== "undefined") return new URL(href);
   const raw = String(href);
   const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
@@ -601,7 +610,7 @@ function quickActionButton(item) {
 function actionLink(action) {
   const link = document.createElement("a");
   link.className = "button secondary";
-  link.href = action?.url || "/torrent-panel/?view=home";
+  link.href = action?.url || `${route("/")}?view=home`;
   link.textContent = action?.label || "Afficher";
   return link;
 }
@@ -747,7 +756,7 @@ function renderQuickActions() {
       if (item.kind === "api" && item.actionId) return quickActionButton(item);
       const link = document.createElement("a");
       link.className = "quick-action";
-      link.href = item.url || "/torrent-panel/?view=home";
+      link.href = item.url || `${route("/")}?view=home`;
       const title = document.createElement("strong");
       title.textContent = item.label;
       const subtitle = document.createElement("span");
@@ -952,7 +961,7 @@ function render() {
 }
 
 async function loadDashboard() {
-  const payload = await api("api/dashboard", { cache: "no-store" });
+  const payload = await api(route("/api/dashboard"), { cache: "no-store" });
   state.dashboard = {
     alerts: Array.isArray(payload.alerts) ? payload.alerts : [],
     criticalCount: Number(payload.criticalCount) || 0,
@@ -972,8 +981,8 @@ async function loadTorrents({ silent = false, force = false } = {}) {
   state.refreshPromise = (async () => {
     try {
       const [dashboardPayload, torrentPayload] = await Promise.all([
-        api("api/dashboard", { cache: "no-store" }),
-        api("api/torrents", { cache: "no-store" }),
+        api(route("/api/dashboard"), { cache: "no-store" }),
+        api(route("/api/torrents"), { cache: "no-store" }),
       ]);
       state.dashboard = {
         alerts: Array.isArray(dashboardPayload.alerts) ? dashboardPayload.alerts : [],
@@ -1025,7 +1034,7 @@ async function runTorrentAction(hashes, action, options = {}) {
   state.globalActionCount += 1;
   render();
   try {
-    await api(`api/torrents/${action}`, {
+    await api(route(`/api/torrents/${action}`), {
       method: "POST",
       body: JSON.stringify({ hashes, ...options }),
     });
@@ -1154,6 +1163,12 @@ function updateDetails() {
   els.detailBody.replaceChildren(dl);
 }
 
+function configureLinks() {
+  if (els.homeNavLink) els.homeNavLink.href = `${route("/")}?view=home`;
+  if (els.torrentsNavLink) els.torrentsNavLink.href = `${route("/")}?view=torrents`;
+  if (els.prowlarrNavLink) els.prowlarrNavLink.href = `${state.prowlarrPanelPrefix || "/prowlarr-panel"}/`;
+}
+
 async function submitMagnets(event) {
   event.preventDefault();
   els.magnetMessage.textContent = "";
@@ -1168,7 +1183,7 @@ async function submitMagnets(event) {
   els.addButton.textContent = "Ajout…";
   state.globalActionCount += 1;
   try {
-    const payload = await api("api/torrents/add", {
+    const payload = await api(route("/api/torrents/add"), {
       method: "POST",
       body: JSON.stringify({
         magnets: valid,
@@ -1312,6 +1327,7 @@ function bindEvents() {
 }
 
 async function init() {
+  configureLinks();
   bindEvents();
   applyUrlState();
   renderControls();

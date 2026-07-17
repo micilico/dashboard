@@ -1,4 +1,7 @@
+const config = window.__PROWLARR_PANEL_CONFIG__ || {};
 const state = {
+  publicPrefix: String(config.publicPrefix || "").replace(/\/$/, ""),
+  torrentPanelPrefix: String(config.torrentPanelPrefix || "/torrent-panel").replace(/\/$/, ""),
   csrfToken: "",
   indexers: [],
   results: [],
@@ -9,45 +12,18 @@ const state = {
   busy: new Set(),
   activeView: "indexers",
   searchAbort: null,
+  sectionErrors: {},
+  sectionLoaded: {
+    overview: false,
+    indexers: false,
+    applications: false,
+    health: false,
+  },
 };
-
-function currentUrl() {
-  const href = window.location?.href || "http://localhost/prowlarr-panel/";
-  if (typeof URL !== "undefined") return new URL(href);
-  const raw = String(href);
-  const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
-  const params = new Map(
-    query
-      .split("&")
-      .filter(Boolean)
-      .map((entry) => {
-        const [key, value = ""] = entry.split("=");
-        return [decodeURIComponent(key), decodeURIComponent(value)];
-      }),
-  );
-  return {
-    searchParams: {
-      get(key) {
-        return params.has(key) ? params.get(key) : null;
-      },
-      set(key, value) {
-        params.set(key, String(value));
-      },
-      delete(key) {
-        params.delete(key);
-      },
-    },
-    toString() {
-      const base = raw.split("?")[0];
-      const search = [...params.entries()].map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
-      return search ? `${base}?${search}` : base;
-    },
-  };
-}
 
 const SEARCH_CATEGORY_PRESETS = [
   { label: "Films", value: 2000 },
-  { label: "Séries", value: 5000 },
+  { label: "Series", value: 5000 },
   { label: "Musique", value: 3000 },
   { label: "Livres", value: 7000 },
   { label: "Autres", value: 8000 },
@@ -57,10 +33,13 @@ const els = {
   refreshStatus: document.querySelector("#refreshStatus"),
   refreshButton: document.querySelector("#refreshButton"),
   retryButton: document.querySelector("#retryButton"),
-  summaryGrid: document.querySelector("#summaryGrid"),
   alert: document.querySelector("#alert"),
   alertText: document.querySelector("#alertText"),
-  tabs: document.querySelectorAll(".tab"),
+  summaryGrid: document.querySelector("#summaryGrid"),
+  homeLink: document.querySelector("#homeLink"),
+  torrentLink: document.querySelector("#torrentLink"),
+  prowlarrLink: document.querySelector("#prowlarrLink"),
+  tabs: [...document.querySelectorAll(".tab")],
   views: {
     indexers: document.querySelector("#indexersView"),
     search: document.querySelector("#searchView"),
@@ -68,6 +47,7 @@ const els = {
     health: document.querySelector("#healthView"),
   },
   indexersSummary: document.querySelector("#indexersSummary"),
+  indexersError: document.querySelector("#indexersError"),
   indexerRows: document.querySelector("#indexerRows"),
   indexersEmpty: document.querySelector("#indexersEmpty"),
   indexerSearch: document.querySelector("#indexerSearch"),
@@ -97,9 +77,11 @@ const els = {
   resultSort: document.querySelector("#resultSort"),
   appsGrid: document.querySelector("#appsGrid"),
   appsSummary: document.querySelector("#appsSummary"),
+  appsError: document.querySelector("#appsError"),
   alertsList: document.querySelector("#alertsList"),
   historyList: document.querySelector("#historyList"),
   healthSummary: document.querySelector("#healthSummary"),
+  healthError: document.querySelector("#healthError"),
   healthTab: document.querySelector("#healthTab"),
   confirmDialog: document.querySelector("#confirmDialog"),
   confirmTitle: document.querySelector("#confirmTitle"),
@@ -109,6 +91,52 @@ const els = {
   toast: document.querySelector("#toast"),
 };
 
+function currentUrl() {
+  return new URL(window.location?.href || "http://localhost/");
+}
+
+function prefixed(path = "/") {
+  const root = state.publicPrefix || "";
+  if (path === "/") return `${root || ""}/`;
+  return `${root}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function text(value, fallback = "—") {
+  const cleaned = String(value ?? "").trim();
+  return cleaned || fallback;
+}
+
+function clearNode(node) {
+  node.replaceChildren();
+}
+
+function element(tag, options = {}) {
+  const node = document.createElement(tag);
+  if (options.className) node.className = options.className;
+  if (options.text !== undefined) node.textContent = String(options.text);
+  if (options.attrs) {
+    for (const [name, value] of Object.entries(options.attrs)) {
+      if (value !== undefined && value !== null) node.setAttribute(name, String(value));
+    }
+  }
+  if (options.dataset) {
+    for (const [name, value] of Object.entries(options.dataset)) {
+      node.dataset[name] = String(value);
+    }
+  }
+  if (options.children) node.append(...options.children);
+  return node;
+}
+
+function button(label, className, dataset = {}) {
+  return element("button", {
+    className,
+    text: label,
+    attrs: { type: "button" },
+    dataset,
+  });
+}
+
 function formatBytes(value) {
   const bytes = Number(value) || 0;
   if (bytes === 0) return "0 o";
@@ -117,14 +145,9 @@ function formatBytes(value) {
   return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-function text(value, fallback = "—") {
-  const cleaned = String(value ?? "").trim();
-  return cleaned || fallback;
-}
-
 function describeError(error) {
   const message = error?.message || "Action impossible pour le moment.";
-  const recovery = error?.recovery || "Réessayer";
+  const recovery = error?.recovery || "Reessayer";
   return `${message} ${recovery}.`;
 }
 
@@ -147,6 +170,10 @@ function clearError() {
   els.alertText.textContent = "";
 }
 
+function route(path) {
+  return prefixed(path);
+}
+
 async function api(path, options = {}, retryCsrf = true) {
   const headers = new Headers(options.headers || {});
   headers.set("Accept", "application/json");
@@ -158,7 +185,7 @@ async function api(path, options = {}, retryCsrf = true) {
   const detail = typeof payload.detail === "object" && payload.detail ? payload.detail : {};
   const error = new Error(detail.message || payload.detail || "Action impossible pour le moment.");
   error.code = detail.code || `http_${response.status}`;
-  error.recovery = detail.recovery || "Réessayer";
+  error.recovery = detail.recovery || "Reessayer";
   error.status = response.status;
   if (response.status === 403 && error.code === "csrf_expired" && retryCsrf) {
     await refreshSession();
@@ -168,21 +195,27 @@ async function api(path, options = {}, retryCsrf = true) {
 }
 
 async function refreshSession() {
-  const session = await api("api/session", { cache: "no-store" }, false);
+  const session = await api(route("/api/session"), { cache: "no-store" }, false);
   state.csrfToken = session.csrfToken;
 }
 
 function setBusy(key, busy) {
   if (busy) state.busy.add(key);
   else state.busy.delete(key);
-  document.querySelectorAll(`[data-busy-key="${CSS.escape(key)}"]`).forEach((button) => {
-    button.disabled = busy;
-    button.textContent = busy ? "En cours..." : button.dataset.label;
+  document.querySelectorAll(`[data-busy-key="${CSS.escape(key)}"]`).forEach((node) => {
+    node.disabled = busy;
+    node.textContent = busy ? "En cours..." : node.dataset.label;
   });
 }
 
 function fillSelect(select, entries, current = "all") {
-  select.innerHTML = entries.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+  const options = entries.map(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = String(label);
+    return option;
+  });
+  select.replaceChildren(...options);
   select.value = current;
 }
 
@@ -194,24 +227,40 @@ function renderSummary(overview) {
     ["Apps", overview.applicationsTotal],
     ["Alertes", overview.systemWarnings],
   ];
-  els.summaryGrid.innerHTML = stats.map(([label, value]) => `<article class="stat"><strong>${text(value, "0")}</strong><span>${label}</span></article>`).join("");
+  els.summaryGrid.replaceChildren(
+    ...stats.map(([label, value]) =>
+      element("article", {
+        className: "stat",
+        children: [element("strong", { text: text(value, "0") }), element("span", { text: label })],
+      }),
+    ),
+  );
   state.capabilities = overview.capabilities || {};
-  els.refreshStatus.textContent = `Actualisé ${new Date().toLocaleTimeString("fr-FR")}`;
+  els.refreshStatus.textContent = `Actualise ${new Date().toLocaleTimeString("fr-FR")}`;
 }
 
 function indexerHealthLabel(indexer) {
   if (indexer.health === "error") return "Erreur";
-  if (!indexer.enabled) return "Désactivé";
+  if (!indexer.enabled) return "Desactive";
   return "Actif";
+}
+
+function renderSectionError(section, error) {
+  state.sectionErrors[section] = error || null;
+  const container = els[`${section}Error`];
+  if (!container) return;
+  const message = container.querySelector("span");
+  message.textContent = error ? describeError(error) : "";
+  container.hidden = !error;
 }
 
 function renderIndexerFilters() {
   const protocols = [...new Set(state.indexers.map((item) => item.protocol).filter(Boolean))].sort();
   const tags = [...new Set(state.indexers.flatMap((item) => item.tags || []))].sort((a, b) => String(a).localeCompare(String(b)));
-  fillSelect(els.indexerState, [["all", "Tous"], ["active", "Actifs"], ["disabled", "Désactivés"], ["error", "En erreur"]], els.indexerState.value || "all");
+  fillSelect(els.indexerState, [["all", "Tous"], ["active", "Actifs"], ["disabled", "Desactives"], ["error", "En erreur"]], els.indexerState.value || "all");
   fillSelect(els.indexerProtocol, [["all", "Tous"], ...protocols.map((item) => [item, item])], els.indexerProtocol.value || "all");
   fillSelect(els.indexerTag, [["all", "Tous"], ...tags.map((item) => [item, item])], els.indexerTag.value || "all");
-  fillSelect(els.indexerSort, [["name", "Nom"], ["priority", "Priorité"], ["state", "État"]], els.indexerSort.value || "name");
+  fillSelect(els.indexerSort, [["name", "Nom"], ["priority", "Priorite"], ["state", "Etat"]], els.indexerSort.value || "name");
 }
 
 function filteredIndexers() {
@@ -221,52 +270,79 @@ function filteredIndexers() {
   const tag = els.indexerTag.value;
   const sort = els.indexerSort.value;
   return [...state.indexers]
-    .filter((item) => !query || item.name.toLowerCase().includes(query))
+    .filter((item) => !query || String(item.name || "").toLowerCase().includes(query))
     .filter((item) => stateFilter === "all" || (stateFilter === "active" && item.enabled && item.health !== "error") || (stateFilter === "disabled" && !item.enabled) || (stateFilter === "error" && item.health === "error"))
     .filter((item) => protocol === "all" || item.protocol === protocol)
     .filter((item) => tag === "all" || (item.tags || []).map(String).includes(tag))
     .sort((a, b) => {
       if (sort === "priority") return Number(a.priority || 0) - Number(b.priority || 0);
       if (sort === "state") return indexerHealthLabel(a).localeCompare(indexerHealthLabel(b));
-      return a.name.localeCompare(b.name);
+      return String(a.name || "").localeCompare(String(b.name || ""));
     });
 }
 
 function renderIndexers() {
   renderIndexerFilters();
   const rows = filteredIndexers();
-  els.indexersSummary.textContent = `${rows.length} affiché(s) sur ${state.indexers.length}.`;
+  els.indexersSummary.textContent = state.sectionErrors.indexers
+    ? `${rows.length} affiche(s) sur ${state.indexers.length}. Derniere donnees conservees.`
+    : `${rows.length} affiche(s) sur ${state.indexers.length}.`;
   els.indexersEmpty.hidden = rows.length > 0;
   renderReleaseIndexers();
-  els.indexerRows.innerHTML = rows.map((item) => {
-    const health = item.health === "error" ? "error" : item.enabled ? "ok" : "disabled";
-    const toggleLabel = item.enabled ? "Désactiver" : "Activer";
-    return `
-      <tr>
-        <td class="name-cell" data-label="Nom">${text(item.name)}</td>
-        <td data-label="Protocole">${text(item.protocol)}</td>
-        <td data-label="État"><span class="badge ${health}">${indexerHealthLabel(item)}</span>${item.error ? `<div class="muted">${text(item.error)}</div>` : ""}</td>
-        <td class="mono" data-label="Priorité">${text(item.priority, "0")}</td>
-        <td data-label="Tags">${(item.tags || []).map((tag) => `<span class="badge">${tag}</span>`).join(" ") || "—"}</td>
-        <td data-label="Catégories">${Array.isArray(item.categories) ? item.categories.length : "—"}</td>
-        <td data-label="Dernier test">${text(item.lastTest)}</td>
-        <td data-label="Actions">
-          <div class="action-row">
-            <button class="button secondary" type="button" data-action="test-indexer" data-id="${item.id}" data-busy-key="test:${item.id}" data-label="Tester">Tester</button>
-            <button class="button ${item.enabled ? "danger" : "secondary"}" type="button" data-action="toggle-indexer" data-id="${item.id}" data-enabled="${item.enabled}" data-name="${item.name}" data-busy-key="toggle:${item.id}" data-label="${toggleLabel}">${toggleLabel}</button>
-          </div>
-        </td>
-      </tr>`;
-  }).join("");
+  els.indexerRows.replaceChildren(
+    ...rows.map((item) => {
+      const health = item.health === "error" ? "error" : item.enabled ? "ok" : "disabled";
+      const toggleLabel = item.enabled ? "Desactiver" : "Activer";
+      const tags = (item.tags || []).map((tag) => element("span", { className: "badge", text: String(tag) }));
+      const row = element("tr");
+      const cells = [
+        element("td", { className: "name-cell", attrs: { "data-label": "Nom" }, text: text(item.name) }),
+        element("td", { attrs: { "data-label": "Protocole" }, text: text(item.protocol) }),
+        element("td", {
+          attrs: { "data-label": "Etat" },
+          children: [
+            element("span", { className: `badge ${health}`, text: indexerHealthLabel(item) }),
+            ...(item.error ? [element("div", { className: "muted", text: text(item.error) })] : []),
+          ],
+        }),
+        element("td", { className: "mono", attrs: { "data-label": "Priorite" }, text: text(item.priority, "0") }),
+        element("td", { attrs: { "data-label": "Tags" }, children: tags.length ? tags : [document.createTextNode("—")] }),
+        element("td", { attrs: { "data-label": "Categories" }, text: Array.isArray(item.categories) ? String(item.categories.length) : "—" }),
+        element("td", { attrs: { "data-label": "Dernier test" }, text: text(item.lastTest) }),
+      ];
+      const actions = element("div", {
+        className: "action-row",
+        children: [
+          button("Tester", "button secondary", { action: "test-indexer", id: item.id, busyKey: `test:${item.id}`, label: "Tester" }),
+          button(toggleLabel, `button ${item.enabled ? "danger" : "secondary"}`, {
+            action: "toggle-indexer",
+            id: item.id,
+            enabled: item.enabled,
+            name: text(item.name),
+            busyKey: `toggle:${item.id}`,
+            label: toggleLabel,
+          }),
+        ],
+      });
+      cells.push(element("td", { attrs: { "data-label": "Actions" }, children: [actions] }));
+      row.append(...cells);
+      return row;
+    }),
+  );
 }
 
 function renderReleaseCategories() {
-  els.releaseCategoryChoices.innerHTML = SEARCH_CATEGORY_PRESETS.map((item) => `
-    <label class="choice-pill">
-      <input type="checkbox" value="${item.value}">
-      <span>${item.label}</span>
-    </label>
-  `).join("");
+  els.releaseCategoryChoices.replaceChildren(
+    ...SEARCH_CATEGORY_PRESETS.map((item) =>
+      element("label", {
+        className: "choice-pill",
+        children: [
+          element("input", { attrs: { type: "checkbox", value: item.value } }),
+          element("span", { text: item.label }),
+        ],
+      }),
+    ),
+  );
 }
 
 function selectedCategoryIds() {
@@ -280,11 +356,16 @@ function selectedCategoryIds() {
 function renderReleaseIndexers() {
   const selected = new Set([...els.releaseIndexers.selectedOptions].map((option) => option.value));
   const query = els.releaseIndexerSearch.value.trim().toLowerCase();
-  const indexers = state.indexers.filter((item) => !query || item.name.toLowerCase().includes(query));
-  els.releaseIndexers.innerHTML = indexers.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
-  [...els.releaseIndexers.options].forEach((option) => {
-    option.selected = selected.has(option.value);
-  });
+  const options = state.indexers
+    .filter((item) => !query || String(item.name || "").toLowerCase().includes(query))
+    .map((item) => {
+      const option = document.createElement("option");
+      option.value = String(item.id);
+      option.textContent = text(item.name);
+      option.selected = selected.has(option.value);
+      return option;
+    });
+  els.releaseIndexers.replaceChildren(...options);
 }
 
 function filteredResults() {
@@ -295,10 +376,10 @@ function filteredResults() {
   const maxSize = Number(els.resultMaxSize.value || 0) * 1024 ** 3;
   const sort = els.resultSort.value || "seeders";
   return [...state.results]
-    .filter((item) => !query || item.title.toLowerCase().includes(query))
+    .filter((item) => !query || String(item.title || "").toLowerCase().includes(query))
     .filter((item) => indexer === "all" || item.indexer === indexer)
     .filter((item) => protocol === "all" || item.protocol === protocol)
-    .filter((item) => !category || item.category.toLowerCase().includes(category))
+    .filter((item) => !category || String(item.category || "").toLowerCase().includes(category))
     .filter((item) => !maxSize || Number(item.size || 0) <= maxSize)
     .sort((a, b) => {
       if (sort === "size") return Number(b.size || 0) - Number(a.size || 0);
@@ -313,49 +394,104 @@ function renderResultFilters() {
   const protocols = [...new Set(state.results.map((item) => item.protocol).filter(Boolean))].sort();
   fillSelect(els.resultIndexer, [["all", "Tous"], ...indexers.map((item) => [item, item])], els.resultIndexer.value || "all");
   fillSelect(els.resultProtocol, [["all", "Tous"], ...protocols.map((item) => [item, item])], els.resultProtocol.value || "all");
-  fillSelect(els.resultSort, [["seeders", "Seeders"], ["size", "Taille"], ["age", "Âge"], ["indexer", "Indexer"]], els.resultSort.value || "seeders");
+  fillSelect(els.resultSort, [["seeders", "Seeders"], ["size", "Taille"], ["age", "Age"], ["indexer", "Indexer"]], els.resultSort.value || "seeders");
 }
 
 function renderResults() {
   renderResultFilters();
   const rows = filteredResults();
-  els.searchSummary.textContent = `${rows.length} résultat(s) affiché(s). Les URLs privées restent côté serveur.`;
+  els.searchSummary.textContent = `${rows.length} resultat(s) affiche(s). Les URLs privees restent cote serveur.`;
   els.resultsEmpty.hidden = rows.length > 0;
-  els.resultRows.innerHTML = rows.map((item) => `
-    <tr>
-      <td class="name-cell" data-label="Titre">${text(item.title)}</td>
-      <td data-label="Indexer">${text(item.indexer)}</td>
-      <td data-label="Catégorie">${text(item.category)}</td>
-      <td class="mono" data-label="Taille">${formatBytes(item.size)}</td>
-      <td data-label="Âge">${text(item.age)}</td>
-      <td class="mono" data-label="Seeders">${text(item.seeders, "0")}</td>
-      <td class="mono" data-label="Leechers">${text(item.leechers, "0")}</td>
-      <td data-label="Protocole">${text(item.protocol)}</td>
-      <td data-label="Statut">${item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}`}</td>
-      <td data-label="Action"><button class="button primary" type="button" data-action="grab" data-release-id="${item.id}" data-title="${item.title}" data-busy-key="grab:${item.id}" data-label="Envoyer vers qBittorrent">Envoyer vers qBittorrent</button></td>
-    </tr>`).join("");
+  els.resultRows.replaceChildren(
+    ...rows.map((item) => {
+      const row = element("tr");
+      row.append(
+        element("td", { className: "name-cell", attrs: { "data-label": "Titre" }, text: text(item.title) }),
+        element("td", { attrs: { "data-label": "Indexer" }, text: text(item.indexer) }),
+        element("td", { attrs: { "data-label": "Categorie" }, text: text(item.category) }),
+        element("td", { className: "mono", attrs: { "data-label": "Taille" }, text: formatBytes(item.size) }),
+        element("td", { attrs: { "data-label": "Age" }, text: text(item.age) }),
+        element("td", { className: "mono", attrs: { "data-label": "Seeders" }, text: text(item.seeders, "0") }),
+        element("td", { className: "mono", attrs: { "data-label": "Leechers" }, text: text(item.leechers, "0") }),
+        element("td", { attrs: { "data-label": "Protocole" }, text: text(item.protocol) }),
+        element("td", { attrs: { "data-label": "Statut" }, text: item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}` }),
+        element("td", {
+          attrs: { "data-label": "Action" },
+          children: [
+            button("Envoyer vers qBittorrent", "button primary", {
+              action: "grab",
+              releaseId: item.id,
+              title: text(item.title),
+              busyKey: `grab:${item.id}`,
+              label: "Envoyer vers qBittorrent",
+            }),
+          ],
+        }),
+      );
+      return row;
+    }),
+  );
 }
 
 function renderApplications() {
-  els.appsSummary.textContent = `${state.applications.length} application(s) configurée(s).`;
-  els.appsGrid.innerHTML = state.applications.map((item) => `
-    <article class="card">
-      <h3>${text(item.name)}</h3>
-      <dl>
-        <dt>Type</dt><dd>${text(item.type)}</dd>
-        <dt>État</dt><dd><span class="badge ${item.enabled ? "ok" : "disabled"}">${item.enabled ? "Active" : "Désactivée"}</span></dd>
-        <dt>Test</dt><dd>${text(item.lastTest)}</dd>
-        <dt>Sync</dt><dd>${text(item.syncLevel)}</dd>
-        <dt>Tags</dt><dd>${(item.tags || []).join(", ") || "—"}</dd>
-      </dl>
-    </article>`).join("") || `<div class="empty">Aucune application à afficher.</div>`;
+  els.appsSummary.textContent = state.sectionErrors.applications
+    ? `${state.applications.length} application(s) configuree(s). Derniere donnees conservees.`
+    : `${state.applications.length} application(s) configuree(s).`;
+  const cards = state.applications.map((item) => {
+    const dl = element("dl");
+    const pairs = [
+      ["Type", text(item.type)],
+      ["Etat", item.enabled ? "Active" : "Desactivee"],
+      ["Test", text(item.lastTest)],
+      ["Sync", text(item.syncLevel)],
+      ["Tags", (item.tags || []).join(", ") || "—"],
+    ];
+    pairs.forEach(([label, value], index) => {
+      if (index === 1) {
+        dl.append(
+          element("dt", { text: label }),
+          element("dd", { children: [element("span", { className: `badge ${item.enabled ? "ok" : "disabled"}`, text: value })] }),
+        );
+        return;
+      }
+      dl.append(element("dt", { text: label }), element("dd", { text: value }));
+    });
+    return element("article", {
+      className: "card",
+      children: [element("h3", { text: text(item.name) }), dl],
+    });
+  });
+  if (!cards.length) cards.push(element("div", { className: "empty", text: "Aucune application a afficher." }));
+  els.appsGrid.replaceChildren(...cards);
 }
 
 function renderHealth() {
-  els.healthSummary.textContent = `${state.alerts.length} alerte(s), ${state.events.length} événement(s).`;
-  els.alertsList.innerHTML = state.alerts.map((item) => `<article class="list-item"><strong>${text(item.source)}</strong><span>${text(item.message)}</span><span class="muted">${text(item.type)} ${text(item.date, "")}</span></article>`).join("") || `<div class="empty">Aucune alerte système.</div>`;
-  els.historyList.innerHTML = state.events.map((item) => `<article class="list-item"><strong>${text(item.title, item.eventType)}</strong><span>${text(item.indexer)} ${text(item.result, "")}</span><span class="muted">${text(item.date)}</span></article>`).join("") || `<div class="empty">Aucun événement récent.</div>`;
-  els.healthTab.textContent = state.alerts.length > 0 ? `Santé (${state.alerts.length})` : "Santé";
+  els.healthSummary.textContent = state.sectionErrors.health
+    ? `${state.alerts.length} alerte(s), ${state.events.length} evenement(s). Donnees partielles conservees.`
+    : `${state.alerts.length} alerte(s), ${state.events.length} evenement(s).`;
+  const alerts = state.alerts.map((item) =>
+    element("article", {
+      className: "list-item",
+      children: [
+        element("strong", { text: text(item.source) }),
+        element("span", { text: text(item.message) }),
+        element("span", { className: "muted", text: `${text(item.type)} ${text(item.date, "")}`.trim() }),
+      ],
+    }),
+  );
+  const events = state.events.map((item) =>
+    element("article", {
+      className: "list-item",
+      children: [
+        element("strong", { text: text(item.title, item.eventType) }),
+        element("span", { text: `${text(item.indexer)} ${text(item.result, "")}`.trim() }),
+        element("span", { className: "muted", text: text(item.date) }),
+      ],
+    }),
+  );
+  els.alertsList.replaceChildren(...(alerts.length ? alerts : [element("div", { className: "empty", text: "Aucune alerte systeme." })]));
+  els.historyList.replaceChildren(...(events.length ? events : [element("div", { className: "empty", text: "Aucun evenement recent." })]));
+  els.healthTab.textContent = state.alerts.length > 0 ? `Sante (${state.alerts.length})` : "Sante";
 }
 
 function updateUrl(replace = true) {
@@ -366,6 +502,27 @@ function updateUrl(replace = true) {
   else url.searchParams.delete("query");
   const method = replace ? "replaceState" : "pushState";
   window.history?.[method]?.({}, "", url.toString());
+}
+
+function focusActiveTab() {
+  const active = els.tabs.find((tab) => tab.dataset.view === state.activeView);
+  active?.focus();
+}
+
+function setView(view, options = {}) {
+  state.activeView = view;
+  Object.entries(els.views).forEach(([name, panel]) => {
+    const active = name === view;
+    panel.hidden = !active;
+    panel.setAttribute("tabindex", active ? "0" : "-1");
+  });
+  els.tabs.forEach((tab) => {
+    const active = tab.dataset.view === view;
+    tab.setAttribute("aria-selected", String(active));
+    tab.setAttribute("tabindex", active ? "0" : "-1");
+  });
+  updateUrl(options.replace !== false);
+  if (options.focus) focusActiveTab();
 }
 
 function applyUrlState() {
@@ -379,35 +536,45 @@ function applyUrlState() {
 async function loadAll() {
   clearError();
   els.refreshStatus.textContent = "Actualisation...";
-  try {
-    const [overview, indexers, applications, health, history] = await Promise.all([
-      api("api/overview", { cache: "no-store" }),
-      api("api/indexers", { cache: "no-store" }),
-      api("api/applications", { cache: "no-store" }),
-      api("api/health", { cache: "no-store" }),
-      api("api/history", { cache: "no-store" }),
-    ]);
-    state.indexers = indexers.indexers || [];
-    state.applications = applications.applications || [];
-    state.alerts = health.alerts || [];
-    state.events = history.events || [];
-    renderSummary(overview);
-    renderIndexers();
-    renderApplications();
-    renderHealth();
-  } catch (error) {
-    els.refreshStatus.textContent = "Erreur";
-    showError(error);
-  }
-}
+  const requests = {
+    overview: api(route("/api/overview"), { cache: "no-store" }),
+    indexers: api(route("/api/indexers"), { cache: "no-store" }),
+    applications: api(route("/api/applications"), { cache: "no-store" }),
+    health: api(route("/api/health"), { cache: "no-store" }),
+    history: api(route("/api/history"), { cache: "no-store" }),
+  };
+  const results = await Promise.allSettled(Object.values(requests));
+  const keys = Object.keys(requests);
+  let failures = 0;
 
-function setView(view) {
-  state.activeView = view;
-  Object.entries(els.views).forEach(([name, element]) => {
-    element.hidden = name !== view;
+  results.forEach((result, index) => {
+    const key = keys[index];
+    if (result.status === "fulfilled") {
+      state.sectionLoaded[key] = true;
+      renderSectionError(key === "history" ? "health" : key, null);
+      if (key === "overview") renderSummary(result.value);
+      if (key === "indexers") state.indexers = result.value.indexers || [];
+      if (key === "applications") state.applications = result.value.applications || [];
+      if (key === "health") state.alerts = result.value.alerts || [];
+      if (key === "history") state.events = result.value.events || [];
+      return;
+    }
+    failures += 1;
+    const section = key === "history" ? "health" : key;
+    renderSectionError(section, result.reason);
+    if (!state.sectionLoaded[key] && key === "overview") showError(result.reason);
   });
-  els.tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.view === view)));
-  updateUrl();
+
+  renderIndexers();
+  renderApplications();
+  renderHealth();
+  if (failures === 0) {
+    els.refreshStatus.textContent = `Actualise ${new Date().toLocaleTimeString("fr-FR")}`;
+  } else if (failures < keys.length) {
+    els.refreshStatus.textContent = "Actualisation partielle";
+  } else {
+    els.refreshStatus.textContent = "Erreur";
+  }
 }
 
 function confirmAction(title, message) {
@@ -432,8 +599,8 @@ async function testIndexer(id) {
   if (state.busy.has(key)) return;
   setBusy(key, true);
   try {
-    await api("api/indexers/test", { method: "POST", body: JSON.stringify({ id: Number(id) }) });
-    showToast("Test d'indexer demandé.");
+    await api(route("/api/indexers/test"), { method: "POST", body: JSON.stringify({ id: Number(id) }) });
+    showToast("Test d'indexer demande.");
     await loadAll();
   } catch (error) {
     showError(error);
@@ -442,19 +609,19 @@ async function testIndexer(id) {
   }
 }
 
-async function toggleIndexer(button) {
-  const id = Number(button.dataset.id);
-  const enabled = button.dataset.enabled === "true";
+async function toggleIndexer(buttonNode) {
+  const id = Number(buttonNode.dataset.id);
+  const enabled = buttonNode.dataset.enabled === "true";
   if (enabled) {
-    const ok = await confirmAction("Désactiver l'indexer", `Confirmer la désactivation de ${button.dataset.name} ?`);
+    const ok = await confirmAction("Desactiver l'indexer", `Confirmer la desactivation de ${buttonNode.dataset.name} ?`);
     if (!ok) return;
   }
   const key = `toggle:${id}`;
   if (state.busy.has(key)) return;
   setBusy(key, true);
   try {
-    await api("api/indexers/enabled", { method: "POST", body: JSON.stringify({ id, enabled: !enabled }) });
-    showToast(enabled ? "Indexer désactivé." : "Indexer activé.");
+    await api(route("/api/indexers/enabled"), { method: "POST", body: JSON.stringify({ id, enabled: !enabled }) });
+    showToast(enabled ? "Indexer desactive." : "Indexer active.");
     await loadAll();
   } catch (error) {
     showError(error);
@@ -472,7 +639,7 @@ async function runSearch(event) {
   els.searchButton.disabled = true;
   els.searchButton.textContent = "Recherche...";
   try {
-    const payload = await api("api/search", {
+    const payload = await api(route("/api/search"), {
       method: "POST",
       body: JSON.stringify({ query: els.releaseQuery.value, categories, indexerIds }),
       signal: state.searchAbort.signal,
@@ -488,19 +655,19 @@ async function runSearch(event) {
   }
 }
 
-async function grabRelease(button) {
-  const key = button.dataset.busyKey;
+async function grabRelease(buttonNode) {
+  const key = buttonNode.dataset.busyKey;
   if (state.busy.has(key)) return;
   setBusy(key, true);
   try {
-    await api("api/grab", {
+    await api(route("/api/grab"), {
       method: "POST",
       body: JSON.stringify({
-        releaseId: button.dataset.releaseId,
-        title: button.dataset.title,
+        releaseId: buttonNode.dataset.releaseId,
+        title: buttonNode.dataset.title,
       }),
     });
-    showToast(`Envoyé vers qBittorrent : ${button.dataset.title}`);
+    showToast(`Envoye vers qBittorrent : ${buttonNode.dataset.title}`);
   } catch (error) {
     showError(error);
   } finally {
@@ -508,66 +675,101 @@ async function grabRelease(button) {
   }
 }
 
-document.addEventListener("click", (event) => {
-  const button = event.target.closest("button");
-  if (!button) return;
-  if (button.dataset.view) setView(button.dataset.view);
-  if (button.dataset.action === "test-indexer") testIndexer(button.dataset.id);
-  if (button.dataset.action === "toggle-indexer") toggleIndexer(button);
-  if (button.dataset.action === "grab") grabRelease(button);
-});
+function configureLinks() {
+  if (els.homeLink) els.homeLink.href = "/";
+  if (els.torrentLink) els.torrentLink.href = `${state.torrentPanelPrefix || "/torrent-panel"}/`;
+  if (els.prowlarrLink) els.prowlarrLink.href = prefixed("/");
+}
 
-els.refreshButton.addEventListener("click", loadAll);
-els.retryButton.addEventListener("click", loadAll);
-els.testAllButton.addEventListener("click", async () => {
-  const ok = await confirmAction("Tester tous les indexers", "Cette action interroge tous les indexers configurés.");
-  if (!ok) return;
-  try {
-    await api("api/indexers/test-all", { method: "POST", body: "{}" });
-    showToast("Test global demandé.");
-    await loadAll();
-  } catch (error) {
-    showError(error);
-  }
-});
-els.searchForm.addEventListener("submit", runSearch);
-[els.indexerSearch, els.indexerState, els.indexerProtocol, els.indexerTag, els.indexerSort].forEach((element) => element.addEventListener("input", renderIndexers));
-els.resetIndexers.addEventListener("click", () => {
-  els.indexerSearch.value = "";
-  els.indexerState.value = "all";
-  els.indexerProtocol.value = "all";
-  els.indexerTag.value = "all";
-  els.indexerSort.value = "name";
-  renderIndexers();
-});
-[els.resultSearch, els.resultIndexer, els.resultProtocol, els.resultCategory, els.resultMaxSize, els.resultSort].forEach((element) => element.addEventListener("input", renderResults));
-els.releaseIndexerSearch.addEventListener("input", renderReleaseIndexers);
-els.selectAllIndexers.addEventListener("click", () => {
-  [...els.releaseIndexers.options].forEach((option) => {
-    option.selected = true;
+function handleTabKeydown(event) {
+  const currentIndex = els.tabs.findIndex((tab) => tab === event.currentTarget);
+  if (currentIndex < 0) return;
+  const keys = {
+    ArrowRight: (currentIndex + 1) % els.tabs.length,
+    ArrowLeft: (currentIndex - 1 + els.tabs.length) % els.tabs.length,
+    Home: 0,
+    End: els.tabs.length - 1,
+  };
+  if (!(event.key in keys)) return;
+  event.preventDefault();
+  const next = els.tabs[keys[event.key]];
+  setView(next.dataset.view, { focus: true });
+}
+
+function bindSectionRetries() {
+  document.querySelectorAll("[data-section-retry]").forEach((node) => {
+    node.addEventListener("click", async () => {
+      await loadAll();
+    });
   });
-});
-els.clearIndexers.addEventListener("click", () => {
-  [...els.releaseIndexers.options].forEach((option) => {
-    option.selected = false;
+}
+
+function bindEvents() {
+  document.addEventListener("click", (event) => {
+    const buttonNode = event.target.closest("button");
+    if (!buttonNode) return;
+    if (buttonNode.dataset.view) setView(buttonNode.dataset.view, { focus: true });
+    if (buttonNode.dataset.action === "test-indexer") testIndexer(buttonNode.dataset.id);
+    if (buttonNode.dataset.action === "toggle-indexer") toggleIndexer(buttonNode);
+    if (buttonNode.dataset.action === "grab") grabRelease(buttonNode);
   });
-});
-window.addEventListener?.("popstate", () => {
-  applyUrlState();
-  setView(state.activeView);
-});
+  els.tabs.forEach((tab) => tab.addEventListener("keydown", handleTabKeydown));
+  els.refreshButton.addEventListener("click", loadAll);
+  els.retryButton.addEventListener("click", loadAll);
+  els.testAllButton.addEventListener("click", async () => {
+    const ok = await confirmAction("Tester tous les indexers", "Cette action interroge tous les indexers configures.");
+    if (!ok) return;
+    try {
+      await api(route("/api/indexers/test-all"), { method: "POST", body: "{}" });
+      showToast("Test global demande.");
+      await loadAll();
+    } catch (error) {
+      showError(error);
+    }
+  });
+  els.searchForm.addEventListener("submit", runSearch);
+  [els.indexerSearch, els.indexerState, els.indexerProtocol, els.indexerTag, els.indexerSort].forEach((node) => node.addEventListener("input", renderIndexers));
+  els.resetIndexers.addEventListener("click", () => {
+    els.indexerSearch.value = "";
+    els.indexerState.value = "all";
+    els.indexerProtocol.value = "all";
+    els.indexerTag.value = "all";
+    els.indexerSort.value = "name";
+    renderIndexers();
+  });
+  [els.resultSearch, els.resultIndexer, els.resultProtocol, els.resultCategory, els.resultMaxSize, els.resultSort].forEach((node) => node.addEventListener("input", renderResults));
+  els.releaseIndexerSearch.addEventListener("input", renderReleaseIndexers);
+  els.selectAllIndexers.addEventListener("click", () => {
+    [...els.releaseIndexers.options].forEach((option) => {
+      option.selected = true;
+    });
+  });
+  els.clearIndexers.addEventListener("click", () => {
+    [...els.releaseIndexers.options].forEach((option) => {
+      option.selected = false;
+    });
+  });
+  window.addEventListener?.("popstate", () => {
+    applyUrlState();
+    setView(state.activeView, { replace: false });
+  });
+  bindSectionRetries();
+}
 
 async function init() {
+  configureLinks();
   renderReleaseCategories();
+  bindEvents();
   applyUrlState();
-  setView(state.activeView);
+  setView(state.activeView, { replace: false });
   await refreshSession();
   await loadAll();
-  const url = currentUrl();
-  if (url.searchParams.get("test") === "all") {
-    await api("api/indexers/test-all", { method: "POST", body: "{}" });
-    showToast("Test global demandé.");
-    await loadAll();
+  const confirmActionName = currentUrl().searchParams.get("confirm");
+  if (confirmActionName === "test-all") {
+    state.activeView = "indexers";
+    setView("indexers", { replace: false });
+    showToast("Confirmation requise avant le test global.");
+    els.testAllButton.focus();
   }
 }
 
