@@ -39,6 +39,7 @@ const state = {
 const els = {
   homeView: document.querySelector("#homeView"),
   torrentsView: document.querySelector("#torrentsView"),
+  homeTitle: document.querySelector("#homeTitle"),
   homeSummary: document.querySelector("#homeSummary"),
   criticalAlerts: document.querySelector("#criticalAlerts"),
   quickActions: document.querySelector("#quickActions"),
