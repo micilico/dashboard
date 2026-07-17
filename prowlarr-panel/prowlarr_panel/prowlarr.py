@@ -1,5 +1,7 @@
 import logging
 import re
+import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -37,6 +39,9 @@ class ProwlarrConfig:
     url: str
     api_key: str
     timeout_seconds: float = 8.0
+    torrent_panel_internal_url: str = ""
+    torrent_panel_internal_token: str = ""
+    release_cache_ttl_seconds: int = 900
 
 
 def clean_text(value: Any) -> str:
@@ -121,6 +126,16 @@ class ProwlarrClient:
                 "Accept": "application/json",
             },
         )
+        self._torrent_client = httpx.AsyncClient(
+            base_url=config.torrent_panel_internal_url.rstrip("/"),
+            timeout=httpx.Timeout(config.timeout_seconds),
+            headers={
+                "User-Agent": "prowlarr-panel/1.0",
+                "Accept": "application/json",
+                "X-Torrent-Panel-Internal-Token": config.torrent_panel_internal_token,
+            },
+        )
+        self._release_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._capabilities: dict[str, Any] = {
             "detected": False,
             "version": None,
@@ -136,6 +151,7 @@ class ProwlarrClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+        await self._torrent_client.aclose()
 
     def _request_error(self, exc: httpx.RequestError) -> ProwlarrError:
         host = urlparse(self._config.url).hostname or ""
@@ -244,7 +260,8 @@ class ProwlarrClient:
             "indexerTestAll": f"{self._api_root}/indexer/testall",
             "search": f"{self._api_root}/search",
             "searchRelease": f"{self._api_root}/search/release",
-            "download": f"{self._api_root}/download",
+            "downloadClient": f"{self._api_root}/downloadclient",
+            "indexerDownload": f"{self._api_root}/indexer/1/download",
             "application": f"{self._api_root}/applications",
             "health": f"{self._api_root}/health",
             "history": f"{self._api_root}/history",
@@ -259,7 +276,7 @@ class ProwlarrClient:
                 "Les endpoints sont validés au démarrage contre l'instance réelle.",
                 "Les URLs privées, passkeys, tokens et champs de configuration sensibles sont supprimés des réponses.",
                 "L'activation/désactivation est proposée seulement si la mise à jour d'indexer est acceptée par l'API.",
-                "L'envoi vers qBittorrent utilise l'action native de téléchargement Prowlarr quand elle est disponible.",
+                "L'envoi vers qBittorrent passe par une API interne Torrent Panel protégée par token.",
             ],
             "lastDiscoveryAt": now_iso(),
         }
@@ -353,7 +370,7 @@ class ProwlarrClient:
                 raise
             logger.info("Prowlarr POST search unavailable or rejected, trying GET search fallback")
             payload = await self._json("GET", f"{self._api_root}/search", params=self._search_get_params(query, categories, indexer_ids))
-        releases = [self._map_release(item) for item in as_list(payload)]
+        releases = [self._cache_and_map_release(item) for item in as_list(payload)]
         return {"results": releases, "partialFailures": []}
 
     def _search_get_params(self, query: str, categories: list[int], indexer_ids: list[int]) -> list[tuple[str, str]]:
@@ -364,13 +381,101 @@ class ProwlarrClient:
             params.extend(("indexerIds", str(item)) for item in indexer_ids)
         return params
 
-    async def grab(self, guid: str, indexer_id: int | None) -> dict[str, Any]:
-        payload: dict[str, Any] = {"guid": guid}
-        if indexer_id is not None:
-            payload["indexerId"] = indexer_id
-        response = await self._request("POST", f"{self._api_root}/download", json=payload, acceptable={200, 201, 202})
-        body = response.json() if response.content else {}
-        return {"status": "sent", "release": scrub(body)}
+    async def grab(self, release_id: str) -> dict[str, Any]:
+        release = self._release_from_cache(release_id)
+        download_url = self._release_download_url(release)
+        title = clean_text(first_present(release, "title", "releaseTitle", default="Release"))
+        await self._send_to_torrent_panel(download_url, title=title)
+        return {"status": "sent", "release": {"title": title}}
+
+    def _cache_and_map_release(self, item: dict[str, Any]) -> dict[str, Any]:
+        self._cleanup_release_cache()
+        release_id = secrets.token_urlsafe(24)
+        self._release_cache[release_id] = (time.monotonic(), item)
+        return self._map_release(item, release_id=release_id)
+
+    def _cleanup_release_cache(self) -> None:
+        now = time.monotonic()
+        ttl = max(60, self._config.release_cache_ttl_seconds)
+        for release_id, (created_at, _release) in list(self._release_cache.items()):
+            if now - created_at > ttl:
+                del self._release_cache[release_id]
+        if len(self._release_cache) <= 500:
+            return
+        for release_id, _entry in sorted(self._release_cache.items(), key=lambda item: item[1][0])[: len(self._release_cache) - 500]:
+            del self._release_cache[release_id]
+
+    def _release_from_cache(self, release_id: str) -> dict[str, Any]:
+        self._cleanup_release_cache()
+        entry = self._release_cache.get(release_id)
+        if not entry:
+            raise ProwlarrError(
+                404,
+                "Release expirée ou introuvable.",
+                code="release_expired",
+                recovery="Relancer la recherche",
+            )
+        return entry[1]
+
+    def _release_download_url(self, release: dict[str, Any]) -> str:
+        for key in ("downloadUrl", "downloadTorrentUrl", "magnetUrl", "magnet", "link"):
+            value = release.get(key)
+            if isinstance(value, str) and (value.startswith("magnet:?") or value.startswith("http://") or value.startswith("https://")):
+                return value
+        raise ProwlarrError(
+            502,
+            "Prowlarr n'a pas fourni d'URL de téléchargement pour cette release.",
+            code="release_download_unavailable",
+            recovery="Essayer une autre release ou ouvrir Prowlarr",
+        )
+
+    async def _send_to_torrent_panel(self, download_url: str, *, title: str) -> None:
+        if not self._config.torrent_panel_internal_url or not self._config.torrent_panel_internal_token:
+            raise ProwlarrError(
+                500,
+                "Lien interne vers Torrent Panel non configuré.",
+                code="torrent_panel_internal_missing",
+                recovery="Vérifier la configuration",
+            )
+        try:
+            response = await self._torrent_client.post(
+                "/api/internal/torrents/add-url",
+                json={"url": download_url, "title": title},
+            )
+        except httpx.TimeoutException as exc:
+            logger.warning("Torrent Panel internal request timed out")
+            raise ProwlarrError(
+                504,
+                "Torrent Panel ne répond pas assez vite.",
+                code="torrent_panel_timeout",
+                recovery="Réessayer",
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.warning("Torrent Panel internal request error: %s", exc.__class__.__name__)
+            raise ProwlarrError(
+                502,
+                "Torrent Panel interne est injoignable.",
+                code="torrent_panel_unreachable",
+                recovery="Vérifier les conteneurs",
+            ) from exc
+
+        if response.status_code in {401, 403}:
+            logger.warning("Torrent Panel internal API refused authentication")
+            raise ProwlarrError(
+                502,
+                "Torrent Panel interne a refusé l'authentification.",
+                code="torrent_panel_internal_forbidden",
+                recovery="Vérifier le token interne",
+            )
+        if response.status_code >= 400:
+            message = response_error_message(response)
+            logger.warning("Torrent Panel internal API returned %s", response.status_code)
+            raise ProwlarrError(
+                502,
+                message or "qBittorrent a refusé l'ajout de la release.",
+                code="torrent_panel_add_refused",
+                recovery="Vérifier qBittorrent",
+            )
 
     def _map_indexer(self, item: dict[str, Any]) -> dict[str, Any]:
         fields = item.get("fields") if isinstance(item.get("fields"), list) else []
@@ -425,13 +530,11 @@ class ProwlarrClient:
             "title": clean_text(first_present(item, "sourceTitle", "title", default="")),
         }
 
-    def _map_release(self, item: dict[str, Any]) -> dict[str, Any]:
+    def _map_release(self, item: dict[str, Any], *, release_id: str | None = None) -> dict[str, Any]:
         indexer_id = first_present(item, "indexerId", "indexerID", default=None)
         guid = clean_text(first_present(item, "guid", "downloadGuid", "infoHash", default=""))
-        opaque_id = f"{indexer_id or 'any'}:{guid}"
         return {
-            "id": opaque_id,
-            "guid": guid,
+            "id": release_id or f"{indexer_id or 'any'}:{guid}",
             "indexerId": indexer_id,
             "title": clean_text(first_present(item, "title", "releaseTitle", default="Sans titre")),
             "indexer": clean_text(first_present(item, "indexer", "indexerName", default="")),

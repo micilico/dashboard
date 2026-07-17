@@ -1,4 +1,5 @@
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -60,8 +61,8 @@ class FakeProwlarr:
         self.calls.append(("search", query, categories, indexer_ids))
         return {"results": [], "partialFailures": []}
 
-    async def grab(self, guid, indexer_id):
-        self.calls.append(("grab", guid, indexer_id))
+    async def grab(self, release_id):
+        self.calls.append(("grab", release_id))
         return {"status": "sent", "release": {}}
 
 
@@ -113,9 +114,9 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     def test_grab_sends_only_opaque_release_fields(self):
-        response = self.post_action("/prowlarr-panel/api/grab", {"guid": "opaque-guid", "indexerId": 7, "title": "Example"})
+        response = self.post_action("/prowlarr-panel/api/grab", {"releaseId": "opaque-release-id-123", "title": "Example"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(app.state.prowlarr.calls[-1], ("grab", "opaque-guid", 7))
+        self.assertEqual(app.state.prowlarr.calls[-1], ("grab", "opaque-release-id-123"))
 
     def test_expired_csrf_token_is_rejected(self):
         token = self.csrf
@@ -243,6 +244,7 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.client._json = fake_json
         result = await self.client.search("ubuntu", [2000], [7])
         self.assertEqual(len(result["results"]), 1)
+        self.assertNotEqual(result["results"][0]["id"], "7:opaque")
         self.assertEqual(calls[-1][0:2], ("POST", "/api/v1/search"))
         self.assertEqual(calls[-1][2]["json"]["query"], "ubuntu")
         self.assertEqual(calls[-1][2]["json"]["type"], "search")
@@ -270,6 +272,51 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[1][0:2], ("GET", "/api/v1/search"))
         self.assertIn(("categories", "2000"), calls[1][2]["params"])
         self.assertIn(("indexerIds", "7"), calls[1][2]["params"])
+
+    async def test_grab_uses_cached_release_download_url_and_torrent_panel(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(
+                url="http://127.0.0.1:1/prowlarr",
+                api_key="secret",
+                torrent_panel_internal_url="http://torrent-panel:3110",
+                torrent_panel_internal_token="internal",
+            )
+        )
+        release_id = "opaque-release-id"
+        calls = []
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"status": "added"}
+
+        async def fake_post(path, **kwargs):
+            calls.append((path, kwargs))
+            return FakeResponse()
+
+        self.client._torrent_client.post = fake_post
+        self.client._release_cache[release_id] = (
+            time.monotonic(),
+            {"title": "Ubuntu", "downloadUrl": "https://tracker.test/download?passkey=secret"},
+        )
+        grab = await self.client.grab(release_id)
+        self.assertEqual(grab["status"], "sent")
+        self.assertEqual(calls[-1][0], "/api/internal/torrents/add-url")
+        self.assertEqual(calls[-1][1]["json"]["url"], "https://tracker.test/download?passkey=secret")
+
+    async def test_grab_requires_cached_release(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(
+                url="http://127.0.0.1:1/prowlarr",
+                api_key="secret",
+                torrent_panel_internal_url="http://torrent-panel:3110",
+                torrent_panel_internal_token="internal",
+            )
+        )
+        with self.assertRaises(ProwlarrError) as context:
+            await self.client.grab("missing-release-id")
+        self.assertEqual(context.exception.code, "release_expired")
 
 
 if __name__ == "__main__":

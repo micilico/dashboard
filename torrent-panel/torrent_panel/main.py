@@ -37,6 +37,7 @@ ALLOWED_SAVE_PATHS = {
     for item in os.getenv("TORRENT_PANEL_ALLOWED_SAVE_PATHS", "").split(",")
     if item.strip()
 }
+INTERNAL_TOKEN = os.getenv("TORRENT_PANEL_INTERNAL_TOKEN", "")
 
 
 class TorrentAction(BaseModel):
@@ -74,6 +75,15 @@ class AddMagnet(BaseModel):
         collected.extend(self.magnets)
         self.magnets = [item.strip() for item in collected if item.strip()]
         return self
+
+
+class AddInternalUrl(BaseModel):
+    url: str = Field(..., min_length=10, max_length=65535)
+    title: str = Field(default="", max_length=500)
+    category: str = Field(default="", max_length=80)
+    tags: str = Field(default="", max_length=200)
+    paused: bool = False
+    savePath: str = Field(default="", max_length=500)
 
 
 class RateLimiter:
@@ -198,6 +208,19 @@ def require_action_guard(
 
 def qbit_error_response(exc: QbitError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, exc.public_message, exc.recovery))
+
+
+def require_internal_token(x_torrent_panel_internal_token: str | None = Header(default=None)) -> None:
+    if not INTERNAL_TOKEN:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("internal_api_disabled", "API interne Torrent Panel non configurée.", "Vérifier la configuration"),
+        )
+    if not x_torrent_panel_internal_token or not secrets.compare_digest(x_torrent_panel_internal_token, INTERNAL_TOKEN):
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("internal_api_forbidden", "API interne Torrent Panel refusée.", "Vérifier la configuration"),
+        )
 
 
 def cleanup_csrf_tokens(app_instance: FastAPI, now: float | None = None) -> None:
@@ -346,6 +369,33 @@ async def add_torrent(payload: AddMagnet) -> dict[str, object]:
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
     return {"status": "added", "accepted": len(accepted), "rejected": rejected}
+
+
+@api_router.post("/internal/torrents/add-url", dependencies=[Depends(require_internal_token)])
+async def add_internal_url(payload: AddInternalUrl) -> dict[str, object]:
+    url = payload.url.strip()
+    if not (url.startswith("magnet:?") or url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail("url_invalid", "URL de release invalide.", "Réessayer"),
+        )
+    if payload.savePath and payload.savePath not in ALLOWED_SAVE_PATHS:
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail("save_path_refused", "Chemin de sauvegarde non autorisé.", "Réessayer"),
+        )
+
+    try:
+        await app.state.qbit.add_url(
+            url,
+            category=payload.category.strip(),
+            tags=payload.tags.strip(),
+            paused=payload.paused,
+            save_path=payload.savePath.strip(),
+        )
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "added", "title": payload.title}
 
 
 app.include_router(api_router, prefix="/api")

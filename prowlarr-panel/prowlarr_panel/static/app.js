@@ -261,7 +261,7 @@ function renderResults() {
       <td class="mono">${text(item.leechers, "0")}</td>
       <td>${text(item.protocol)}</td>
       <td>${item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}`}</td>
-      <td><button class="button primary" type="button" data-action="grab" data-guid="${item.guid}" data-indexer-id="${item.indexerId || ""}" data-title="${item.title}" data-busy-key="grab:${item.id}" data-label="Envoyer">Envoyer</button></td>
+      <td><button class="button primary" type="button" data-action="grab" data-release-id="${item.id}" data-title="${item.title}" data-busy-key="grab:${item.id}" data-label="Envoyer">Envoyer</button></td>
     </tr>`).join("");
 }
 
@@ -404,8 +404,7 @@ async function grabRelease(button) {
     await api("api/grab", {
       method: "POST",
       body: JSON.stringify({
-        guid: button.dataset.guid,
-        indexerId: button.dataset.indexerId ? Number(button.dataset.indexerId) : null,
+        releaseId: button.dataset.releaseId,
         title: button.dataset.title,
       }),
     });

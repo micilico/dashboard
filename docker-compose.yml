@@ -49,3 +49,4 @@ services:
     environment:
       PROWLARR_PANEL_HOST: 0.0.0.0
       PROWLARR_PANEL_PORT: ${PROWLARR_PANEL_PORT:-3120}
+      TORRENT_PANEL_INTERNAL_URL: http://torrent-panel:${TORRENT_PANEL_PORT:-3110}

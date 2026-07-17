@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import torrent_panel.main as main_module  # noqa: E402
 from torrent_panel.main import (  # noqa: E402
     RateLimiter,
     app,
@@ -50,6 +51,9 @@ class FakeQbit:
     async def add_magnet(self, magnet, **kwargs):
         self.calls.append(("add", magnet, kwargs))
 
+    async def add_url(self, url, **kwargs):
+        self.calls.append(("add_url", url, kwargs))
+
     async def ready(self):
         return True
 
@@ -59,9 +63,11 @@ class BackendTests(unittest.TestCase):
         self.original_qbit = app.state.qbit
         self.original_limiter = app.state.action_limiter
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
+        self.original_internal_token = main_module.INTERNAL_TOKEN
         app.state.qbit = FakeQbit()
         app.state.action_limiter = RateLimiter(max_calls=100, period_seconds=60, max_keys=100)
         app.state.csrf_tokens = {}
+        main_module.INTERNAL_TOKEN = "internal-token"
         self.client = TestClient(app)
         session = self.client.get("/torrent-panel/api/session").json()
         self.csrf = session["csrfToken"]
@@ -70,6 +76,7 @@ class BackendTests(unittest.TestCase):
         app.state.qbit = self.original_qbit
         app.state.action_limiter = self.original_limiter
         app.state.csrf_tokens = self.original_csrf_tokens
+        main_module.INTERNAL_TOKEN = self.original_internal_token
 
     def post_action(self, path, payload):
         return self.client.post(
@@ -174,6 +181,23 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(len(body["rejected"]), 1)
         self.assertEqual(app.state.qbit.calls[-1][0], "add")
         self.assertEqual(app.state.qbit.calls[-1][2]["category"], "Films")
+
+    def test_internal_add_url_requires_token(self):
+        response = self.client.post(
+            "/torrent-panel/api/internal/torrents/add-url",
+            json={"url": "https://tracker.test/download?passkey=secret", "title": "Private"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_internal_add_url_sends_private_url_to_qbit_backend_only(self):
+        response = self.client.post(
+            "/torrent-panel/api/internal/torrents/add-url",
+            json={"url": "https://tracker.test/download?passkey=secret", "title": "Private"},
+            headers={"X-Torrent-Panel-Internal-Token": "internal-token"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app.state.qbit.calls[-1][0], "add_url")
+        self.assertEqual(app.state.qbit.calls[-1][1], "https://tracker.test/download?passkey=secret")
 
     def test_rate_limiter_is_bounded(self):
         limiter = RateLimiter(max_calls=1, period_seconds=60, max_keys=2)
