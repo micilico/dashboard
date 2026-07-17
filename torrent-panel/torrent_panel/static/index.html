@@ -15,8 +15,14 @@
           <p class="eyebrow">qBittorrent</p>
           <h1>Torrent Panel</h1>
         </div>
+        <nav class="nav" aria-label="Navigation principale">
+          <a href="/">Accueil</a>
+          <a aria-current="page" href="/torrent-panel/">Torrents</a>
+          <a href="/prowlarr-panel/">Prowlarr</a>
+        </nav>
         <div class="topbar-actions">
           <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
+          <button id="openAddPanelButton" type="button" class="button primary">Ajouter un torrent</button>
           <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
         </div>
       </header>
@@ -58,22 +64,11 @@
             <h2 id="list-title">Torrents</h2>
             <p id="summary">Chargement de la liste...</p>
           </div>
-          <div class="refresh-controls">
-            <label class="check-line">
-              <input id="autoRefreshToggle" type="checkbox">
-              Auto
-            </label>
-            <label>
-              Intervalle
-              <select id="refreshInterval">
-                <option value="6000">6 s</option>
-                <option value="10000">10 s</option>
-                <option value="30000">30 s</option>
-                <option value="60000">60 s</option>
-              </select>
-            </label>
-          </div>
+          <button id="clearActiveFilters" type="button" class="button secondary" hidden>Effacer les filtres</button>
         </div>
+
+        <div class="quick-filters" id="quickFilters" aria-label="Filtres rapides torrents"></div>
+        <p id="filterNotice" class="filter-notice" aria-live="polite"></p>
 
         <div class="filters" aria-label="Recherche et filtres">
           <label>
@@ -98,6 +93,25 @@
           </label>
           <button id="resetFilters" type="button" class="button secondary">Réinitialiser</button>
         </div>
+
+        <details class="secondary-panel">
+          <summary>Actualisation et détails</summary>
+          <div class="secondary-panel-body refresh-controls">
+            <label class="check-line">
+              <input id="autoRefreshToggle" type="checkbox">
+              Actualisation automatique
+            </label>
+            <label>
+              Intervalle
+              <select id="refreshInterval">
+                <option value="6000">6 s</option>
+                <option value="10000">10 s</option>
+                <option value="30000">30 s</option>
+                <option value="60000">60 s</option>
+              </select>
+            </label>
+          </div>
+        </details>
 
         <div id="bulkBar" class="bulk-bar" hidden>
           <strong id="bulkCount">0 sélectionné</strong>

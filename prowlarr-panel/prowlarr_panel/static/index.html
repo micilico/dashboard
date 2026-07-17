@@ -33,7 +33,7 @@
           <button class="tab" type="button" data-view="indexers" aria-selected="true">Indexers</button>
           <button class="tab" type="button" data-view="search" aria-selected="false">Recherche</button>
           <button class="tab" type="button" data-view="applications" aria-selected="false">Applications</button>
-          <button class="tab" type="button" data-view="health" aria-selected="false">Santé</button>
+          <button class="tab" id="healthTab" type="button" data-view="health" aria-selected="false">Santé</button>
         </div>
 
         <div id="alert" class="alert" role="alert" hidden>
@@ -86,8 +86,23 @@
           </div>
           <form id="searchForm" class="search-form">
             <label>Requête <input id="releaseQuery" name="query" type="search" autocomplete="off" required minlength="2"></label>
-            <label>Catégories <input id="releaseCategories" inputmode="numeric" placeholder="2000, 5000"></label>
-            <label>Indexers <select id="releaseIndexers" multiple size="4"></select></label>
+            <fieldset class="category-picker">
+              <legend>Catégories</legend>
+              <div id="releaseCategoryChoices" class="category-choices"></div>
+              <details class="advanced-inline">
+                <summary>Catégories avancées</summary>
+                <label>Identifiants bruts <input id="releaseCategories" inputmode="numeric" placeholder="2000, 5000"></label>
+              </details>
+            </fieldset>
+            <fieldset class="indexer-picker">
+              <legend>Indexers</legend>
+              <label>Filtrer la liste <input id="releaseIndexerSearch" type="search" autocomplete="off" placeholder="Nom d’indexer"></label>
+              <div class="picker-actions">
+                <button id="selectAllIndexers" type="button" class="button secondary">Tout sélectionner</button>
+                <button id="clearIndexers" type="button" class="button secondary">Tout désélectionner</button>
+              </div>
+              <select id="releaseIndexers" multiple size="6"></select>
+            </fieldset>
             <button id="searchButton" type="submit" class="button primary">Rechercher</button>
           </form>
           <div class="filters" aria-label="Filtres résultats">

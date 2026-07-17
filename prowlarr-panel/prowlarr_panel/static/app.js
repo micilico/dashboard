@@ -11,6 +11,14 @@ const state = {
   searchAbort: null,
 };
 
+const SEARCH_CATEGORY_PRESETS = [
+  { label: "Films", value: 2000 },
+  { label: "Séries", value: 5000 },
+  { label: "Musique", value: 3000 },
+  { label: "Livres", value: 7000 },
+  { label: "Autres", value: 8000 },
+];
+
 const els = {
   refreshStatus: document.querySelector("#refreshStatus"),
   refreshButton: document.querySelector("#refreshButton"),
@@ -38,7 +46,11 @@ const els = {
   searchForm: document.querySelector("#searchForm"),
   releaseQuery: document.querySelector("#releaseQuery"),
   releaseCategories: document.querySelector("#releaseCategories"),
+  releaseCategoryChoices: document.querySelector("#releaseCategoryChoices"),
+  releaseIndexerSearch: document.querySelector("#releaseIndexerSearch"),
   releaseIndexers: document.querySelector("#releaseIndexers"),
+  selectAllIndexers: document.querySelector("#selectAllIndexers"),
+  clearIndexers: document.querySelector("#clearIndexers"),
   searchButton: document.querySelector("#searchButton"),
   searchSummary: document.querySelector("#searchSummary"),
   resultRows: document.querySelector("#resultRows"),
@@ -54,6 +66,7 @@ const els = {
   alertsList: document.querySelector("#alertsList"),
   historyList: document.querySelector("#historyList"),
   healthSummary: document.querySelector("#healthSummary"),
+  healthTab: document.querySelector("#healthTab"),
   confirmDialog: document.querySelector("#confirmDialog"),
   confirmTitle: document.querySelector("#confirmTitle"),
   confirmText: document.querySelector("#confirmText"),
@@ -142,10 +155,7 @@ function fillSelect(select, entries, current = "all") {
 function renderSummary(overview) {
   const stats = [
     ["Connexion", overview.connection === "ready" ? "OK" : "Erreur"],
-    ["Version", overview.version],
-    ["Indexers", overview.indexersTotal],
     ["Actifs", overview.indexersActive],
-    ["Désactivés", overview.indexersDisabled],
     ["En erreur", overview.indexersError],
     ["Apps", overview.applicationsTotal],
     ["Alertes", overview.systemWarnings],
@@ -193,20 +203,20 @@ function renderIndexers() {
   const rows = filteredIndexers();
   els.indexersSummary.textContent = `${rows.length} affiché(s) sur ${state.indexers.length}.`;
   els.indexersEmpty.hidden = rows.length > 0;
-  els.releaseIndexers.innerHTML = state.indexers.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
+  renderReleaseIndexers();
   els.indexerRows.innerHTML = rows.map((item) => {
     const health = item.health === "error" ? "error" : item.enabled ? "ok" : "disabled";
     const toggleLabel = item.enabled ? "Désactiver" : "Activer";
     return `
       <tr>
-        <td class="name-cell">${text(item.name)}</td>
-        <td>${text(item.protocol)}</td>
-        <td><span class="badge ${health}">${indexerHealthLabel(item)}</span>${item.error ? `<div class="muted">${text(item.error)}</div>` : ""}</td>
-        <td class="mono">${text(item.priority, "0")}</td>
-        <td>${(item.tags || []).map((tag) => `<span class="badge">${tag}</span>`).join(" ") || "—"}</td>
-        <td>${Array.isArray(item.categories) ? item.categories.length : "—"}</td>
-        <td>${text(item.lastTest)}</td>
-        <td>
+        <td class="name-cell" data-label="Nom">${text(item.name)}</td>
+        <td data-label="Protocole">${text(item.protocol)}</td>
+        <td data-label="État"><span class="badge ${health}">${indexerHealthLabel(item)}</span>${item.error ? `<div class="muted">${text(item.error)}</div>` : ""}</td>
+        <td class="mono" data-label="Priorité">${text(item.priority, "0")}</td>
+        <td data-label="Tags">${(item.tags || []).map((tag) => `<span class="badge">${tag}</span>`).join(" ") || "—"}</td>
+        <td data-label="Catégories">${Array.isArray(item.categories) ? item.categories.length : "—"}</td>
+        <td data-label="Dernier test">${text(item.lastTest)}</td>
+        <td data-label="Actions">
           <div class="action-row">
             <button class="button secondary" type="button" data-action="test-indexer" data-id="${item.id}" data-busy-key="test:${item.id}" data-label="Tester">Tester</button>
             <button class="button ${item.enabled ? "danger" : "secondary"}" type="button" data-action="toggle-indexer" data-id="${item.id}" data-enabled="${item.enabled}" data-name="${item.name}" data-busy-key="toggle:${item.id}" data-label="${toggleLabel}">${toggleLabel}</button>
@@ -214,6 +224,33 @@ function renderIndexers() {
         </td>
       </tr>`;
   }).join("");
+}
+
+function renderReleaseCategories() {
+  els.releaseCategoryChoices.innerHTML = SEARCH_CATEGORY_PRESETS.map((item) => `
+    <label class="choice-pill">
+      <input type="checkbox" value="${item.value}">
+      <span>${item.label}</span>
+    </label>
+  `).join("");
+}
+
+function selectedCategoryIds() {
+  const presetValues = [...els.releaseCategoryChoices.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((input) => Number(input.value))
+    .filter(Number.isInteger);
+  const advancedValues = els.releaseCategories.value.split(",").map((item) => Number(item.trim())).filter((value) => Number.isInteger(value) && value > 0);
+  return [...new Set([...presetValues, ...advancedValues])];
+}
+
+function renderReleaseIndexers() {
+  const selected = new Set([...els.releaseIndexers.selectedOptions].map((option) => option.value));
+  const query = els.releaseIndexerSearch.value.trim().toLowerCase();
+  const indexers = state.indexers.filter((item) => !query || item.name.toLowerCase().includes(query));
+  els.releaseIndexers.innerHTML = indexers.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
+  [...els.releaseIndexers.options].forEach((option) => {
+    option.selected = selected.has(option.value);
+  });
 }
 
 function filteredResults() {
@@ -252,16 +289,16 @@ function renderResults() {
   els.resultsEmpty.hidden = rows.length > 0;
   els.resultRows.innerHTML = rows.map((item) => `
     <tr>
-      <td class="name-cell">${text(item.title)}</td>
-      <td>${text(item.indexer)}</td>
-      <td>${text(item.category)}</td>
-      <td class="mono">${formatBytes(item.size)}</td>
-      <td>${text(item.age)}</td>
-      <td class="mono">${text(item.seeders, "0")}</td>
-      <td class="mono">${text(item.leechers, "0")}</td>
-      <td>${text(item.protocol)}</td>
-      <td>${item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}`}</td>
-      <td><button class="button primary" type="button" data-action="grab" data-release-id="${item.id}" data-title="${item.title}" data-busy-key="grab:${item.id}" data-label="Envoyer">Envoyer</button></td>
+      <td class="name-cell" data-label="Titre">${text(item.title)}</td>
+      <td data-label="Indexer">${text(item.indexer)}</td>
+      <td data-label="Catégorie">${text(item.category)}</td>
+      <td class="mono" data-label="Taille">${formatBytes(item.size)}</td>
+      <td data-label="Âge">${text(item.age)}</td>
+      <td class="mono" data-label="Seeders">${text(item.seeders, "0")}</td>
+      <td class="mono" data-label="Leechers">${text(item.leechers, "0")}</td>
+      <td data-label="Protocole">${text(item.protocol)}</td>
+      <td data-label="Statut">${item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}`}</td>
+      <td data-label="Action"><button class="button primary" type="button" data-action="grab" data-release-id="${item.id}" data-title="${item.title}" data-busy-key="grab:${item.id}" data-label="Envoyer vers qBittorrent">Envoyer vers qBittorrent</button></td>
     </tr>`).join("");
 }
 
@@ -284,6 +321,7 @@ function renderHealth() {
   els.healthSummary.textContent = `${state.alerts.length} alerte(s), ${state.events.length} événement(s).`;
   els.alertsList.innerHTML = state.alerts.map((item) => `<article class="list-item"><strong>${text(item.source)}</strong><span>${text(item.message)}</span><span class="muted">${text(item.type)} ${text(item.date, "")}</span></article>`).join("") || `<div class="empty">Aucune alerte système.</div>`;
   els.historyList.innerHTML = state.events.map((item) => `<article class="list-item"><strong>${text(item.title, item.eventType)}</strong><span>${text(item.indexer)} ${text(item.result, "")}</span><span class="muted">${text(item.date)}</span></article>`).join("") || `<div class="empty">Aucun événement récent.</div>`;
+  els.healthTab.textContent = state.alerts.length > 0 ? `Santé (${state.alerts.length})` : "Santé";
 }
 
 async function loadAll() {
@@ -376,7 +414,7 @@ async function runSearch(event) {
   event.preventDefault();
   if (state.searchAbort) state.searchAbort.abort();
   state.searchAbort = new AbortController();
-  const categories = els.releaseCategories.value.split(",").map((item) => Number(item.trim())).filter((value) => Number.isInteger(value) && value > 0);
+  const categories = selectedCategoryIds();
   const indexerIds = [...els.releaseIndexers.selectedOptions].map((option) => Number(option.value)).filter(Number.isFinite);
   els.searchButton.disabled = true;
   els.searchButton.textContent = "Recherche...";
@@ -449,5 +487,17 @@ els.resetIndexers.addEventListener("click", () => {
   renderIndexers();
 });
 [els.resultSearch, els.resultIndexer, els.resultProtocol, els.resultCategory, els.resultMaxSize, els.resultSort].forEach((element) => element.addEventListener("input", renderResults));
+els.releaseIndexerSearch.addEventListener("input", renderReleaseIndexers);
+els.selectAllIndexers.addEventListener("click", () => {
+  [...els.releaseIndexers.options].forEach((option) => {
+    option.selected = true;
+  });
+});
+els.clearIndexers.addEventListener("click", () => {
+  [...els.releaseIndexers.options].forEach((option) => {
+    option.selected = false;
+  });
+});
 
+renderReleaseCategories();
 refreshSession().then(loadAll).catch(showError);

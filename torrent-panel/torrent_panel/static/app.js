@@ -8,6 +8,8 @@ const DEFAULT_PREFS = {
   direction: "asc",
   autoRefresh: true,
   refreshIntervalMs: 6000,
+  lastCategory: "",
+  lastTags: "",
 };
 
 const state = {
@@ -37,6 +39,7 @@ const els = {
   empty: document.querySelector("#emptyState"),
   refreshStatus: document.querySelector("#refreshStatus"),
   refreshButton: document.querySelector("#refreshButton"),
+  openAddPanelButton: document.querySelector("#openAddPanelButton"),
   autoRefreshToggle: document.querySelector("#autoRefreshToggle"),
   refreshInterval: document.querySelector("#refreshInterval"),
   searchInput: document.querySelector("#searchInput"),
@@ -45,6 +48,9 @@ const els = {
   tagFilter: document.querySelector("#tagFilter"),
   sortSelect: document.querySelector("#sortSelect"),
   resetFilters: document.querySelector("#resetFilters"),
+  clearActiveFilters: document.querySelector("#clearActiveFilters"),
+  quickFilters: document.querySelector("#quickFilters"),
+  filterNotice: document.querySelector("#filterNotice"),
   selectVisible: document.querySelector("#selectVisible"),
   bulkBar: document.querySelector("#bulkBar"),
   bulkCount: document.querySelector("#bulkCount"),
@@ -74,6 +80,7 @@ const els = {
 
 const STATUS_GROUPS = {
   all: "Tous les états",
+  active: "Actifs",
   error: "Erreurs et blocages",
   downloading: "Téléchargement",
   waiting: "En attente",
@@ -118,6 +125,14 @@ const SORT_LABELS = {
   eta: "ETA",
   addedOn: "Date d'ajout",
 };
+
+const QUICK_FILTERS = [
+  { key: "all", label: "Tous" },
+  { key: "active", label: "Actifs" },
+  { key: "error", label: "Bloqués" },
+  { key: "complete", label: "Terminés" },
+  { key: "paused", label: "En pause" },
+];
 
 const GROUP_ORDER = {
   error: 0,
@@ -265,6 +280,7 @@ function summarize(torrents) {
     total: torrents.length,
     downloading: 0,
     sharing: 0,
+    active: 0,
     complete: 0,
     paused: 0,
     error: 0,
@@ -276,6 +292,7 @@ function summarize(torrents) {
     const meta = stateMeta(torrent);
     if (meta.group === "downloading") result.downloading += 1;
     if (meta.group === "sharing") result.sharing += 1;
+    if (["downloading", "sharing", "waiting", "checking"].includes(meta.group)) result.active += 1;
     if (isComplete(torrent)) result.complete += 1;
     if (meta.group === "paused") result.paused += 1;
     if (meta.group === "error") result.error += 1;
@@ -289,20 +306,21 @@ function summarize(torrents) {
 function renderSummary() {
   const data = summarize(state.torrents);
   const cards = [
-    ["Total", data.total],
-    ["Actifs", data.downloading],
-    ["Partage", data.sharing],
-    ["Terminés", data.complete],
-    ["Pause", data.paused],
-    ["Erreur/bloqué", data.error],
-    ["Descendant", formatSpeed(data.downSpeed)],
-    ["Montant", formatSpeed(data.upSpeed)],
-    ["Restant", formatBytes(data.remaining)],
+    ["active", "Actifs", data.active],
+    ["error", "Bloqués", data.error],
+    [null, "Descendant", formatSpeed(data.downSpeed)],
+    [null, "Montant", formatSpeed(data.upSpeed)],
+    [null, "Restant", formatBytes(data.remaining)],
   ];
   els.summaryGrid.replaceChildren(
-    ...cards.map(([label, value]) => {
-      const item = document.createElement("div");
-      item.className = "stat";
+    ...cards.map(([filterKey, label, value]) => {
+      const item = document.createElement(filterKey ? "button" : "div");
+      item.className = `stat${filterKey ? " stat-button" : ""}`;
+      if (filterKey) {
+        item.type = "button";
+        item.dataset.filter = filterKey;
+        item.setAttribute("aria-pressed", String(matchesQuickFilter(state.prefs.status, filterKey)));
+      }
       const strong = document.createElement("strong");
       strong.textContent = value;
       const span = document.createElement("span");
@@ -334,6 +352,8 @@ function renderControls() {
   els.searchInput.value = state.prefs.search;
   els.autoRefreshToggle.checked = state.prefs.autoRefresh;
   els.refreshInterval.value = String(state.prefs.refreshIntervalMs);
+  if (document.activeElement !== els.categoryInput) els.categoryInput.value = state.prefs.lastCategory || "";
+  if (document.activeElement !== els.tagsInput) els.tagsInput.value = state.prefs.lastTags || "";
   fillSelect(els.statusFilter, Object.entries(STATUS_GROUPS), state.prefs.status);
   fillSelect(els.categoryFilter, [["all", "Toutes"], ...uniqueValues((t) => [String(t.category || "").trim()]).map((v) => [v, v])], state.prefs.category);
   fillSelect(els.tagFilter, [["all", "Tous"], ...uniqueValues((t) => normalizeTags(t.tags)).map((v) => [v, v])], state.prefs.tag);
@@ -346,6 +366,47 @@ function renderControls() {
     }),
   );
   els.sortSelect.value = state.prefs.sort;
+  renderQuickFilters();
+  renderFilterNotice();
+}
+
+function matchesQuickFilter(status, quickKey) {
+  if (quickKey === "all") return status === "all";
+  if (quickKey === "active") return ["downloading", "waiting", "checking", "sharing"].includes(status);
+  return status === quickKey;
+}
+
+function renderQuickFilters() {
+  els.quickFilters.replaceChildren(
+    ...QUICK_FILTERS.map((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `button ${matchesQuickFilter(state.prefs.status, item.key) ? "primary" : "secondary"}`;
+      button.dataset.quickFilter = item.key;
+      button.textContent = item.label;
+      button.setAttribute("aria-pressed", String(matchesQuickFilter(state.prefs.status, item.key)));
+      return button;
+    }),
+  );
+}
+
+function activeFilterLabels() {
+  const labels = [];
+  if (state.prefs.status !== "all") {
+    const quick = QUICK_FILTERS.find((item) => matchesQuickFilter(state.prefs.status, item.key));
+    labels.push(`État : ${quick?.label || STATUS_GROUPS[state.prefs.status] || state.prefs.status}`);
+  }
+  if (state.prefs.search.trim()) labels.push(`Recherche : ${state.prefs.search.trim()}`);
+  if (state.prefs.category !== "all") labels.push(`Catégorie : ${state.prefs.category}`);
+  if (state.prefs.tag !== "all") labels.push(`Tag : ${state.prefs.tag}`);
+  return labels;
+}
+
+function renderFilterNotice() {
+  const labels = activeFilterLabels();
+  const hasFilters = labels.length > 0;
+  els.filterNotice.textContent = hasFilters ? `Filtres actifs : ${labels.join(" · ")}` : "Aucun filtre actif.";
+  els.clearActiveFilters.hidden = !hasFilters;
 }
 
 function filteredTorrents() {
@@ -354,12 +415,19 @@ function filteredTorrents() {
     const meta = stateMeta(torrent);
     if (search && !String(torrent.name || "").toLocaleLowerCase("fr").includes(search)) return false;
     if (state.prefs.status === "complete" && !isComplete(torrent)) return false;
-    if (state.prefs.status !== "all" && state.prefs.status !== "complete" && meta.group !== state.prefs.status) return false;
+    if (state.prefs.status === "active" && !["downloading", "waiting", "checking", "sharing"].includes(meta.group)) return false;
+    if (!["all", "complete", "active"].includes(state.prefs.status) && meta.group !== state.prefs.status) return false;
     if (state.prefs.category !== "all" && String(torrent.category || "") !== state.prefs.category) return false;
     if (state.prefs.tag !== "all" && !normalizeTags(torrent.tags).includes(state.prefs.tag)) return false;
     return true;
   });
   return sortTorrents(filtered);
+}
+
+function setStatusFromQuickFilter(filterKey) {
+  state.prefs.status = filterKey;
+  savePrefs();
+  render();
 }
 
 function sortValue(torrent, key) {
@@ -749,6 +817,9 @@ async function submitMagnets(event) {
       }),
     });
     const rejected = Array.isArray(payload.rejected) ? payload.rejected : [];
+    state.prefs.lastCategory = els.categoryInput.value.trim();
+    state.prefs.lastTags = els.tagsInput.value.trim();
+    savePrefs();
     els.magnetMessage.textContent = `${payload.accepted || 0} accepté${payload.accepted > 1 ? "s" : ""}, ${rejected.length} refusé${rejected.length > 1 ? "s" : ""}.`;
     if (payload.accepted) {
       els.magnetInput.value = "";
@@ -780,19 +851,29 @@ function updatePreference(key, value) {
   render();
 }
 
+function resetFilters() {
+  state.prefs = { ...state.prefs, search: "", status: "all", category: "all", tag: "all", sort: "default", direction: "asc" };
+  savePrefs();
+  render();
+}
+
+function openAddPanel() {
+  const addPanel = document.querySelector("#addPanel");
+  if (addPanel) addPanel.open = true;
+  els.magnetInput.focus();
+}
+
 function bindEvents() {
   els.refreshButton.addEventListener("click", () => loadTorrents({ force: true }));
+  els.openAddPanelButton.addEventListener("click", openAddPanel);
   els.retryButton.addEventListener("click", () => loadTorrents({ force: true }));
   els.searchInput.addEventListener("input", () => updatePreference("search", els.searchInput.value));
   els.statusFilter.addEventListener("change", () => updatePreference("status", els.statusFilter.value));
   els.categoryFilter.addEventListener("change", () => updatePreference("category", els.categoryFilter.value));
   els.tagFilter.addEventListener("change", () => updatePreference("tag", els.tagFilter.value));
   els.sortSelect.addEventListener("change", () => updatePreference("sort", els.sortSelect.value));
-  els.resetFilters.addEventListener("click", () => {
-    state.prefs = { ...state.prefs, search: "", status: "all", category: "all", tag: "all", sort: "default", direction: "asc" };
-    savePrefs();
-    render();
-  });
+  els.resetFilters.addEventListener("click", resetFilters);
+  els.clearActiveFilters.addEventListener("click", resetFilters);
   els.autoRefreshToggle.addEventListener("change", () => {
     state.prefs.autoRefresh = els.autoRefreshToggle.checked;
     savePrefs();
@@ -806,6 +887,16 @@ function bindEvents() {
   });
   document.querySelectorAll(".sort-head").forEach((head) => {
     head.addEventListener("click", () => setSort(head.dataset.sort));
+  });
+  els.quickFilters.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-quick-filter]");
+    if (!button) return;
+    setStatusFromQuickFilter(button.dataset.quickFilter);
+  });
+  els.summaryGrid.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-filter]");
+    if (!button) return;
+    setStatusFromQuickFilter(button.dataset.filter);
   });
   els.selectVisible.addEventListener("change", () => {
     const visible = filteredTorrents();
