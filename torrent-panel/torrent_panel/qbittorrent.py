@@ -217,6 +217,19 @@ class QBittorrentClient:
                 raise
             await self._request("POST", "/api/v2/torrents/start", data={"hashes": "|".join(torrent_hashes)})
 
+    async def set_force_start(self, torrent_hash: str, enabled: bool) -> None:
+        await self.set_force_start_many([torrent_hash], enabled)
+
+    async def set_force_start_many(self, torrent_hashes: list[str], enabled: bool) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/setForceStart",
+            data={
+                "hashes": "|".join(torrent_hashes),
+                "value": "true" if enabled else "false",
+            },
+        )
+
     async def delete(self, torrent_hash: str, delete_files: bool) -> None:
         await self.delete_many([torrent_hash], delete_files)
 

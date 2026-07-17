@@ -56,6 +56,10 @@ class DeleteTorrent(TorrentHashesAction):
     deleteFiles: bool = False
 
 
+class ForceStartTorrent(TorrentHashesAction):
+    enabled: bool = True
+
+
 class AddMagnet(BaseModel):
     magnet: str | None = Field(default=None, max_length=65535)
     magnets: list[str] = Field(default_factory=list, max_length=50)
@@ -311,6 +315,16 @@ async def delete_torrent(payload: DeleteTorrent) -> dict[str, object]:
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
     return {"status": "deleted", "count": len(hashes)}
+
+
+@api_router.post("/torrents/force-start", dependencies=[Depends(require_action_guard)])
+async def force_start_torrent(payload: ForceStartTorrent) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.set_force_start_many(hashes, payload.enabled)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "force_start_updated", "enabled": payload.enabled, "count": len(hashes)}
 
 
 @api_router.post("/torrents/add", dependencies=[Depends(require_action_guard)])

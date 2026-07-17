@@ -44,6 +44,9 @@ class FakeQbit:
     async def resume_many(self, hashes):
         self.calls.append(("resume", hashes))
 
+    async def set_force_start_many(self, hashes, enabled):
+        self.calls.append(("force_start", hashes, enabled))
+
     async def delete_many(self, hashes, delete_files):
         self.calls.append(("delete", hashes, delete_files))
 
@@ -155,6 +158,16 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(app.state.qbit.calls[-1], ("delete", [VALID_HASH], True))
 
+    def test_force_start_updates_selected_torrents(self):
+        second_hash = "b" * 40
+        response = self.post_action(
+            "/torrent-panel/api/torrents/force-start",
+            {"hashes": [VALID_HASH, second_hash], "enabled": True},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["enabled"], True)
+        self.assertEqual(app.state.qbit.calls[-1], ("force_start", [VALID_HASH, second_hash], True))
+
     def test_add_multiple_magnets_keeps_rejections(self):
         response = self.post_action(
             "/torrent-panel/api/torrents/add",
@@ -238,6 +251,19 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.client._request = fake_request
         await self.client.resume_many([VALID_HASH, "b" * 40])
         self.assertEqual(calls[-1][2]["hashes"], f"{VALID_HASH}|{'b' * 40}")
+
+    async def test_force_start_sends_enabled_flag(self):
+        self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))
+        calls = []
+
+        async def fake_request(method, path, *, data=None, **kwargs):
+            calls.append((method, path, data))
+            return FakeResponse()
+
+        self.client._request = fake_request
+        await self.client.set_force_start_many([VALID_HASH], True)
+        self.assertEqual(calls[-1][1], "/api/v2/torrents/setForceStart")
+        self.assertEqual(calls[-1][2]["value"], "true")
 
 
 if __name__ == "__main__":

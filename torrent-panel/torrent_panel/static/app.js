@@ -56,6 +56,7 @@ const els = {
   bulkCount: document.querySelector("#bulkCount"),
   bulkPause: document.querySelector("#bulkPause"),
   bulkResume: document.querySelector("#bulkResume"),
+  bulkForceShare: document.querySelector("#bulkForceShare"),
   bulkDelete: document.querySelector("#bulkDelete"),
   addForm: document.querySelector("#addForm"),
   addButton: document.querySelector("#addButton"),
@@ -560,15 +561,22 @@ function renderRow(torrent) {
   const actions = document.createElement("div");
   actions.className = "action-row";
   const isPaused = meta.group === "paused";
+  const isForcedShare = torrent.state === "forcedUP";
+  const canForceShare = isComplete(torrent) || isForcedShare;
   const pauseOrResume = button(isPaused ? "Reprendre" : "Pause", isPaused ? "primary" : "secondary", () => {
     runTorrentAction([hash], isPaused ? "resume" : "pause");
   });
   const detail = button("Détails", "secondary", (event) => openDetails(hash, event.currentTarget));
+  const forceShare = canForceShare
+    ? button(isForcedShare ? "Partage normal" : "Partage forcé", isForcedShare ? "primary" : "secondary", () => {
+      runTorrentAction([hash], "force-start", { enabled: !isForcedShare });
+    })
+    : null;
   const remove = button("Supprimer", "danger", (event) => openDeleteDialog([torrent], event.currentTarget));
-  for (const control of [pauseOrResume, detail, remove]) {
+  for (const control of [pauseOrResume, detail, forceShare, remove].filter(Boolean)) {
     control.disabled = Boolean(busyText);
   }
-  actions.append(pauseOrResume, detail, remove);
+  actions.append(...[pauseOrResume, detail, forceShare, remove].filter(Boolean));
   const inline = document.createElement("div");
   inline.className = "row-status";
   inline.setAttribute("aria-live", "polite");
@@ -657,6 +665,7 @@ function actionText(action) {
   return {
     pause: "Mise en pause…",
     resume: "Reprise…",
+    "force-start": "Mise à jour du partage forcé…",
     delete: "Suppression…",
     add: "Ajout…",
   }[action] || "Action…";
@@ -675,7 +684,15 @@ async function runTorrentAction(hashes, action, options = {}) {
       method: "POST",
       body: JSON.stringify({ hashes, ...options }),
     });
-    showToast(action === "pause" ? "Torrent mis en pause." : action === "resume" ? "Torrent repris." : "Torrent supprimé.");
+    showToast(
+      action === "pause"
+        ? "Torrent mis en pause."
+        : action === "resume"
+          ? "Torrent repris."
+          : action === "force-start"
+            ? (options.enabled ? "Partage forcé activé." : "Partage forcé désactivé.")
+            : "Torrent supprimé.",
+    );
     hashes.forEach((hash) => state.selected.delete(hash));
     await loadTorrents({ silent: true, force: true });
   } catch (error) {
@@ -909,6 +926,20 @@ function bindEvents() {
   });
   els.bulkPause.addEventListener("click", () => runTorrentAction([...state.selected], "pause"));
   els.bulkResume.addEventListener("click", () => runTorrentAction([...state.selected], "resume"));
+  els.bulkForceShare.addEventListener("click", () => {
+    const selectedTorrents = state.torrents.filter((torrent) => state.selected.has(torrent.hash));
+    const eligible = selectedTorrents.filter((torrent) => isComplete(torrent) || torrent.state === "forcedUP");
+    if (!eligible.length) {
+      showToast("Sélectionnez au moins un torrent terminé pour utiliser le partage forcé.");
+      return;
+    }
+    const disableForcedShare = eligible.every((torrent) => torrent.state === "forcedUP");
+    runTorrentAction(
+      eligible.map((torrent) => torrent.hash),
+      "force-start",
+      { enabled: !disableForcedShare },
+    );
+  });
   els.bulkDelete.addEventListener("click", (event) => {
     const selectedTorrents = state.torrents.filter((torrent) => state.selected.has(torrent.hash));
     openDeleteDialog(selectedTorrents, event.currentTarget);
