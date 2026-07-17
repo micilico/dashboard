@@ -3,25 +3,25 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Torrent Panel</title>
-    <link rel="stylesheet" href="./static/app.css?v=20260717-activity-fix">
+    <title>Dashboard · Centre de contrôle</title>
+    <link rel="stylesheet" href="./static/app.css?v=20260717-premium">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
     <main id="content" class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">qBittorrent</p>
-          <h1>Torrent Panel</h1>
+          <p class="eyebrow">Centre de contrôle</p>
+          <h1>Dashboard</h1>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a id="homeNavLink" href="./?view=home">Accueil <span id="navAlertCount" class="nav-count" hidden>0</span></a>
-          <a id="activityNavLink" href="/activity/">Activité</a>
+          <a id="homeNavLink" href="./?view=home">Vue d’ensemble <span id="navAlertCount" class="nav-count" hidden>0</span></a>
           <a id="torrentsNavLink" aria-current="page" href="./?view=torrents">Torrents</a>
           <a id="prowlarrNavLink" href="/prowlarr-panel/">Prowlarr</a>
           <a id="storageNavLink" href="/storage-panel/">Stockage</a>
           <a id="mediaNavLink" href="/media-panel/">Médias</a>
           <a id="healthNavLink" href="/health/">Santé</a>
+          <a id="activityNavLink" href="/activity/">Activité</a>
         </nav>
         <div class="topbar-actions">
           <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
@@ -35,7 +35,7 @@
       <section class="content-panel" id="homeView" aria-labelledby="homeTitle" hidden>
         <div class="panel-head">
           <div>
-            <h2 id="homeTitle">Accueil opérationnel</h2>
+            <h2 id="homeTitle">État du système</h2>
             <p id="homeSummary">Vérification globale des services et alertes critiques.</p>
           </div>
         </div>
@@ -237,6 +237,6 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="./config.js?v=20260717-activity-fix"></script>
-    <script src="./static/app.js?v=20260717-activity-fix" defer></script>
+    <script src="./static/app.js?v=20260717-premium" defer></script>
   </body>
 </html>

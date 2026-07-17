@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Aperçu Dashboard</title>
+    <link rel="stylesheet" href="./static/app.css?v=20260717-premium">
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Aller au contenu</a>
+    <main id="content" class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Centre de contrôle</p>
+          <h1>Dashboard</h1>
+        </div>
+        <nav class="nav" aria-label="Navigation principale">
+          <a aria-current="page" href="#">Vue d’ensemble</a>
+          <a href="#">Torrents</a>
+          <a href="#">Prowlarr</a>
+          <a href="#">Stockage</a>
+          <a href="#">Médias</a>
+          <a href="#">Santé</a>
+          <a href="#">Activité</a>
+        </nav>
+        <div class="topbar-actions">
+          <div class="status-pill">Actualisé à 15:42:08</div>
+          <button type="button" class="button primary">Ajouter un torrent</button>
+          <button type="button" class="button secondary">Actualiser</button>
+        </div>
+      </header>
+
+      <section class="summary-grid" aria-label="Synthèse des torrents">
+        <button class="stat stat-button" type="button"><strong>7</strong><span>Actifs</span></button>
+        <button class="stat stat-button" type="button"><strong>0</strong><span>Bloqués</span></button>
+        <div class="stat"><strong>38,4 Mo/s</strong><span>Descendant</span></div>
+        <div class="stat"><strong>6,2 Mo/s</strong><span>Montant</span></div>
+        <div class="stat"><strong>186 Go</strong><span>Restant</span></div>
+      </section>
+
+      <section class="content-panel" aria-labelledby="homeTitle">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Bonjour Corentin</p>
+            <h2 id="homeTitle">Tout fonctionne. Parfaitement.</h2>
+            <p>Aucune alerte critique. Les services restent surveillés en direct.</p>
+          </div>
+          <span class="badge complete"><span class="badge-icon" aria-hidden="true">✓</span><span>Opérationnel</span></span>
+        </div>
+
+        <div class="home-grid">
+          <section class="home-card">
+            <div class="card-head">
+              <p class="eyebrow">Votre espace média</p>
+              <h3>2,8 To disponibles</h3>
+              <p>sur 8 To de capacité totale</p>
+            </div>
+            <div class="progress-wrap" style="margin-top:32px">
+              <div class="progress-track" role="progressbar" aria-valuenow="65" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" style="width:65%"></div>
+              </div>
+              <div class="progress-text">5,2 To utilisés · 65 %</div>
+            </div>
+            <div class="quick-actions" style="margin-top:28px">
+              <a class="quick-action" href="#"><strong>Ouvrir Stockage</strong><span>Capacité, transferts et montage.</span></a>
+              <a class="quick-action" href="#"><strong>Voir les médias</strong><span>Bibliothèques et derniers ajouts.</span></a>
+            </div>
+          </section>
+
+          <section class="home-card">
+            <div class="card-head">
+              <h3>Activité récente</h3>
+              <p>Les derniers événements utiles.</p>
+            </div>
+            <div class="alert-list">
+              <article class="alert-item"><div class="alert-head"><strong>Film téléchargé</strong><span class="service-meta">15:38</span></div><p>Ajouté à la bibliothèque Jellyfin.</p></article>
+              <article class="alert-item"><div class="alert-head"><strong>Indexeurs testés</strong><span class="service-meta">15:35</span></div><p>12 services ont répondu normalement.</p></article>
+            </div>
+          </section>
+        </div>
+
+        <section class="home-card service-card">
+          <div class="card-head">
+            <h3>État des services</h3>
+            <p>4/4 services opérationnels · dernière vérification à 15:42.</p>
+          </div>
+          <div class="services-grid">
+            <article class="service-item operational"><div class="service-head"><strong>qBittorrent</strong><span class="badge complete"><span class="badge-icon">✓</span>Opérationnel</span></div><p>Connexion stable, 7 torrents actifs.</p><div class="service-meta">Contrôlé il y a 12 secondes</div></article>
+            <article class="service-item operational"><div class="service-head"><strong>Prowlarr</strong><span class="badge complete"><span class="badge-icon">✓</span>Opérationnel</span></div><p>12 indexeurs disponibles.</p><div class="service-meta">Contrôlé il y a 18 secondes</div></article>
+            <article class="service-item operational"><div class="service-head"><strong>rclone</strong><span class="badge complete"><span class="badge-icon">✓</span>Opérationnel</span></div><p>Montage distant accessible.</p><div class="service-meta">Contrôlé il y a 20 secondes</div></article>
+            <article class="service-item operational"><div class="service-head"><strong>Jellyfin</strong><span class="badge complete"><span class="badge-icon">✓</span>Opérationnel</span></div><p>Bibliothèques à jour.</p><div class="service-meta">Contrôlé il y a 26 secondes</div></article>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Santé</title>
-    <link rel="stylesheet" href="./static/console.css?v=20260717-activity-fix">
+    <link rel="stylesheet" href="./static/console.css?v=20260717-premium">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -16,13 +16,13 @@
           <p id="pageSubtitle" class="muted"></p>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a id="homeLink" href="/">Accueil</a>
-          <a id="activityLink" href="/activity/">Activité</a>
+          <a id="homeLink" href="/">Vue d’ensemble</a>
           <a id="torrentLink" href="/torrent-panel/">Torrents</a>
           <a id="prowlarrLink" href="/prowlarr-panel/">Prowlarr</a>
           <a id="storageLink" href="/storage-panel/">Stockage</a>
           <a id="mediaLink" href="/media-panel/">Médias</a>
           <a id="healthLink" href="/health/">Santé</a>
+          <a id="activityLink" href="/activity/">Activité</a>
         </nav>
         <div class="toolbar">
           <div id="refreshStatus" class="status-pill">Initialisation</div>
@@ -35,10 +35,10 @@
         <div id="contentA"></div>
         <div id="contentB"></div>
       </section>
-      <section id="cardsGrid" class="cards-grid" style="margin-top:16px;"></section>
+      <section id="cardsGrid" class="cards-grid"></section>
     </main>
     <div id="toast" class="toast" hidden></div>
     <script src="./config.js?v=20260717-activity-fix"></script>
-    <script src="./static/console.js?v=20260717-activity-fix" defer></script>
+    <script src="./static/console.js?v=20260717-premium" defer></script>
   </body>
   </html>
