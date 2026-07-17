@@ -579,24 +579,38 @@ class MediaAutomationManager:
         except OSError as exc:
             raise MediaAutomationError("Le montage ne répond pas encore.") from exc
 
+    async def _jellyfin_post(self, client: httpx.AsyncClient, path: str) -> httpx.Response:
+        auth_attempts = [
+            {"headers": {"X-Emby-Token": self._config.jellyfin_api_key}, "params": None},
+            {"headers": None, "params": {"api_key": self._config.jellyfin_api_key}},
+            {"headers": {"Authorization": f'MediaBrowser Token="{self._config.jellyfin_api_key}"'}, "params": None},
+        ]
+        last_response: httpx.Response | None = None
+        for attempt in auth_attempts:
+            response = await client.post(
+                f"{self._config.jellyfin_api_url}{path}",
+                headers=attempt["headers"],
+                params=attempt["params"],
+            )
+            last_response = response
+            if response.status_code != 401:
+                return response
+        return last_response if last_response is not None else httpx.Response(status_code=500)
+
     async def trigger_jellyfin_scan(self, library_ids: list[str]) -> dict[str, str]:
         if not self._config.jellyfin_api_key:
             raise MediaAutomationError("Clé API Jellyfin absente côté backend.")
-        headers = {"X-Emby-Token": self._config.jellyfin_api_key}
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
                 if library_ids:
                     for library_id in library_ids:
-                        response = await client.post(
-                            f"{self._config.jellyfin_api_url}/Items/{library_id}/Refresh",
-                            headers=headers,
-                        )
+                        response = await self._jellyfin_post(client, f"/Items/{library_id}/Refresh")
                         if response.status_code >= 400:
                             raise MediaAutomationError(f"Bibliothèque Jellyfin refusée ({response.status_code}).")
                     return {"scope": "targeted"}
                 if not self._config.jellyfin_global_fallback:
                     raise MediaAutomationError("Aucune bibliothèque Jellyfin mappée.")
-                response = await client.post(f"{self._config.jellyfin_api_url}/Library/Refresh", headers=headers)
+                response = await self._jellyfin_post(client, "/Library/Refresh")
                 if response.status_code >= 400:
                     raise MediaAutomationError(f"Jellyfin a refusé le scan ({response.status_code}).")
                 return {"scope": "global"}
