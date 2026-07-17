@@ -384,6 +384,12 @@ td input[type="checkbox"] {
   text-align: left;
 }
 
+.quick-action-button {
+  width: 100%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
 .quick-action span {
   color: var(--muted);
   font-size: 0.9rem;

@@ -231,6 +231,32 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(limiter.allow("c"))
         self.assertLessEqual(len(limiter._hits), 2)
 
+    def test_manual_rclone_action_endpoint(self):
+        calls = []
+
+        async def fake_manual_action(action):
+            calls.append(action)
+            return {"status": "ok", "message": "Actualisation rclone lancée."}
+
+        app.state.media_automation.manual_action = fake_manual_action
+        response = self.post_action("/torrent-panel/api/media-actions/rclone-refresh", {})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertEqual(calls, ["rclone-refresh"])
+
+    def test_manual_jellyfin_action_endpoint(self):
+        calls = []
+
+        async def fake_manual_action(action):
+            calls.append(action)
+            return {"status": "ok", "message": "Scan Jellyfin lancé."}
+
+        app.state.media_automation.manual_action = fake_manual_action
+        response = self.post_action("/torrent-panel/api/media-actions/jellyfin-refresh", {})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        self.assertEqual(calls, ["jellyfin-refresh"])
+
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):

@@ -134,6 +134,11 @@ class RetryMediaWorkflow(BaseModel):
     scope: str = Field(default="full", pattern="^(full|jellyfin)$")
 
 
+class ManualMediaActionResult(BaseModel):
+    status: str
+    message: str
+
+
 class RateLimiter:
     def __init__(self, max_calls: int, period_seconds: int, max_keys: int) -> None:
         self._max_calls = max_calls
@@ -644,6 +649,23 @@ class MediaAutomationManager:
             self._save_state()
             return dict(entry)
 
+    async def manual_action(self, action: str) -> dict[str, str]:
+        async with self._lock:
+            if action == "rclone-refresh":
+                await self.refresh_rclone()
+                self._set_notification("Actualisation rclone lancée manuellement.")
+                self._save_state()
+                return {"status": "ok", "message": "Actualisation rclone lancée."}
+            if action == "jellyfin-refresh":
+                await self.trigger_jellyfin_scan([])
+                self._set_notification("Scan Jellyfin lancé manuellement.")
+                self._save_state()
+                return {"status": "ok", "message": "Scan Jellyfin lancé."}
+            raise HTTPException(
+                status_code=404,
+                detail=error_detail("manual_action_not_found", "Action manuelle inconnue.", "Actualiser"),
+            )
+
 
 app = FastAPI(title="Torrent Panel", docs_url=None, redoc_url=None, openapi_url=None)
 api_router = APIRouter()
@@ -1097,6 +1119,20 @@ async def dashboard_snapshot() -> dict[str, Any]:
             {"id": "blocked-torrents", "label": "Voir les torrents bloqués", "url": "/torrent-panel/?view=torrents&status=error"},
             {"id": "test-indexers", "label": "Tester les indexeurs", "url": "/prowlarr-panel/?view=indexers&test=all"},
             {"id": "open-jellyfin", "label": "Ouvrir Jellyfin", "url": JELLYFIN_PUBLIC_URL},
+            {
+                "id": "refresh-rclone-manual",
+                "label": "Actualiser rclone",
+                "kind": "api",
+                "actionId": "rclone-refresh",
+                "description": "Déclenche un refresh manuel du montage rclone.",
+            },
+            {
+                "id": "refresh-jellyfin-manual",
+                "label": "Scanner Jellyfin",
+                "kind": "api",
+                "actionId": "jellyfin-refresh",
+                "description": "Déclenche un scan manuel des bibliothèques Jellyfin.",
+            },
             {"id": "media-history", "label": "Historique médias", "url": "/torrent-panel/?view=home#mediaAutomation"},
             {"id": "refresh-all", "label": "Actualiser tous les services", "url": "/torrent-panel/?view=home&refresh=1"},
         ],
@@ -1289,6 +1325,17 @@ async def add_torrent(payload: AddMagnet) -> dict[str, object]:
 @api_router.post("/media-workflows/{entry_id}/retry", dependencies=[Depends(require_action_guard)])
 async def retry_media_workflow(entry_id: str, payload: RetryMediaWorkflow) -> dict[str, Any]:
     return {"entry": await app.state.media_automation.retry(entry_id, payload.scope)}
+
+
+@api_router.post("/media-actions/{action}", dependencies=[Depends(require_action_guard)])
+async def trigger_manual_media_action(action: str) -> dict[str, str]:
+    try:
+        return await app.state.media_automation.manual_action(action)
+    except MediaAutomationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=error_detail("media_action_failed", exc.public_message, "Réessayer"),
+        ) from exc
 
 
 app.include_router(api_router, prefix="/api")

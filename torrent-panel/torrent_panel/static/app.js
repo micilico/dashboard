@@ -572,6 +572,32 @@ function button(label, className, onClick) {
   return el;
 }
 
+function quickActionButton(item) {
+  const action = button(item.label, "secondary", async (event) => {
+    const trigger = event.currentTarget;
+    trigger.disabled = true;
+    const previous = trigger.textContent;
+    trigger.textContent = "Lancement…";
+    try {
+      const payload = await api(`api/media-actions/${item.actionId}`, { method: "POST" });
+      showToast(payload.message || "Action lancée.");
+      await loadTorrents({ silent: true, force: true });
+    } catch (error) {
+      showError(error);
+    } finally {
+      trigger.disabled = false;
+      trigger.textContent = previous;
+    }
+  });
+  action.className = "quick-action quick-action-button";
+  const title = document.createElement("strong");
+  title.textContent = item.label;
+  const subtitle = document.createElement("span");
+  subtitle.textContent = item.description || "Déclenche une action backend.";
+  action.replaceChildren(title, subtitle);
+  return action;
+}
+
 function actionLink(action) {
   const link = document.createElement("a");
   link.className = "button secondary";
@@ -718,13 +744,14 @@ function renderSortHeaders() {
 function renderQuickActions() {
   els.quickActions.replaceChildren(
     ...(state.dashboard.quickActions || []).map((item) => {
+      if (item.kind === "api" && item.actionId) return quickActionButton(item);
       const link = document.createElement("a");
       link.className = "quick-action";
       link.href = item.url || "/torrent-panel/?view=home";
       const title = document.createElement("strong");
       title.textContent = item.label;
       const subtitle = document.createElement("span");
-      subtitle.textContent = item.id === "refresh-all" ? "Relance la vérification de tous les services." : "Ouvre directement la bonne vue.";
+      subtitle.textContent = item.description || (item.id === "refresh-all" ? "Relance la vérification de tous les services." : "Ouvre directement la bonne vue.");
       link.append(title, subtitle);
       return link;
     }),
