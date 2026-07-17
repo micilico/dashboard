@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prowlarr_panel.main import RateLimiter, app, cleanup_csrf_tokens, parse_rate_limits  # noqa: E402
-from prowlarr_panel.prowlarr import ProwlarrClient, ProwlarrConfig, scrub  # noqa: E402
+from prowlarr_panel.prowlarr import ProwlarrClient, ProwlarrConfig, ProwlarrError, scrub  # noqa: E402
 
 
 class FakeProwlarr:
@@ -162,6 +162,70 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["search"], (2, 10))
         self.assertEqual(parsed["grab"], (3, 20))
         self.assertIn("modify", parsed)
+
+    async def test_test_indexer_posts_full_indexer_model(self):
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
+        calls = []
+
+        async def fake_json(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            return {"id": 7, "name": "Safe", "fields": [{"name": "passkey", "value": "secret"}]}
+
+        class FakeResponse:
+            content = b"{}"
+
+            def json(self):
+                return {}
+
+        async def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            return FakeResponse()
+
+        self.client._json = fake_json
+        self.client._request = fake_request
+        result = await self.client.test_indexer(7)
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(calls[0][0:2], ("GET", "/api/v1/indexer/7"))
+        self.assertEqual(calls[1][0:2], ("POST", "/api/v1/indexer/test"))
+        self.assertEqual(calls[1][2]["json"]["id"], 7)
+
+    async def test_test_all_indexers_uses_testall_endpoint(self):
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
+        calls = []
+
+        class FakeResponse:
+            content = b"{}"
+
+            def json(self):
+                return {}
+
+        async def fake_request(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            return FakeResponse()
+
+        self.client._request = fake_request
+        result = await self.client.test_indexer()
+        self.assertEqual(result["status"], "accepted")
+        self.assertEqual(calls[-1][0:2], ("POST", "/api/v1/indexer/testall"))
+
+    async def test_validation_error_message_is_scrubbed(self):
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
+
+        class FakeResponse:
+            status_code = 400
+
+            def json(self):
+                return [{"errorMessage": "bad https://tracker.test/rss?passkey=secret"}]
+
+        async def fake_client_request(*args, **kwargs):
+            return FakeResponse()
+
+        self.client._client.request = fake_client_request
+        with self.assertRaises(ProwlarrError) as context:
+            await self.client._request("POST", "/api/v1/indexer/test", json={"id": 7})
+        self.assertEqual(context.exception.code, "prowlarr_validation_refused")
+        self.assertNotIn("secret", context.exception.public_message)
+        self.assertNotIn("tracker.test", context.exception.public_message)
 
 
 if __name__ == "__main__":

@@ -77,6 +77,33 @@ def as_list(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def response_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if isinstance(payload, dict):
+        if isinstance(payload.get("message"), str):
+            return clean_text(payload["message"])
+        if isinstance(payload.get("errorMessage"), str):
+            return clean_text(payload["errorMessage"])
+        if isinstance(payload.get("errors"), list):
+            messages = [
+                clean_text(item.get("errorMessage") or item.get("message"))
+                for item in payload["errors"]
+                if isinstance(item, dict) and (item.get("errorMessage") or item.get("message"))
+            ]
+            return " ".join(item for item in messages if item)[:500]
+    if isinstance(payload, list):
+        messages = [
+            clean_text(item.get("errorMessage") or item.get("message"))
+            for item in payload
+            if isinstance(item, dict) and (item.get("errorMessage") or item.get("message"))
+        ]
+        return " ".join(item for item in messages if item)[:500]
+    return ""
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -171,6 +198,15 @@ class ProwlarrClient:
                 code="prowlarr_action_unavailable",
                 recovery="Utiliser l'interface Prowlarr native",
             )
+        if response.status_code == 400:
+            message = response_error_message(response)
+            logger.warning("Prowlarr rejected request with validation error on %s %s", method, path)
+            raise ProwlarrError(
+                502,
+                message or "Prowlarr a refusé la demande.",
+                code="prowlarr_validation_refused",
+                recovery="Vérifier l'indexer dans Prowlarr",
+            )
         if response.status_code >= 400:
             logger.warning("Prowlarr returned %s on %s %s", response.status_code, method, path)
             raise ProwlarrError(
@@ -205,6 +241,7 @@ class ProwlarrClient:
             "systemStatus": f"{self._api_root}/system/status",
             "indexer": f"{self._api_root}/indexer",
             "indexerTest": f"{self._api_root}/indexer/test",
+            "indexerTestAll": f"{self._api_root}/indexer/testall",
             "search": f"{self._api_root}/search",
             "searchRelease": f"{self._api_root}/search/release",
             "download": f"{self._api_root}/download",
@@ -279,9 +316,15 @@ class ProwlarrClient:
         }
 
     async def test_indexer(self, indexer_id: int | None = None) -> dict[str, Any]:
-        path = f"{self._api_root}/indexer/test"
-        params = {"id": indexer_id} if indexer_id is not None else None
-        response = await self._request("POST", path, params=params, acceptable={200, 202})
+        if indexer_id is None:
+            response = await self._request("POST", f"{self._api_root}/indexer/testall", acceptable={200, 202})
+            payload = response.json() if response.content else {}
+            return {"status": "accepted", "result": scrub(payload)}
+
+        current = await self._json("GET", f"{self._api_root}/indexer/{indexer_id}")
+        if not isinstance(current, dict):
+            raise ProwlarrError(502, "Réponse Prowlarr invalide.", code="prowlarr_invalid_response")
+        response = await self._request("POST", f"{self._api_root}/indexer/test", json=current, acceptable={200, 202})
         payload = response.json() if response.content else {}
         return {"status": "accepted", "result": scrub(payload)}
 
