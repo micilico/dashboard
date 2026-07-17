@@ -124,6 +124,25 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"]["code"], "csrf_expired")
 
+    def test_action_accepts_matching_token_among_duplicate_path_cookies(self):
+        response = self.client.post(
+            "/torrent-panel/api/torrents/pause",
+            json={"hashes": [VALID_HASH]},
+            headers={
+                "X-Torrent-Panel-CSRF": self.csrf,
+                "Cookie": f"torrent_panel_csrf={self.csrf}; torrent_panel_csrf=stale-token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(app.state.qbit.calls[-1], ("pause", [VALID_HASH]))
+
+    def test_session_response_is_not_cacheable(self):
+        response = self.client.get("/torrent-panel/api/session")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+
     def test_group_actions_send_hashes_once(self):
         second_hash = "b" * 40
         response = self.post_action("/torrent-panel/api/torrents/pause", {"hashes": [VALID_HASH, second_hash]})

@@ -179,8 +179,11 @@ def require_action_guard(
     request: Request,
     x_torrent_panel_csrf: str | None = Header(default=None),
 ) -> None:
-    cookie = request.cookies.get(CSRF_COOKIE)
-    if not cookie or not x_torrent_panel_csrf or cookie != x_torrent_panel_csrf or not csrf_token_is_valid(request.app, cookie):
+    if (
+        not x_torrent_panel_csrf
+        or not csrf_cookie_matches(request, x_torrent_panel_csrf)
+        or not csrf_token_is_valid(request.app, x_torrent_panel_csrf)
+    ):
         raise HTTPException(
             status_code=403,
             detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
@@ -212,6 +215,21 @@ def cleanup_csrf_tokens(app_instance: FastAPI, now: float | None = None) -> None
 def csrf_token_is_valid(app_instance: FastAPI, token: str) -> bool:
     cleanup_csrf_tokens(app_instance)
     return token in app_instance.state.csrf_tokens
+
+
+def csrf_cookie_matches(request: Request, token: str) -> bool:
+    """Accept the token when any same-name cookie matches it.
+
+    Browsers may retain cookies with the same name but different paths after a
+    reverse-proxy or public-prefix change. ``request.cookies`` collapses those
+    duplicates and can select the stale value, making session renewal fail
+    forever even though the browser also sent the fresh cookie.
+    """
+    for item in request.headers.get("cookie", "").split(";"):
+        name, separator, value = item.strip().partition("=")
+        if separator and name == CSRF_COOKIE and secrets.compare_digest(value, token):
+            return True
+    return False
 
 
 def set_csrf_cookie(request: Request, response: Response) -> str:
@@ -255,6 +273,7 @@ async def readyz() -> dict[str, str]:
 
 @api_router.get("/session")
 async def session(request: Request, response: Response) -> dict[str, str]:
+    response.headers["Cache-Control"] = "no-store"
     return {"csrfToken": set_csrf_cookie(request, response)}
 
 

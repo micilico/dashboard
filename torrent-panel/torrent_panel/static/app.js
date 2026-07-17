@@ -256,7 +256,7 @@ async function api(path, options = {}, retryCsrf = true) {
 }
 
 async function refreshSession() {
-  const session = await api("api/session", {}, false);
+  const session = await api("api/session", { cache: "no-store" }, false);
   state.csrfToken = session.csrfToken;
 }
 
