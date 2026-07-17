@@ -227,6 +227,45 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", context.exception.public_message)
         self.assertNotIn("tracker.test", context.exception.public_message)
 
+    async def test_search_prefers_post_search_input(self):
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
+        calls = []
+
+        async def fake_json(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            return [{"title": "Ubuntu", "indexerId": 7, "guid": "opaque"}]
+
+        self.client._json = fake_json
+        result = await self.client.search("ubuntu", [2000], [7])
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(calls[-1][0:2], ("POST", "/api/v1/search"))
+        self.assertEqual(calls[-1][2]["json"]["query"], "ubuntu")
+        self.assertEqual(calls[-1][2]["json"]["type"], "search")
+        self.assertEqual(calls[-1][2]["json"]["categories"], [2000])
+        self.assertEqual(calls[-1][2]["json"]["indexerIds"], [7])
+
+    async def test_search_falls_back_to_get_when_post_is_unavailable(self):
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
+        calls = []
+
+        async def fake_json(method, path, **kwargs):
+            calls.append((method, path, kwargs))
+            if method == "POST":
+                raise ProwlarrError(
+                    404,
+                    "Action Prowlarr indisponible sur cette version.",
+                    code="prowlarr_action_unavailable",
+                )
+            return [{"title": "Ubuntu", "indexerId": 7, "guid": "opaque"}]
+
+        self.client._json = fake_json
+        result = await self.client.search("ubuntu", [2000], [7])
+        self.assertEqual(len(result["results"]), 1)
+        self.assertEqual(calls[0][0:2], ("POST", "/api/v1/search"))
+        self.assertEqual(calls[1][0:2], ("GET", "/api/v1/search"))
+        self.assertIn(("categories", "2000"), calls[1][2]["params"])
+        self.assertIn(("indexerIds", "7"), calls[1][2]["params"])
+
 
 if __name__ == "__main__":
     unittest.main()

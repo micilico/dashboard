@@ -154,7 +154,7 @@ class ProwlarrClient:
         method: str,
         path: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: Any | None = None,
         data: Any | None = None,
         json: Any | None = None,
         acceptable: set[int] | None = None,
@@ -338,14 +338,31 @@ class ProwlarrClient:
         return self._map_indexer(payload if isinstance(payload, dict) else current)
 
     async def search(self, query: str, categories: list[int], indexer_ids: list[int]) -> dict[str, Any]:
-        params: dict[str, Any] = {"query": query}
-        if categories:
-            params["categories"] = ",".join(str(item) for item in categories)
-        if indexer_ids:
-            params["indexerIds"] = ",".join(str(item) for item in indexer_ids)
-        payload = await self._json("GET", f"{self._api_root}/search", params=params)
+        body: dict[str, Any] = {
+            "query": query,
+            "type": "search",
+            "indexerIds": indexer_ids,
+            "categories": categories,
+            "limit": 100,
+            "offset": 0,
+        }
+        try:
+            payload = await self._json("POST", f"{self._api_root}/search", json=body)
+        except ProwlarrError as post_error:
+            if post_error.code not in {"prowlarr_action_unavailable", "prowlarr_validation_refused"}:
+                raise
+            logger.info("Prowlarr POST search unavailable or rejected, trying GET search fallback")
+            payload = await self._json("GET", f"{self._api_root}/search", params=self._search_get_params(query, categories, indexer_ids))
         releases = [self._map_release(item) for item in as_list(payload)]
         return {"results": releases, "partialFailures": []}
+
+    def _search_get_params(self, query: str, categories: list[int], indexer_ids: list[int]) -> list[tuple[str, str]]:
+        params: list[tuple[str, str]] = [("query", query), ("type", "search"), ("limit", "100"), ("offset", "0")]
+        if categories:
+            params.extend(("categories", str(item)) for item in categories)
+        if indexer_ids:
+            params.extend(("indexerIds", str(item)) for item in indexer_ids)
+        return params
 
     async def grab(self, guid: str, indexer_id: int | None) -> dict[str, Any]:
         payload: dict[str, Any] = {"guid": guid}
