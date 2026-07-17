@@ -12,88 +12,58 @@ services:
         required: false
     environment:
       HOMEPAGE_ALLOWED_HOSTS: ${HOMEPAGE_ALLOWED_HOSTS}
-      PUID: ${PUID}
-      PGID: ${PGID}
-      TZ: ${TZ}
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
+      TZ: ${TZ:-Europe/Paris}
     volumes:
       - ./homepage:/app/config
       - /mnt/ultra-media:/mnt/ultra-media:ro
       - /sys:/sys:ro
-    mem_limit: 512m
-    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   torrent-panel:
     build: ./torrent-panel
     container_name: torrent-panel
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${TORRENT_PANEL_PORT:-3110}:${TORRENT_PANEL_PORT:-3110}"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: "host"
     env_file:
       - path: ./torrent-panel/.env
         required: false
     environment:
-      TORRENT_PANEL_HOST: 0.0.0.0
+      TORRENT_PANEL_HOST: 127.0.0.1
       TORRENT_PANEL_PORT: ${TORRENT_PANEL_PORT:-3110}
       TORRENT_PANEL_MEDIA_AUTOMATION_STATE_PATH: /app/data/media-automation-state.json
-      TORRENT_PANEL_INTERNAL_AUTH_SECRET: ${TORRENT_PANEL_INTERNAL_AUTH_SECRET}
-      PROWLARR_PANEL_INTERNAL_AUTH_SECRET: ${PROWLARR_PANEL_INTERNAL_AUTH_SECRET}
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
+      TORRENT_PANEL_NOTIFICATION_STATE_PATH: /app/data/notification-state.json
+      TORRENT_PANEL_AUTOMATION_RULES_STATE_PATH: /app/data/automation-rules.json
     volumes:
       - torrent-panel-data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3110/healthz', timeout=4)"]
       interval: 30s
       timeout: 5s
-      retries: 3
-      start_period: 15s
-    mem_limit: 512m
-    cpus: 1.0
+      retries: 5
+      start_period: 20s
 
   prowlarr-panel:
     build: ./prowlarr-panel
     container_name: prowlarr-panel
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${PROWLARR_PANEL_PORT:-3120}:${PROWLARR_PANEL_PORT:-3120}"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    network_mode: "host"
     env_file:
       - path: ./prowlarr-panel/.env
         required: false
     environment:
-      PROWLARR_PANEL_HOST: 0.0.0.0
+      PROWLARR_PANEL_HOST: 127.0.0.1
       PROWLARR_PANEL_PORT: ${PROWLARR_PANEL_PORT:-3120}
-      PROWLARR_PANEL_INTERNAL_AUTH_SECRET: ${PROWLARR_PANEL_INTERNAL_AUTH_SECRET}
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3120/healthz', timeout=4)"]
       interval: 30s
       timeout: 5s
-      retries: 3
-      start_period: 15s
-    mem_limit: 384m
-    cpus: 1.0
+      retries: 5
+      start_period: 20s
 
 volumes:
   torrent-panel-data:
