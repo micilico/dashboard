@@ -16,8 +16,8 @@
           <h1>Torrent Panel</h1>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a href="/">Accueil</a>
-          <a aria-current="page" href="/torrent-panel/">Torrents</a>
+          <a id="homeNavLink" href="/torrent-panel/?view=home">Accueil <span id="navAlertCount" class="nav-count" hidden>0</span></a>
+          <a id="torrentsNavLink" aria-current="page" href="/torrent-panel/?view=torrents">Torrents</a>
           <a href="/prowlarr-panel/">Prowlarr</a>
         </nav>
         <div class="topbar-actions">
@@ -28,6 +28,43 @@
       </header>
 
       <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents"></section>
+
+      <section class="content-panel" id="homeView" aria-labelledby="homeTitle" hidden>
+        <div class="panel-head">
+          <div>
+            <h2 id="homeTitle">Accueil opérationnel</h2>
+            <p id="homeSummary">Vérification globale des services et alertes critiques.</p>
+          </div>
+        </div>
+
+        <div id="criticalAlerts" class="alert-strip" hidden></div>
+
+        <div class="home-grid">
+          <section class="home-card" aria-labelledby="quickActionsTitle">
+            <div class="card-head">
+              <h3 id="quickActionsTitle">Actions rapides</h3>
+              <p>Raccourcis directs vers les vues utiles.</p>
+            </div>
+            <div id="quickActions" class="quick-actions"></div>
+          </section>
+
+          <section class="home-card" aria-labelledby="alertsTitle">
+            <div class="card-head">
+              <h3 id="alertsTitle">Centre d’alertes</h3>
+              <p id="alertsSummary">Aucune alerte chargée.</p>
+            </div>
+            <div id="alertsList" class="alert-list"></div>
+          </section>
+        </div>
+
+        <section class="home-card service-card" aria-labelledby="servicesTitle">
+          <div class="card-head">
+            <h3 id="servicesTitle">État des services</h3>
+            <p id="servicesSummary">Dernières vérifications et services exposés.</p>
+          </div>
+          <div id="servicesGrid" class="services-grid"></div>
+        </section>
+      </section>
 
       <details class="toolbar" id="addPanel">
         <summary>
@@ -58,7 +95,7 @@
         </form>
       </details>
 
-      <section class="content-panel" aria-labelledby="list-title">
+      <section class="content-panel" id="torrentsView" aria-labelledby="list-title">
         <div class="panel-head">
           <div>
             <h2 id="list-title">Torrents</h2>

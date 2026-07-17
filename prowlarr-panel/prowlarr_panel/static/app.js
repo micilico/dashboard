@@ -11,6 +11,40 @@ const state = {
   searchAbort: null,
 };
 
+function currentUrl() {
+  const href = window.location?.href || "http://localhost/prowlarr-panel/";
+  if (typeof URL !== "undefined") return new URL(href);
+  const raw = String(href);
+  const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
+  const params = new Map(
+    query
+      .split("&")
+      .filter(Boolean)
+      .map((entry) => {
+        const [key, value = ""] = entry.split("=");
+        return [decodeURIComponent(key), decodeURIComponent(value)];
+      }),
+  );
+  return {
+    searchParams: {
+      get(key) {
+        return params.has(key) ? params.get(key) : null;
+      },
+      set(key, value) {
+        params.set(key, String(value));
+      },
+      delete(key) {
+        params.delete(key);
+      },
+    },
+    toString() {
+      const base = raw.split("?")[0];
+      const search = [...params.entries()].map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+      return search ? `${base}?${search}` : base;
+    },
+  };
+}
+
 const SEARCH_CATEGORY_PRESETS = [
   { label: "Films", value: 2000 },
   { label: "Séries", value: 5000 },
@@ -324,6 +358,24 @@ function renderHealth() {
   els.healthTab.textContent = state.alerts.length > 0 ? `Santé (${state.alerts.length})` : "Santé";
 }
 
+function updateUrl(replace = true) {
+  const url = currentUrl();
+  url.searchParams.set("view", state.activeView);
+  const query = els.releaseQuery.value.trim();
+  if (state.activeView === "search" && query) url.searchParams.set("query", query);
+  else url.searchParams.delete("query");
+  const method = replace ? "replaceState" : "pushState";
+  window.history?.[method]?.({}, "", url.toString());
+}
+
+function applyUrlState() {
+  const url = currentUrl();
+  const requestedView = url.searchParams.get("view");
+  state.activeView = Object.hasOwn(els.views, requestedView) ? requestedView : "indexers";
+  const query = url.searchParams.get("query");
+  if (query) els.releaseQuery.value = query;
+}
+
 async function loadAll() {
   clearError();
   els.refreshStatus.textContent = "Actualisation...";
@@ -355,6 +407,7 @@ function setView(view) {
     element.hidden = name !== view;
   });
   els.tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.view === view)));
+  updateUrl();
 }
 
 function confirmAction(title, message) {
@@ -431,6 +484,7 @@ async function runSearch(event) {
   } finally {
     els.searchButton.disabled = false;
     els.searchButton.textContent = "Rechercher";
+    updateUrl();
   }
 }
 
@@ -498,6 +552,23 @@ els.clearIndexers.addEventListener("click", () => {
     option.selected = false;
   });
 });
+window.addEventListener?.("popstate", () => {
+  applyUrlState();
+  setView(state.activeView);
+});
 
-renderReleaseCategories();
-refreshSession().then(loadAll).catch(showError);
+async function init() {
+  renderReleaseCategories();
+  applyUrlState();
+  setView(state.activeView);
+  await refreshSession();
+  await loadAll();
+  const url = currentUrl();
+  if (url.searchParams.get("test") === "all") {
+    await api("api/indexers/test-all", { method: "POST", body: "{}" });
+    showToast("Test global demandé.");
+    await loadAll();
+  }
+}
+
+init().catch(showError);

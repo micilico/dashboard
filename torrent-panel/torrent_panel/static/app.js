@@ -14,7 +14,9 @@ const DEFAULT_PREFS = {
 
 const state = {
   csrfToken: "",
+  activeView: "home",
   torrents: [],
+  dashboard: { alerts: [], criticalCount: 0, quickActions: [], services: [] },
   selected: new Set(),
   rowErrors: new Map(),
   rowBusy: new Map(),
@@ -30,6 +32,18 @@ const state = {
 };
 
 const els = {
+  homeView: document.querySelector("#homeView"),
+  torrentsView: document.querySelector("#torrentsView"),
+  homeSummary: document.querySelector("#homeSummary"),
+  criticalAlerts: document.querySelector("#criticalAlerts"),
+  quickActions: document.querySelector("#quickActions"),
+  alertsList: document.querySelector("#alertsList"),
+  alertsSummary: document.querySelector("#alertsSummary"),
+  servicesGrid: document.querySelector("#servicesGrid"),
+  servicesSummary: document.querySelector("#servicesSummary"),
+  homeNavLink: document.querySelector("#homeNavLink"),
+  torrentsNavLink: document.querySelector("#torrentsNavLink"),
+  navAlertCount: document.querySelector("#navAlertCount"),
   rows: document.querySelector("#torrentRows"),
   summary: document.querySelector("#summary"),
   summaryGrid: document.querySelector("#summaryGrid"),
@@ -190,10 +204,14 @@ function formatEta(seconds) {
 function formatDate(timestamp) {
   const value = Number(timestamp);
   if (!Number.isFinite(value) || value <= 0) return "—";
-  return new Date(value * 1000).toLocaleString("fr-FR", {
-    dateStyle: "short",
-    timeStyle: "short",
-  });
+  return new Date(value * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function formatIsoDate(value) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 }
 
 function normalizeTags(tags) {
@@ -247,12 +265,8 @@ function clearError() {
 async function api(path, options = {}, retryCsrf = true) {
   const headers = new Headers(options.headers || {});
   headers.set("Accept", "application/json");
-  if (options.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  if ((options.method || "GET").toUpperCase() !== "GET") {
-    headers.set("X-Torrent-Panel-CSRF", state.csrfToken);
-  }
+  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if ((options.method || "GET").toUpperCase() !== "GET") headers.set("X-Torrent-Panel-CSRF", state.csrfToken);
 
   const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
   const payload = await response.json().catch(() => ({}));
@@ -261,9 +275,8 @@ async function api(path, options = {}, retryCsrf = true) {
   const detail = typeof payload.detail === "object" && payload.detail ? payload.detail : {};
   const error = new Error(detail.message || payload.detail || "Action impossible pour le moment.");
   error.code = detail.code || `http_${response.status}`;
-  error.recovery = detail.recovery || (response.status === 429 ? "Réessayer" : "Réessayer");
+  error.recovery = detail.recovery || "Réessayer";
   error.status = response.status;
-
   if (response.status === 403 && error.code === "csrf_expired" && retryCsrf) {
     await refreshSession();
     return api(path, options, false);
@@ -274,6 +287,88 @@ async function api(path, options = {}, retryCsrf = true) {
 async function refreshSession() {
   const session = await api("api/session", { cache: "no-store" }, false);
   state.csrfToken = session.csrfToken;
+}
+
+function currentUrl() {
+  const href = window.location?.href || "http://localhost/torrent-panel/";
+  if (typeof URL !== "undefined") return new URL(href);
+  const raw = String(href);
+  const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
+  const params = new Map(
+    query
+      .split("&")
+      .filter(Boolean)
+      .map((entry) => {
+        const [key, value = ""] = entry.split("=");
+        return [decodeURIComponent(key), decodeURIComponent(value)];
+      }),
+  );
+  return {
+    searchParams: {
+      get(key) {
+        return params.has(key) ? params.get(key) : null;
+      },
+      set(key, value) {
+        params.set(key, String(value));
+      },
+      delete(key) {
+        params.delete(key);
+      },
+    },
+    toString() {
+      const base = raw.split("?")[0];
+      const search = [...params.entries()].map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join("&");
+      return search ? `${base}?${search}` : base;
+    },
+  };
+}
+
+function updateUrl(replace = true) {
+  const url = currentUrl();
+  url.searchParams.set("view", state.activeView);
+  if (state.activeView === "torrents") {
+    for (const [key, value] of Object.entries({
+      search: state.prefs.search,
+      status: state.prefs.status,
+      category: state.prefs.category,
+      tag: state.prefs.tag,
+      sort: state.prefs.sort,
+      direction: state.prefs.direction,
+    })) {
+      if (value && value !== DEFAULT_PREFS[key]) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    }
+  } else {
+    ["search", "status", "category", "tag", "sort", "direction"].forEach((key) => url.searchParams.delete(key));
+  }
+  const method = replace ? "replaceState" : "pushState";
+  window.history?.[method]?.({}, "", url.toString());
+}
+
+function applyUrlState() {
+  const url = currentUrl();
+  state.activeView = url.searchParams.get("view") === "torrents" ? "torrents" : "home";
+  const search = url.searchParams.get("search");
+  const status = url.searchParams.get("status");
+  const category = url.searchParams.get("category");
+  const tag = url.searchParams.get("tag");
+  const sort = url.searchParams.get("sort");
+  const direction = url.searchParams.get("direction");
+  if (search !== null) state.prefs.search = search;
+  if (status !== null) state.prefs.status = status;
+  if (category !== null) state.prefs.category = category;
+  if (tag !== null) state.prefs.tag = tag;
+  if (sort !== null) state.prefs.sort = sort;
+  if (direction !== null) state.prefs.direction = direction;
+}
+
+function setView(view, { push = true } = {}) {
+  state.activeView = view === "torrents" ? "torrents" : "home";
+  els.homeView.hidden = state.activeView !== "home";
+  els.torrentsView.hidden = state.activeView !== "torrents";
+  if (els.homeNavLink) els.homeNavLink.setAttribute("aria-current", state.activeView === "home" ? "page" : "false");
+  if (els.torrentsNavLink) els.torrentsNavLink.setAttribute("aria-current", state.activeView === "torrents" ? "page" : "false");
+  updateUrl(!push);
 }
 
 function summarize(torrents) {
@@ -302,6 +397,12 @@ function summarize(torrents) {
     result.remaining += Number(torrent.remaining) || Math.max(0, (Number(torrent.size) || 0) - (Number(torrent.downloaded) || 0));
   }
   return result;
+}
+
+function matchesQuickFilter(status, quickKey) {
+  if (quickKey === "all") return status === "all";
+  if (quickKey === "active") return ["downloading", "waiting", "checking", "sharing"].includes(status);
+  return status === quickKey;
 }
 
 function renderSummary() {
@@ -346,35 +447,7 @@ function fillSelect(select, entries, value) {
       return option;
     }),
   );
-  select.value = entries.some(([optionValue]) => optionValue === current) ? current : "all";
-}
-
-function renderControls() {
-  els.searchInput.value = state.prefs.search;
-  els.autoRefreshToggle.checked = state.prefs.autoRefresh;
-  els.refreshInterval.value = String(state.prefs.refreshIntervalMs);
-  if (document.activeElement !== els.categoryInput) els.categoryInput.value = state.prefs.lastCategory || "";
-  if (document.activeElement !== els.tagsInput) els.tagsInput.value = state.prefs.lastTags || "";
-  fillSelect(els.statusFilter, Object.entries(STATUS_GROUPS), state.prefs.status);
-  fillSelect(els.categoryFilter, [["all", "Toutes"], ...uniqueValues((t) => [String(t.category || "").trim()]).map((v) => [v, v])], state.prefs.category);
-  fillSelect(els.tagFilter, [["all", "Tous"], ...uniqueValues((t) => normalizeTags(t.tags)).map((v) => [v, v])], state.prefs.tag);
-  els.sortSelect.replaceChildren(
-    ...Object.entries(SORT_LABELS).map(([value, label]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      return option;
-    }),
-  );
-  els.sortSelect.value = state.prefs.sort;
-  renderQuickFilters();
-  renderFilterNotice();
-}
-
-function matchesQuickFilter(status, quickKey) {
-  if (quickKey === "all") return status === "all";
-  if (quickKey === "active") return ["downloading", "waiting", "checking", "sharing"].includes(status);
-  return status === quickKey;
+  select.value = entries.some(([optionValue]) => optionValue === current) ? current : entries[0]?.[0];
 }
 
 function renderQuickFilters() {
@@ -405,9 +478,30 @@ function activeFilterLabels() {
 
 function renderFilterNotice() {
   const labels = activeFilterLabels();
-  const hasFilters = labels.length > 0;
-  els.filterNotice.textContent = hasFilters ? `Filtres actifs : ${labels.join(" · ")}` : "Aucun filtre actif.";
-  els.clearActiveFilters.hidden = !hasFilters;
+  els.filterNotice.textContent = labels.length ? `Filtres actifs : ${labels.join(" · ")}` : "Aucun filtre actif.";
+  els.clearActiveFilters.hidden = labels.length === 0;
+}
+
+function renderControls() {
+  els.searchInput.value = state.prefs.search;
+  els.autoRefreshToggle.checked = state.prefs.autoRefresh;
+  els.refreshInterval.value = String(state.prefs.refreshIntervalMs);
+  if (document.activeElement !== els.categoryInput) els.categoryInput.value = state.prefs.lastCategory || "";
+  if (document.activeElement !== els.tagsInput) els.tagsInput.value = state.prefs.lastTags || "";
+  fillSelect(els.statusFilter, Object.entries(STATUS_GROUPS), state.prefs.status);
+  fillSelect(els.categoryFilter, [["all", "Toutes"], ...uniqueValues((torrent) => [String(torrent.category || "").trim()]).map((value) => [value, value])], state.prefs.category);
+  fillSelect(els.tagFilter, [["all", "Tous"], ...uniqueValues((torrent) => normalizeTags(torrent.tags)).map((value) => [value, value])], state.prefs.tag);
+  els.sortSelect.replaceChildren(
+    ...Object.entries(SORT_LABELS).map(([value, label]) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      return option;
+    }),
+  );
+  els.sortSelect.value = state.prefs.sort;
+  renderQuickFilters();
+  renderFilterNotice();
 }
 
 function filteredTorrents() {
@@ -425,12 +519,6 @@ function filteredTorrents() {
   return sortTorrents(filtered);
 }
 
-function setStatusFromQuickFilter(filterKey) {
-  state.prefs.status = filterKey;
-  savePrefs();
-  render();
-}
-
 function sortValue(torrent, key) {
   if (key === "state") return GROUP_ORDER[stateMeta(torrent).group] ?? 99;
   if (key === "name") return String(torrent.name || "").toLocaleLowerCase("fr");
@@ -440,19 +528,24 @@ function sortValue(torrent, key) {
 function sortTorrents(torrents) {
   const key = state.prefs.sort;
   const direction = state.prefs.direction === "desc" ? -1 : 1;
-  return [...torrents].sort((a, b) => {
+  return [...torrents].sort((leftTorrent, rightTorrent) => {
     if (key === "default") {
-      const groupDiff = (GROUP_ORDER[stateMeta(a).group] ?? 99) - (GROUP_ORDER[stateMeta(b).group] ?? 99);
+      const groupDiff = (GROUP_ORDER[stateMeta(leftTorrent).group] ?? 99) - (GROUP_ORDER[stateMeta(rightTorrent).group] ?? 99);
       if (groupDiff) return groupDiff;
-      return (Number(b.downloadSpeed) || 0) - (Number(a.downloadSpeed) || 0);
+      return (Number(rightTorrent.downloadSpeed) || 0) - (Number(leftTorrent.downloadSpeed) || 0);
     }
-    const left = sortValue(a, key);
-    const right = sortValue(b, key);
-    if (typeof left === "string" || typeof right === "string") {
-      return String(left).localeCompare(String(right), "fr") * direction;
-    }
+    const left = sortValue(leftTorrent, key);
+    const right = sortValue(rightTorrent, key);
+    if (typeof left === "string" || typeof right === "string") return String(left).localeCompare(String(right), "fr") * direction;
     return (left - right) * direction;
   });
+}
+
+function setStatusFromQuickFilter(filterKey) {
+  state.prefs.status = filterKey;
+  savePrefs();
+  updateUrl();
+  render();
 }
 
 function setSort(key) {
@@ -463,6 +556,7 @@ function setSort(key) {
     state.prefs.direction = key === "name" ? "asc" : "desc";
   }
   savePrefs();
+  updateUrl();
   render();
 }
 
@@ -473,6 +567,14 @@ function button(label, className, onClick) {
   el.textContent = label;
   el.addEventListener("click", onClick);
   return el;
+}
+
+function actionLink(action) {
+  const link = document.createElement("a");
+  link.className = "button secondary";
+  link.href = action?.url || "/torrent-panel/?view=home";
+  link.textContent = action?.label || "Afficher";
+  return link;
 }
 
 function renderBadge(meta) {
@@ -563,19 +665,13 @@ function renderRow(torrent) {
   const isPaused = meta.group === "paused";
   const isForcedShare = torrent.state === "forcedUP";
   const canForceShare = isComplete(torrent) || isForcedShare;
-  const pauseOrResume = button(isPaused ? "Reprendre" : "Pause", isPaused ? "primary" : "secondary", () => {
-    runTorrentAction([hash], isPaused ? "resume" : "pause");
-  });
+  const pauseOrResume = button(isPaused ? "Reprendre" : "Pause", isPaused ? "primary" : "secondary", () => runTorrentAction([hash], isPaused ? "resume" : "pause"));
   const detail = button("Détails", "secondary", (event) => openDetails(hash, event.currentTarget));
   const forceShare = canForceShare
-    ? button(isForcedShare ? "Partage normal" : "Partage forcé", isForcedShare ? "primary" : "secondary", () => {
-      runTorrentAction([hash], "force-start", { enabled: !isForcedShare });
-    })
+    ? button(isForcedShare ? "Partage normal" : "Partage forcé", isForcedShare ? "primary" : "secondary", () => runTorrentAction([hash], "force-start", { enabled: !isForcedShare }))
     : null;
   const remove = button("Supprimer", "danger", (event) => openDeleteDialog([torrent], event.currentTarget));
-  for (const control of [pauseOrResume, detail, forceShare, remove].filter(Boolean)) {
-    control.disabled = Boolean(busyText);
-  }
+  for (const control of [pauseOrResume, detail, forceShare, remove].filter(Boolean)) control.disabled = Boolean(busyText);
   actions.append(...[pauseOrResume, detail, forceShare, remove].filter(Boolean));
   const inline = document.createElement("div");
   inline.className = "row-status";
@@ -616,9 +712,113 @@ function renderSortHeaders() {
   });
 }
 
+function renderQuickActions() {
+  els.quickActions.replaceChildren(
+    ...(state.dashboard.quickActions || []).map((item) => {
+      const link = document.createElement("a");
+      link.className = "quick-action";
+      link.href = item.url || "/torrent-panel/?view=home";
+      const title = document.createElement("strong");
+      title.textContent = item.label;
+      const subtitle = document.createElement("span");
+      subtitle.textContent = item.id === "refresh-all" ? "Relance la vérification de tous les services." : "Ouvre directement la bonne vue.";
+      link.append(title, subtitle);
+      return link;
+    }),
+  );
+}
+
+function renderAlerts() {
+  const alerts = Array.isArray(state.dashboard.alerts) ? state.dashboard.alerts : [];
+  const critical = alerts.filter((item) => item.severity === "critical");
+  els.alertsSummary.textContent = `${alerts.length} alerte(s), dont ${critical.length} critique(s).`;
+  els.navAlertCount.hidden = critical.length === 0;
+  els.navAlertCount.textContent = String(critical.length);
+  els.criticalAlerts.hidden = critical.length === 0;
+  els.criticalAlerts.replaceChildren(
+    ...critical.map((item) => {
+      const article = document.createElement("article");
+      article.className = "alert-item critical";
+      const head = document.createElement("div");
+      head.className = "alert-head";
+      const title = document.createElement("strong");
+      title.textContent = item.service;
+      const severity = document.createElement("span");
+      severity.className = "severity-pill critical";
+      severity.textContent = "Critique";
+      head.append(title, severity);
+      const text = document.createElement("p");
+      text.textContent = item.message;
+      article.append(head, text, actionLink(item.action));
+      return article;
+    }),
+  );
+  els.alertsList.replaceChildren(
+    ...alerts.map((item) => {
+      const article = document.createElement("article");
+      article.className = `alert-item ${item.severity || "warning"}`;
+      const head = document.createElement("div");
+      head.className = "alert-head";
+      const title = document.createElement("strong");
+      title.textContent = item.service;
+      const severity = document.createElement("span");
+      severity.className = `severity-pill ${item.severity || "warning"}`;
+      severity.textContent = item.severity === "critical" ? "Critique" : "Alerte";
+      head.append(title, severity);
+      const text = document.createElement("p");
+      text.textContent = item.message;
+      const meta = document.createElement("div");
+      meta.className = "service-meta";
+      meta.textContent = formatIsoDate(item.date);
+      article.append(head, text, meta, actionLink(item.action));
+      return article;
+    }),
+  );
+}
+
+function renderServices() {
+  const services = Array.isArray(state.dashboard.services) ? state.dashboard.services : [];
+  const operational = services.filter((item) => item.status === "operational").length;
+  els.servicesSummary.textContent = `${operational}/${services.length} service(s) opérationnel(s).`;
+  els.servicesGrid.replaceChildren(
+    ...services.map((item) => {
+      const article = document.createElement("article");
+      article.className = `service-item ${item.status || "checking"}`;
+      const head = document.createElement("div");
+      head.className = "service-head";
+      const title = document.createElement("strong");
+      title.textContent = item.name;
+      head.append(title, renderBadge({
+        group: item.status === "operational" ? "complete" : item.status === "degraded" ? "checking" : item.status === "checking" ? "waiting" : "error",
+        text: item.status === "operational" ? "Opérationnel" : item.status === "degraded" ? "Dégradé" : item.status === "checking" ? "Vérification en cours" : "Indisponible",
+        icon: item.status === "operational" ? "✓" : item.status === "degraded" ? "…" : item.status === "checking" ? "…" : "!",
+      }));
+      const text = document.createElement("p");
+      text.textContent = item.message;
+      const meta = document.createElement("div");
+      meta.className = "service-meta";
+      meta.textContent = `Dernière vérification: ${formatIsoDate(item.checkedAt)} · Dernier succès: ${formatIsoDate(item.lastSuccessfulCheckAt)}`;
+      article.append(head, text, meta, actionLink(item.action));
+      return article;
+    }),
+  );
+}
+
+function renderHome() {
+  const critical = Number(state.dashboard.criticalCount || 0);
+  els.homeSummary.textContent = critical
+    ? `${critical} alerte(s) critique(s) demandent une attention immédiate.`
+    : "Aucune alerte critique. Les services restent surveillés en direct.";
+  renderQuickActions();
+  renderAlerts();
+  renderServices();
+}
+
 function render() {
   renderSummary();
   renderControls();
+  renderHome();
+  setView(state.activeView, { push: false });
   const visible = filteredTorrents();
   els.rows.replaceChildren(...visible.map(renderRow));
   els.empty.textContent = state.torrents.length === 0 ? "Aucun torrent pour le moment." : "Aucun torrent ne correspond aux filtres.";
@@ -629,6 +829,16 @@ function render() {
   updateDetails();
 }
 
+async function loadDashboard() {
+  const payload = await api("api/dashboard", { cache: "no-store" });
+  state.dashboard = {
+    alerts: Array.isArray(payload.alerts) ? payload.alerts : [],
+    criticalCount: Number(payload.criticalCount) || 0,
+    quickActions: Array.isArray(payload.quickActions) ? payload.quickActions : [],
+    services: Array.isArray(payload.services) ? payload.services : [],
+  };
+}
+
 async function loadTorrents({ silent = false, force = false } = {}) {
   if (state.refreshPromise) return state.refreshPromise;
   if (!force && (state.globalActionCount > 0 || document.hidden)) return null;
@@ -636,18 +846,25 @@ async function loadTorrents({ silent = false, force = false } = {}) {
 
   state.refreshPromise = (async () => {
     try {
-      const payload = await api("api/torrents");
-      const torrents = Array.isArray(payload.torrents) ? payload.torrents : [];
+      const [dashboardPayload, torrentPayload] = await Promise.all([
+        api("api/dashboard", { cache: "no-store" }),
+        api("api/torrents", { cache: "no-store" }),
+      ]);
+      state.dashboard = {
+        alerts: Array.isArray(dashboardPayload.alerts) ? dashboardPayload.alerts : [],
+        criticalCount: Number(dashboardPayload.criticalCount) || 0,
+        quickActions: Array.isArray(dashboardPayload.quickActions) ? dashboardPayload.quickActions : [],
+        services: Array.isArray(dashboardPayload.services) ? dashboardPayload.services : [],
+      };
+      const torrents = Array.isArray(torrentPayload.torrents) ? torrentPayload.torrents : [];
       const signature = JSON.stringify(torrents);
       state.lastUpdatedAt = new Date();
       if (signature !== state.lastSignature) {
         state.torrents = torrents;
         state.lastSignature = signature;
-        render();
-      } else {
-        renderSelection();
       }
       clearError();
+      render();
       els.refreshStatus.textContent = `À jour ${state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" })}`;
     } catch (error) {
       showError(error);
@@ -697,6 +914,7 @@ async function runTorrentAction(hashes, action, options = {}) {
     await loadTorrents({ silent: true, force: true });
   } catch (error) {
     hashes.forEach((hash) => state.rowErrors.set(hash, describeError(error)));
+    render();
   } finally {
     hashes.forEach((hash) => state.rowBusy.delete(hash));
     state.globalActionCount -= 1;
@@ -712,9 +930,7 @@ function openDeleteDialog(torrents, trigger) {
   state.lastFocus = trigger || document.activeElement;
   state.pendingDelete = torrents;
   els.deleteTitle.textContent = torrents.length > 1 ? "Supprimer les torrents" : "Supprimer le torrent";
-  els.deleteTorrentName.textContent = torrents.length > 1
-    ? `${torrents.length} torrents sélectionnés`
-    : torrents[0]?.name || "";
+  els.deleteTorrentName.textContent = torrents.length > 1 ? `${torrents.length} torrents sélectionnés` : torrents[0]?.name || "";
   els.deleteForm.deleteMode.value = "torrent";
   els.confirmText.value = "";
   updateDeleteConfirm();
@@ -865,18 +1081,22 @@ function restartRefreshTimer() {
 function updatePreference(key, value) {
   state.prefs[key] = value;
   savePrefs();
+  updateUrl();
   render();
 }
 
 function resetFilters() {
   state.prefs = { ...state.prefs, search: "", status: "all", category: "all", tag: "all", sort: "default", direction: "asc" };
   savePrefs();
+  updateUrl();
   render();
 }
 
 function openAddPanel() {
   const addPanel = document.querySelector("#addPanel");
   if (addPanel) addPanel.open = true;
+  state.activeView = "torrents";
+  setView("torrents");
   els.magnetInput.focus();
 }
 
@@ -902,26 +1122,23 @@ function bindEvents() {
     savePrefs();
     restartRefreshTimer();
   });
-  document.querySelectorAll(".sort-head").forEach((head) => {
-    head.addEventListener("click", () => setSort(head.dataset.sort));
-  });
+  document.querySelectorAll(".sort-head").forEach((head) => head.addEventListener("click", () => setSort(head.dataset.sort)));
   els.quickFilters.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-quick-filter]");
-    if (!button) return;
-    setStatusFromQuickFilter(button.dataset.quickFilter);
+    const clicked = event.target.closest("[data-quick-filter]");
+    if (!clicked) return;
+    setStatusFromQuickFilter(clicked.dataset.quickFilter);
   });
   els.summaryGrid.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-filter]");
-    if (!button) return;
-    setStatusFromQuickFilter(button.dataset.filter);
+    const clicked = event.target.closest("[data-filter]");
+    if (!clicked) return;
+    state.activeView = "torrents";
+    setView("torrents");
+    setStatusFromQuickFilter(clicked.dataset.filter);
   });
   els.selectVisible.addEventListener("change", () => {
     const visible = filteredTorrents();
-    if (els.selectVisible.checked) {
-      visible.forEach((torrent) => state.selected.add(torrent.hash));
-    } else {
-      visible.forEach((torrent) => state.selected.delete(torrent.hash));
-    }
+    if (els.selectVisible.checked) visible.forEach((torrent) => state.selected.add(torrent.hash));
+    else visible.forEach((torrent) => state.selected.delete(torrent.hash));
     render();
   });
   els.bulkPause.addEventListener("click", () => runTorrentAction([...state.selected], "pause"));
@@ -934,11 +1151,7 @@ function bindEvents() {
       return;
     }
     const disableForcedShare = eligible.every((torrent) => torrent.state === "forcedUP");
-    runTorrentAction(
-      eligible.map((torrent) => torrent.hash),
-      "force-start",
-      { enabled: !disableForcedShare },
-    );
+    runTorrentAction(eligible.map((torrent) => torrent.hash), "force-start", { enabled: !disableForcedShare });
   });
   els.bulkDelete.addEventListener("click", (event) => {
     const selectedTorrents = state.torrents.filter((torrent) => state.selected.has(torrent.hash));
@@ -951,9 +1164,7 @@ function bindEvents() {
     state.pendingDelete = null;
     els.deleteDialog.close();
   });
-  els.confirmDeleteButton.addEventListener("click", () => {
-    confirmDelete();
-  });
+  els.confirmDeleteButton.addEventListener("click", confirmDelete);
   els.deleteForm.addEventListener("submit", (event) => {
     event.preventDefault();
     confirmDelete();
@@ -966,19 +1177,33 @@ function bindEvents() {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) loadTorrents({ silent: true, force: true });
   });
+  window.addEventListener?.("popstate", () => {
+    applyUrlState();
+    render();
+  });
 }
 
 async function init() {
   bindEvents();
+  applyUrlState();
   renderControls();
   restartRefreshTimer();
   try {
     await refreshSession();
     await loadTorrents({ force: true });
+    const url = currentUrl();
+    if (url.searchParams.get("add") === "1") openAddPanel();
+    if (url.searchParams.get("refresh") === "1") await loadTorrents({ force: true });
   } catch (error) {
+    try {
+      await loadDashboard();
+      render();
+    } catch {}
     showError(error);
     els.refreshStatus.textContent = "Erreur";
   }
 }
 
 init();
+
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, state };
