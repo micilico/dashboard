@@ -112,12 +112,13 @@ function createEnvironment() {
 
   [
     "#refreshStatus", "#refreshButton", "#retryButton", "#alert", "#alertText", "#summaryGrid",
-    "#homeLink", "#torrentLink", "#prowlarrLink", "#indexersView", "#searchView", "#applicationsView",
+    "#homeLink", "#activityLink", "#torrentLink", "#prowlarrLink", "#storageLink", "#mediaLink", "#healthLink",
+    "#indexersView", "#searchView", "#applicationsView",
     "#healthView", "#indexersSummary", "#indexersError", "#indexerRows", "#indexersEmpty", "#indexerSearch",
     "#indexerState", "#indexerProtocol", "#indexerTag", "#indexerSort", "#resetIndexers", "#testAllButton",
     "#searchForm", "#releaseQuery", "#releaseCategories", "#releaseCategoryChoices", "#releaseIndexerSearch",
     "#releaseIndexers", "#selectAllIndexers", "#clearIndexers", "#searchButton", "#searchSummary", "#resultRows",
-    "#resultsEmpty", "#resultSearch", "#resultIndexer", "#resultProtocol", "#resultCategory", "#resultMaxSize",
+    "#searchPartialFailures", "#grabNotice", "#resultsEmpty", "#resultSearch", "#resultIndexer", "#resultProtocol", "#resultCategory", "#resultMaxSize",
     "#resultSort", "#appsGrid", "#appsSummary", "#appsError", "#alertsList", "#historyList", "#healthSummary",
     "#healthError", "#healthTab", "#confirmDialog", "#confirmTitle", "#confirmText", "#cancelConfirm",
     "#acceptConfirm", "#toast",
@@ -167,7 +168,7 @@ function createEnvironment() {
 const { context, elements } = createEnvironment();
 const source = fs.readFileSync("prowlarr-panel/prowlarr_panel/static/app.js", "utf8").replace(
   "init().catch(showError);",
-  "globalThis.__testApi = { state, renderIndexers, renderResults, setView, handleTabKeydown };",
+  "globalThis.__testApi = { state, renderIndexers, renderResults, renderGrabNotice, buildTorrentFollowUrl, setView, handleTabKeydown };",
 );
 vm.runInNewContext(source, context);
 const api = context.__testApi;
@@ -215,6 +216,15 @@ assert.equal(resultRows.children.length, 1);
 assert.equal(flattenText(resultRows).includes('"><svg onload=alert(1)>'), true);
 assert.equal(flattenText(resultRows).includes("</button><script>alert(1)</script>"), true);
 assert.equal(resultRows.children.some((child) => child.tagName === "SVG"), false);
+
+api.state.partialFailures = [{ message: "Indexer A indisponible." }];
+api.renderResults();
+assert.equal(elements.get("#searchPartialFailures").hidden, false);
+
+api.state.lastGrab = { title: "Ubuntu ISO", followUrl: api.buildTorrentFollowUrl("Ubuntu ISO") };
+api.renderGrabNotice();
+assert.equal(elements.get("#grabNotice").hidden, false);
+assert.equal(flattenText(elements.get("#grabNotice")).includes("Suivre dans Torrent Panel"), true);
 
 const tabs = context.document.querySelectorAll(".tab");
 api.setView("search", { replace: false });

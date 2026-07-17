@@ -16,8 +16,12 @@
         </div>
         <nav class="nav" aria-label="Navigation principale">
           <a id="homeNavLink" href="./?view=home">Accueil <span id="navAlertCount" class="nav-count" hidden>0</span></a>
+          <a id="activityNavLink" href="/activity/">Activité</a>
           <a id="torrentsNavLink" aria-current="page" href="./?view=torrents">Torrents</a>
           <a id="prowlarrNavLink" href="/prowlarr-panel/">Prowlarr</a>
+          <a id="storageNavLink" href="/storage-panel/">Stockage</a>
+          <a id="mediaNavLink" href="/media-panel/">Médias</a>
+          <a id="healthNavLink" href="/health/">Santé</a>
         </nav>
         <div class="topbar-actions">
           <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
@@ -114,6 +118,7 @@
 
         <div class="quick-filters" id="quickFilters" aria-label="Filtres rapides torrents"></div>
         <p id="filterNotice" class="filter-notice" aria-live="polite"></p>
+        <div id="followNotice" class="follow-notice" hidden></div>
 
         <div class="filters" aria-label="Recherche et filtres">
           <label>

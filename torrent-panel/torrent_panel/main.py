@@ -26,6 +26,11 @@ logger = logging.getLogger("torrent_panel")
 STATIC_DIR = Path(__file__).parent / "static"
 HASH_RE = re.compile(r"^[A-Fa-f0-9]{40}([A-Fa-f0-9]{24})?$")
 PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
+ACTIVITY_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_ACTIVITY_PUBLIC_PREFIX", "/activity").rstrip("/")
+STORAGE_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")
+MEDIA_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_MEDIA_PUBLIC_PREFIX", "/media-panel").rstrip("/")
+HEALTH_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_HEALTH_PUBLIC_PREFIX", "/health").rstrip("/")
+CONSOLE_PREFIXES = [ACTIVITY_PUBLIC_PREFIX, STORAGE_PUBLIC_PREFIX, MEDIA_PUBLIC_PREFIX, HEALTH_PUBLIC_PREFIX]
 PROWLARR_PANEL_PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")
 CSRF_COOKIE = "torrent_panel_csrf"
 CSRF_HEADER = "X-Torrent-Panel-CSRF"
@@ -83,6 +88,18 @@ MEDIA_AUTOMATION_STATE_PATH = Path(
     os.getenv(
         "TORRENT_PANEL_MEDIA_AUTOMATION_STATE_PATH",
         str(Path(__file__).resolve().parents[1] / "data" / "media-automation-state.json"),
+    )
+)
+NOTIFICATION_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_NOTIFICATION_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "notification-state.json"),
+    )
+)
+AUTOMATION_RULES_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_AUTOMATION_RULES_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "automation-rules.json"),
     )
 )
 MEDIA_MOUNT_PATH = os.getenv("TORRENT_PANEL_MEDIA_MOUNT_PATH", MONITOR_DISK_PATH)
@@ -145,6 +162,34 @@ class RetryMediaWorkflow(BaseModel):
 class ManualMediaActionResult(BaseModel):
     status: str
     message: str
+
+
+class NotificationAction(BaseModel):
+    code: str = Field(..., min_length=3, max_length=160)
+
+
+class TorrentCategoryUpdate(TorrentHashesAction):
+    category: str = Field(default="", max_length=80)
+
+
+class TorrentTagsUpdate(TorrentHashesAction):
+    tags: str = Field(default="", max_length=200)
+
+
+class TorrentRateLimitUpdate(TorrentHashesAction):
+    limitKiB: int = Field(..., ge=0, le=10_000_000)
+
+
+class TorrentSequentialUpdate(TorrentHashesAction):
+    enabled: bool = True
+
+
+class AutomationRulePayload(BaseModel):
+    name: str = Field(..., min_length=3, max_length=120)
+    trigger: str = Field(..., min_length=3, max_length=80)
+    conditions: list[str] = Field(default_factory=list, max_length=12)
+    actions: list[str] = Field(default_factory=list, min_length=1, max_length=12)
+    enabled: bool = False
 
 
 class RateLimiter:
@@ -704,13 +749,237 @@ class MediaAutomationManager:
             )
 
 
+class NotificationCenter:
+    def __init__(self, state_path: Path) -> None:
+        self._state_path = state_path
+        self._records: dict[str, dict[str, Any]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError):
+            logger.warning("Unable to read notification state")
+            return
+        if isinstance(payload, dict):
+            self._records = {str(key): value for key, value in payload.items() if isinstance(value, dict)}
+
+    def _save(self) -> None:
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self._state_path.with_suffix(".tmp")
+            temp_path.write_text(json.dumps(self._records, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.replace(self._state_path)
+        except OSError:
+            logger.warning("Unable to persist notification state")
+
+    def reconcile(self, alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen_codes: set[str] = set()
+        for alert in alerts:
+            code = str(alert.get("code") or "")
+            if not code:
+                continue
+            seen_codes.add(code)
+            record = self._records.get(code)
+            if record is None:
+                record = {
+                    "code": code,
+                    "service": alert.get("service", "Service"),
+                    "severity": alert.get("severity", "warning"),
+                    "message": alert.get("message", ""),
+                    "firstSeenAt": alert.get("date") or now_iso(),
+                    "lastSeenAt": alert.get("date") or now_iso(),
+                    "occurrences": 1,
+                    "status": "open",
+                    "ackedAt": None,
+                    "lastResult": "open",
+                    "action": alert.get("action"),
+                }
+                self._records[code] = record
+                continue
+            record["service"] = alert.get("service", record.get("service"))
+            record["severity"] = alert.get("severity", record.get("severity"))
+            record["message"] = alert.get("message", record.get("message"))
+            record["lastSeenAt"] = alert.get("date") or now_iso()
+            record["occurrences"] = int(record.get("occurrences", 0) or 0) + 1
+            record["action"] = alert.get("action")
+            if record.get("status") == "acknowledged":
+                record["status"] = "reopened"
+                record["lastResult"] = "reopened"
+        for code, record in self._records.items():
+            if code not in seen_codes and record.get("status") == "open":
+                record["lastResult"] = "stable"
+        self._save()
+        return self.snapshot()
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        return sorted(
+            [dict(item) for item in self._records.values()],
+            key=lambda item: (item.get("status") == "acknowledged", item.get("lastSeenAt") or ""),
+            reverse=True,
+        )
+
+    def acknowledge(self, code: str) -> dict[str, Any]:
+        record = self._records.get(code)
+        if not record:
+            raise HTTPException(status_code=404, detail=error_detail("notification_not_found", "Alerte introuvable.", "Actualiser"))
+        record["status"] = "acknowledged"
+        record["ackedAt"] = now_iso()
+        record["lastResult"] = "acknowledged"
+        self._save()
+        return dict(record)
+
+    def reopen(self, code: str) -> dict[str, Any]:
+        record = self._records.get(code)
+        if not record:
+            raise HTTPException(status_code=404, detail=error_detail("notification_not_found", "Alerte introuvable.", "Actualiser"))
+        record["status"] = "reopened"
+        record["ackedAt"] = None
+        record["lastResult"] = "reopened"
+        self._save()
+        return dict(record)
+
+
+class AutomationRuleStore:
+    def __init__(self, state_path: Path) -> None:
+        self._state_path = state_path
+        self._rules: list[dict[str, Any]] = []
+        self._load()
+
+    def _default_rules(self) -> list[dict[str, Any]]:
+        generated_at = now_iso()
+        return [
+            {
+                "id": secrets.token_hex(6),
+                "name": "Pause si disque critique",
+                "trigger": "disk_critical",
+                "conditions": ["Stockage critique"],
+                "actions": ["pause_downloads"],
+                "enabled": False,
+                "mode": "simulation",
+                "createdAt": generated_at,
+                "updatedAt": generated_at,
+                "lastExecutedAt": None,
+                "lastResult": "never",
+            },
+            {
+                "id": secrets.token_hex(6),
+                "name": "Alerte torrent bloqué",
+                "trigger": "blocked_torrent",
+                "conditions": ["Torrent bloqué plusieurs minutes"],
+                "actions": ["notify_blocked_torrent"],
+                "enabled": True,
+                "mode": "simulation",
+                "createdAt": generated_at,
+                "updatedAt": generated_at,
+                "lastExecutedAt": None,
+                "lastResult": "never",
+            },
+            {
+                "id": secrets.token_hex(6),
+                "name": "Alerte backend indisponible",
+                "trigger": "backend_unavailable",
+                "conditions": ["Service distant indisponible"],
+                "actions": ["notify_backend_unavailable"],
+                "enabled": True,
+                "mode": "simulation",
+                "createdAt": generated_at,
+                "updatedAt": generated_at,
+                "lastExecutedAt": None,
+                "lastResult": "never",
+            },
+        ]
+
+    def _load(self) -> None:
+        try:
+            payload = json.loads(self._state_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            self._rules = self._default_rules()
+            self._save()
+            return
+        except (OSError, ValueError):
+            logger.warning("Unable to read automation rules state")
+            self._rules = self._default_rules()
+            return
+        parsed = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+        self._rules = parsed or self._default_rules()
+
+    def _save(self) -> None:
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = self._state_path.with_suffix(".tmp")
+            temp_path.write_text(json.dumps(self._rules, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.replace(self._state_path)
+        except OSError:
+            logger.warning("Unable to persist automation rules")
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        return [dict(item) for item in self._rules]
+
+    def upsert(self, payload: AutomationRulePayload) -> dict[str, Any]:
+        existing = next((item for item in self._rules if item.get("name") == payload.name), None)
+        if existing is None:
+            existing = {"id": secrets.token_hex(6), "createdAt": now_iso()}
+            self._rules.append(existing)
+        existing.update(
+            {
+                "name": payload.name,
+                "trigger": payload.trigger,
+                "conditions": payload.conditions,
+                "actions": payload.actions,
+                "enabled": payload.enabled,
+                "mode": "simulation",
+                "updatedAt": now_iso(),
+                "lastExecutedAt": existing.get("lastExecutedAt"),
+                "lastResult": existing.get("lastResult", "never"),
+            }
+        )
+        self._save()
+        return dict(existing)
+
+    def simulate(self, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        alerts = snapshot.get("alerts", [])
+        services = snapshot.get("services", [])
+        for rule in self._rules:
+            matched = False
+            trigger = str(rule.get("trigger") or "")
+            if trigger == "disk_critical":
+                matched = any(item.get("service") == "Stockage" and item.get("severity") == "critical" for item in alerts)
+            elif trigger == "blocked_torrent":
+                matched = any(item.get("service") == "qBittorrent" for item in alerts)
+            elif trigger == "backend_unavailable":
+                matched = any(item.get("status") == "unavailable" for item in services)
+            result = {
+                "ruleId": rule.get("id"),
+                "name": rule.get("name"),
+                "mode": "simulation",
+                "matched": matched,
+                "actions": list(rule.get("actions") or []),
+                "trigger": trigger,
+                "date": now_iso(),
+            }
+            rule["lastExecutedAt"] = result["date"]
+            rule["lastResult"] = "matched" if matched else "no_match"
+            results.append(result)
+        self._save()
+        return results
+
+
 app = FastAPI(title="Torrent Panel", docs_url=None, redoc_url=None, openapi_url=None)
 api_router = APIRouter()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if PUBLIC_PREFIX:
     app.mount(f"{PUBLIC_PREFIX}/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
+for prefix in CONSOLE_PREFIXES:
+    if prefix:
+        app.mount(f"{prefix}/static", StaticFiles(directory=STATIC_DIR), name=f"{prefix.strip('/').replace('-', '_')}_static")
 app.state.qbit = build_client()
 app.state.media_automation = MediaAutomationManager(app.state.qbit, build_media_automation_config())
+app.state.notifications = NotificationCenter(NOTIFICATION_STATE_PATH)
+app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
 app.state.csrf_tokens = {}
 app.state.action_limiter = RateLimiter(
     max_calls=RATE_LIMIT_CALLS,
@@ -726,6 +995,7 @@ async def add_security_headers(request: Request, call_next):
         protected_prefixes = ["/api"]
         if PUBLIC_PREFIX:
             protected_prefixes.append(f"{PUBLIC_PREFIX}/api")
+        protected_prefixes.extend(f"{prefix}/api" for prefix in CONSOLE_PREFIXES if prefix)
         ready_paths = {"/readyz"}
         if PUBLIC_PREFIX:
             ready_paths.add(f"{PUBLIC_PREFIX}/readyz")
@@ -1225,6 +1495,250 @@ async def dashboard_snapshot() -> dict[str, Any]:
     }
 
 
+def format_bytes(value: int | float) -> str:
+    units = ["o", "Ko", "Mo", "Go", "To"]
+    amount = float(value or 0)
+    if amount <= 0:
+        return "0 o"
+    unit_index = 0
+    while amount >= 1024 and unit_index < len(units) - 1:
+        amount /= 1024
+        unit_index += 1
+    precision = 0 if unit_index == 0 else 1
+    return f"{amount:.{precision}f} {units[unit_index]}"
+
+
+def route_url(prefix: str, path: str = "/") -> str:
+    base = prefix or ""
+    if path == "/":
+        return f"{base}/"
+    return f"{base}{path}"
+
+
+async def storage_snapshot() -> dict[str, Any]:
+    generated_at = now_iso()
+    disk: dict[str, Any]
+    try:
+        stats = os.statvfs(MONITOR_DISK_PATH)
+        total_bytes = stats.f_frsize * stats.f_blocks
+        free_bytes = stats.f_frsize * stats.f_bavail
+        used_bytes = max(0, total_bytes - free_bytes)
+        used_percent = (used_bytes / total_bytes * 100) if total_bytes else 0.0
+        status = "critical" if (100 - used_percent) <= MONITOR_DISK_CRITICAL_PERCENT else "warning" if (100 - used_percent) <= MONITOR_DISK_WARNING_PERCENT else "normal"
+        disk = {
+            "path": MONITOR_DISK_PATH,
+            "mounted": True,
+            "status": status,
+            "totalBytes": total_bytes,
+            "usedBytes": used_bytes,
+            "freeBytes": free_bytes,
+            "usedPercent": round(used_percent, 1),
+            "freePercent": round(100 - used_percent, 1),
+            "estimateToFull": None,
+        }
+    except OSError:
+        disk = {
+            "path": MONITOR_DISK_PATH,
+            "mounted": False,
+            "status": "critical",
+            "totalBytes": 0,
+            "usedBytes": 0,
+            "freeBytes": 0,
+            "usedPercent": 0.0,
+            "freePercent": 0.0,
+            "estimateToFull": None,
+        }
+
+    rclone_stats: dict[str, Any] = {}
+    rclone_error = ""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
+            response = await client.post(RCLONE_RC_URL, json={})
+        parsed = response.json() if response.status_code == 200 else {}
+        rclone_stats = parsed if isinstance(parsed, dict) else {}
+    except (httpx.HTTPError, ValueError):
+        rclone_error = "Endpoint RC rclone inaccessible."
+
+    transfers = rclone_stats.get("transferring")
+    queue = rclone_stats.get("checking") or rclone_stats.get("transfers") or 0
+    active_transfers = transfers if isinstance(transfers, list) else []
+    speed = int(rclone_stats.get("speed", 0) or 0)
+    if speed > 0 and disk.get("freeBytes"):
+        disk["estimateToFull"] = round(disk["freeBytes"] / speed)
+
+    return {
+        "generatedAt": generated_at,
+        "disk": disk,
+        "rclone": {
+            "status": "error" if rclone_error else ("warning" if int(rclone_stats.get("errors", 0) or 0) else "ok"),
+            "lastSuccessfulResponseAt": generated_at if not rclone_error else None,
+            "speedBytes": speed,
+            "speedLabel": format_bytes(speed) + "/s",
+            "bytesTransferred": int(rclone_stats.get("bytes", 0) or 0),
+            "errors": int(rclone_stats.get("errors", 0) or 0),
+            "queue": queue,
+            "transfersActive": len(active_transfers),
+            "transfers": active_transfers,
+            "errorMessage": rclone_error,
+        },
+    }
+
+
+async def jellyfin_snapshot() -> dict[str, Any]:
+    generated_at = now_iso()
+    summary = {
+        "generatedAt": generated_at,
+        "status": "unavailable",
+        "version": "inconnue",
+        "serverName": "Jellyfin",
+        "sessions": [],
+        "activeUsers": [],
+        "libraries": [],
+        "recentItems": [],
+        "tasks": [],
+        "errors": [],
+        "actions": {
+            "openUrl": JELLYFIN_PUBLIC_URL,
+            "scanEndpointAvailable": bool(JELLYFIN_API_KEY),
+        },
+    }
+    if not JELLYFIN_API_KEY:
+        summary["errors"] = ["Clé API Jellyfin absente côté backend."]
+        return summary
+
+    headers = {"X-Emby-Token": JELLYFIN_API_KEY}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), trust_env=False) as client:
+            info_response, session_response, views_response, latest_response, tasks_response = await asyncio.gather(
+                client.get(f"{JELLYFIN_API_URL}/System/Info/Public", headers=headers),
+                client.get(f"{JELLYFIN_API_URL}/Sessions", headers=headers),
+                client.get(f"{JELLYFIN_API_URL}/Users", headers=headers),
+                client.get(f"{JELLYFIN_API_URL}/Items/Latest", headers=headers, params={"Limit": 8}),
+                client.get(f"{JELLYFIN_API_URL}/ScheduledTasks", headers=headers),
+            )
+        info = info_response.json() if info_response.status_code == 200 else {}
+        sessions = session_response.json() if session_response.status_code == 200 else []
+        users = views_response.json() if views_response.status_code == 200 else []
+        latest = latest_response.json() if latest_response.status_code == 200 else []
+        tasks = tasks_response.json() if tasks_response.status_code == 200 else []
+    except (httpx.HTTPError, ValueError):
+        summary["errors"] = ["API Jellyfin indisponible."]
+        return summary
+
+    summary["status"] = "operational"
+    summary["version"] = str(info.get("Version") or info.get("version") or "inconnue")
+    summary["serverName"] = str(info.get("ServerName") or info.get("serverName") or "Jellyfin")
+    summary["sessions"] = [item for item in sessions if isinstance(item, dict)]
+    summary["activeUsers"] = [
+        {"name": str(item.get("Name") or item.get("name") or ""), "id": str(item.get("Id") or item.get("id") or "")}
+        for item in users if isinstance(item, dict)
+    ]
+    summary["recentItems"] = [
+        {"name": str(item.get("Name") or item.get("name") or "Media"), "type": str(item.get("Type") or item.get("type") or ""), "id": str(item.get("Id") or item.get("id") or "")}
+        for item in latest if isinstance(item, dict)
+    ]
+    summary["tasks"] = [
+        {
+            "name": str(item.get("Name") or item.get("name") or "Tâche"),
+            "state": str(item.get("State") or item.get("state") or ""),
+            "lastExecutionResult": str(item.get("LastExecutionResult") or ""),
+            "isRunning": bool(item.get("IsRunning") or item.get("isRunning")),
+        }
+        for item in tasks if isinstance(item, dict)
+    ]
+    return summary
+
+
+async def health_snapshot() -> dict[str, Any]:
+    dashboard = await dashboard_snapshot()
+    services = list(dashboard.get("services", []))
+    operational = [item for item in services if item.get("status") == "operational"]
+    unavailable = [item for item in services if item.get("status") == "unavailable"]
+    degraded = [item for item in services if item.get("status") == "degraded"]
+    global_status = "indisponible" if unavailable else "dégradé" if degraded else "opérationnel"
+    checks = []
+    for item in services:
+        checks.append(
+            {
+                "name": item.get("name"),
+                "service": item.get("service"),
+                "liveness": "ok" if item.get("name") in {"Torrent Panel", "Homepage", "Prowlarr Panel"} else ("ok" if item.get("status") != "unavailable" else "error"),
+                "readiness": normalize_service_status(str(item.get("status") or "")),
+                "message": item.get("message"),
+                "latency": item.get("details", {}).get("httpStatus"),
+                "lastSuccessfulCheckAt": item.get("lastSuccessfulCheckAt"),
+                "lastError": item.get("message") if item.get("status") != "operational" else "",
+            }
+        )
+    return {
+        "generatedAt": dashboard.get("generatedAt"),
+        "globalStatus": global_status,
+        "summary": {"operational": len(operational), "degraded": len(degraded), "unavailable": len(unavailable)},
+        "checks": checks,
+        "alerts": dashboard.get("alerts", []),
+    }
+
+
+async def activity_snapshot() -> dict[str, Any]:
+    dashboard = await dashboard_snapshot()
+    storage = await storage_snapshot()
+    media = await jellyfin_snapshot()
+    torrents = []
+    try:
+        torrents = await app.state.qbit.torrents()
+    except QbitError:
+        torrents = []
+    prowlarr_overview, _prowlarr_health = await prowlarr_snapshot()
+    media_history = app.state.media_automation.snapshot().get("entries", [])
+    summary = {
+        "downloadsActive": len([item for item in torrents if state_meta_from_qbit(item) == "downloading"]),
+        "downloadSpeedBytes": sum(int(item.get("downloadSpeed", 0) or 0) for item in torrents),
+        "uploadSpeedBytes": sum(int(item.get("uploadSpeed", 0) or 0) for item in torrents),
+        "completedRecently": len([item for item in torrents if int(item.get("completionOn", 0) or 0) > 0]),
+        "blockedTorrents": len([item for item in torrents if state_meta_from_qbit(item) == "error"]),
+        "indexersError": int(prowlarr_overview.get("indexersError", 0) or 0),
+        "transfersRcloneActive": int(storage.get("rclone", {}).get("transfersActive", 0) or 0),
+        "rcloneErrors": int(storage.get("rclone", {}).get("errors", 0) or 0),
+        "diskFreeBytes": int(storage.get("disk", {}).get("freeBytes", 0) or 0),
+        "jellyfinRecentItems": len(media.get("recentItems", [])),
+        "backendUnavailable": len([item for item in dashboard.get("services", []) if item.get("status") == "unavailable"]),
+    }
+    timeline: list[dict[str, Any]] = []
+    for alert in dashboard.get("alerts", [])[:10]:
+        timeline.append(
+            {
+                "date": alert.get("date"),
+                "service": alert.get("service"),
+                "type": "service_alert",
+                "message": alert.get("message"),
+                "result": alert.get("severity"),
+                "origin": "automatique",
+            }
+        )
+    for entry in media_history[:10]:
+        timeline.append(
+            {
+                "date": entry.get("updatedAt") or entry.get("completedAt"),
+                "service": "Automatisation médias",
+                "type": "download_completed",
+                "message": entry.get("torrentName"),
+                "result": entry.get("stateLabel"),
+                "origin": "automatique",
+            }
+        )
+    timeline.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
+    notifications = app.state.notifications.reconcile(list(dashboard.get("alerts", [])))
+    simulations = app.state.automation_rules.simulate(dashboard)
+    return {
+        "generatedAt": dashboard.get("generatedAt"),
+        "summary": summary,
+        "timeline": timeline[:20],
+        "alerts": notifications,
+        "simulations": simulations,
+        "lastSuccessfulRefreshAt": dashboard.get("generatedAt"),
+    }
+
+
 def state_meta_from_qbit(torrent: dict[str, Any]) -> str:
     raw = str(torrent.get("state") or "unknown")
     if raw in {"stalledDL", "stalledUP", "error", "missingFiles"}:
@@ -1283,7 +1797,7 @@ def set_csrf_cookie(request: Request, response: Response) -> str:
         secure=is_https,
         httponly=False,
         samesite="strict",
-        path=f"{PUBLIC_PREFIX}/" if PUBLIC_PREFIX else "/",
+        path="/",
     )
     return token
 
@@ -1308,6 +1822,27 @@ async def config_js() -> PlainTextResponse:
     )
 
 
+def console_config_js(section: str, prefix: str) -> PlainTextResponse:
+    return PlainTextResponse(
+        "\n".join(
+            [
+                "window.__DASHBOARD_CONSOLE_CONFIG__ = {",
+                f'  section: "{section}",',
+                f'  publicPrefix: "{prefix}",',
+                f'  apiPrefix: "{prefix}/api",',
+                f'  torrentPanelPrefix: "{PUBLIC_PREFIX or ""}",',
+                f'  prowlarrPanelPrefix: "{PROWLARR_PANEL_PUBLIC_PREFIX or ""}",',
+                f'  activityPrefix: "{ACTIVITY_PUBLIC_PREFIX or ""}",',
+                f'  storagePrefix: "{STORAGE_PUBLIC_PREFIX or ""}",',
+                f'  mediaPrefix: "{MEDIA_PUBLIC_PREFIX or ""}",',
+                f'  healthPrefix: "{HEALTH_PUBLIC_PREFIX or ""}",',
+                "};",
+            ]
+        ),
+        media_type="application/javascript",
+    )
+
+
 if PUBLIC_PREFIX:
 
     @app.get(PUBLIC_PREFIX)
@@ -1323,6 +1858,29 @@ if PUBLIC_PREFIX:
     @app.get(f"{PUBLIC_PREFIX}/config.js")
     async def prefixed_config_js() -> PlainTextResponse:
         return await config_js()
+
+
+def register_console_page(prefix: str, section: str, filename: str) -> None:
+    if not prefix:
+        return
+
+    @app.get(prefix)
+    async def console_redirect(_prefix: str = prefix) -> RedirectResponse:
+        return RedirectResponse(url=f"{_prefix}/", status_code=308)
+
+    @app.get(f"{prefix}/")
+    async def console_index(_filename: str = filename) -> FileResponse:
+        return FileResponse(STATIC_DIR / _filename)
+
+    @app.get(f"{prefix}/config.js")
+    async def console_config(_section: str = section, _prefix: str = prefix) -> PlainTextResponse:
+        return console_config_js(_section, _prefix)
+
+
+register_console_page(ACTIVITY_PUBLIC_PREFIX, "activity", "activity.html")
+register_console_page(STORAGE_PUBLIC_PREFIX, "storage", "storage.html")
+register_console_page(MEDIA_PUBLIC_PREFIX, "media", "media.html")
+register_console_page(HEALTH_PUBLIC_PREFIX, "health", "health.html")
 
 
 @app.get("/healthz")
@@ -1372,6 +1930,52 @@ async def dashboard() -> dict[str, Any]:
     return await dashboard_snapshot()
 
 
+@api_router.get("/activity")
+async def activity() -> dict[str, Any]:
+    return await activity_snapshot()
+
+
+@api_router.get("/storage")
+async def storage() -> dict[str, Any]:
+    return await storage_snapshot()
+
+
+@api_router.get("/media")
+async def media() -> dict[str, Any]:
+    return await jellyfin_snapshot()
+
+
+@api_router.get("/health/overview")
+async def health_overview() -> dict[str, Any]:
+    return await health_snapshot()
+
+
+@api_router.get("/notifications")
+async def notifications() -> dict[str, Any]:
+    dashboard = await dashboard_snapshot()
+    return {"notifications": app.state.notifications.reconcile(list(dashboard.get("alerts", [])))}
+
+
+@api_router.post("/notifications/ack", dependencies=[Depends(require_action_guard)])
+async def acknowledge_notification(payload: NotificationAction) -> dict[str, Any]:
+    return {"notification": app.state.notifications.acknowledge(payload.code)}
+
+
+@api_router.post("/notifications/reopen", dependencies=[Depends(require_action_guard)])
+async def reopen_notification(payload: NotificationAction) -> dict[str, Any]:
+    return {"notification": app.state.notifications.reopen(payload.code)}
+
+
+@api_router.get("/automations")
+async def automations() -> dict[str, Any]:
+    return {"rules": app.state.automation_rules.snapshot()}
+
+
+@api_router.post("/automations", dependencies=[Depends(require_action_guard)])
+async def upsert_automation(payload: AutomationRulePayload) -> dict[str, Any]:
+    return {"rule": app.state.automation_rules.upsert(payload)}
+
+
 @api_router.get("/media-workflows")
 async def media_workflows() -> dict[str, Any]:
     return app.state.media_automation.snapshot()
@@ -1415,6 +2019,92 @@ async def force_start_torrent(payload: ForceStartTorrent) -> dict[str, object]:
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
     return {"status": "force_start_updated", "enabled": payload.enabled, "count": len(hashes)}
+
+
+@api_router.post("/torrents/recheck", dependencies=[Depends(require_action_guard)])
+async def recheck_torrents(payload: TorrentHashesAction) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.recheck_many(hashes)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "recheck_requested", "count": len(hashes)}
+
+
+@api_router.post("/torrents/reannounce", dependencies=[Depends(require_action_guard)])
+async def reannounce_torrents(payload: TorrentHashesAction) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.reannounce_many(hashes)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "reannounce_requested", "count": len(hashes)}
+
+
+@api_router.post("/torrents/set-category", dependencies=[Depends(require_action_guard)])
+async def set_torrent_category(payload: TorrentCategoryUpdate) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.set_category_many(hashes, payload.category.strip())
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "category_updated", "count": len(hashes), "category": payload.category.strip()}
+
+
+@api_router.post("/torrents/add-tags", dependencies=[Depends(require_action_guard)])
+async def add_torrent_tags(payload: TorrentTagsUpdate) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.add_tags_many(hashes, payload.tags.strip())
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "tags_updated", "count": len(hashes), "tags": payload.tags.strip()}
+
+
+@api_router.post("/torrents/set-download-limit", dependencies=[Depends(require_action_guard)])
+async def set_torrent_download_limit(payload: TorrentRateLimitUpdate) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.set_download_limit_many(hashes, payload.limitKiB * 1024)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "download_limit_updated", "count": len(hashes), "limitKiB": payload.limitKiB}
+
+
+@api_router.post("/torrents/set-upload-limit", dependencies=[Depends(require_action_guard)])
+async def set_torrent_upload_limit(payload: TorrentRateLimitUpdate) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.set_upload_limit_many(hashes, payload.limitKiB * 1024)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "upload_limit_updated", "count": len(hashes), "limitKiB": payload.limitKiB}
+
+
+@api_router.post("/torrents/set-sequential", dependencies=[Depends(require_action_guard)])
+async def set_torrent_sequential(payload: TorrentSequentialUpdate) -> dict[str, object]:
+    try:
+        hashes = validate_hashes(payload.hashes)
+        await app.state.qbit.set_sequential_download_many(hashes, payload.enabled)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    return {"status": "sequential_updated", "count": len(hashes), "enabled": payload.enabled}
+
+
+@api_router.get("/torrents/{torrent_hash}/trackers")
+async def torrent_trackers(torrent_hash: str) -> dict[str, Any]:
+    try:
+        return {"trackers": await app.state.qbit.trackers(validate_hash(torrent_hash))}
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+
+@api_router.get("/torrents/{torrent_hash}/files")
+async def torrent_files(torrent_hash: str) -> dict[str, Any]:
+    try:
+        return {"files": await app.state.qbit.files(validate_hash(torrent_hash))}
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
 
 
 @api_router.post("/torrents/add", dependencies=[Depends(require_action_guard)])
@@ -1469,3 +2159,6 @@ async def trigger_manual_media_action(action: str) -> dict[str, str]:
 app.include_router(api_router, prefix="/api")
 if PUBLIC_PREFIX:
     app.include_router(api_router, prefix=f"{PUBLIC_PREFIX}/api")
+for prefix in CONSOLE_PREFIXES:
+    if prefix:
+        app.include_router(api_router, prefix=f"{prefix}/api")

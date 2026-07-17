@@ -40,6 +40,19 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
   min-height: 44px; display: inline-flex; align-items: center; border: 1px solid var(--border);
   border-radius: 6px; padding: 8px 12px; color: var(--text); text-decoration: none; font-weight: 800;
 }
+.nav a.is-upcoming {
+  border-style: dashed;
+  color: var(--muted);
+}
+.nav a.is-upcoming::after {
+  content: "Bientôt";
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
 .nav a[aria-current="page"] { background: rgba(34, 197, 94, 0.16); color: #bbf7d0; }
 .eyebrow, h1, h2, h3, p { margin: 0; }
 .eyebrow { color: var(--accent); font-size: 0.82rem; font-weight: 700; text-transform: uppercase; }
@@ -102,6 +115,18 @@ select[multiple] { min-height: 120px; }
   display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 16px 20px 0;
   border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.12); color: #fecaca; padding: 12px;
 }
+.inline-stack { display: grid; gap: 12px; padding: 16px 20px 0; }
+.inline-stack .alert { margin: 0; }
+.grab-notice {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.09);
+  color: #dcfce7;
+}
+.grab-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .empty { padding: 36px 20px; color: var(--muted); text-align: center; }
 .table-scroll { overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; }
@@ -150,7 +175,7 @@ td { min-width: 90px; }
   .topbar, .topbar-actions, .panel-head, .filters, .search-form, .split, .card-grid { display: grid; grid-template-columns: 1fr; }
   .status-pill { min-width: 0; text-align: left; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .picker-actions, .category-choices, .nav { display: grid; grid-template-columns: 1fr; }
+  .picker-actions, .category-choices, .nav, .grab-actions { display: grid; grid-template-columns: 1fr; }
   .table-scroll { overflow-x: visible; }
   .data-table, .data-table thead, .data-table tbody, .data-table tr, .data-table th, .data-table td { display: block; }
   .data-table thead {

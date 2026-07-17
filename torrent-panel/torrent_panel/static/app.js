@@ -31,6 +31,8 @@ const state = {
   lastSignature: "",
   lastUpdatedAt: null,
   globalActionCount: 0,
+  pendingReleaseTitle: "",
+  sourceHint: "",
   prefs: loadPrefs(),
 };
 
@@ -48,8 +50,12 @@ const els = {
   mediaAutomationNotice: document.querySelector("#mediaAutomationNotice"),
   mediaAutomationList: document.querySelector("#mediaAutomationList"),
   homeNavLink: document.querySelector("#homeNavLink"),
+  activityNavLink: document.querySelector("#activityNavLink"),
   torrentsNavLink: document.querySelector("#torrentsNavLink"),
   prowlarrNavLink: document.querySelector("#prowlarrNavLink"),
+  storageNavLink: document.querySelector("#storageNavLink"),
+  mediaNavLink: document.querySelector("#mediaNavLink"),
+  healthNavLink: document.querySelector("#healthNavLink"),
   navAlertCount: document.querySelector("#navAlertCount"),
   rows: document.querySelector("#torrentRows"),
   summary: document.querySelector("#summary"),
@@ -72,6 +78,7 @@ const els = {
   clearActiveFilters: document.querySelector("#clearActiveFilters"),
   quickFilters: document.querySelector("#quickFilters"),
   filterNotice: document.querySelector("#filterNotice"),
+  followNotice: document.querySelector("#followNotice"),
   selectVisible: document.querySelector("#selectVisible"),
   bulkBar: document.querySelector("#bulkBar"),
   bulkCount: document.querySelector("#bulkCount"),
@@ -366,6 +373,8 @@ function applyUrlState() {
   const tag = url.searchParams.get("tag");
   const sort = url.searchParams.get("sort");
   const direction = url.searchParams.get("direction");
+  state.pendingReleaseTitle = url.searchParams.get("pendingRelease") || "";
+  state.sourceHint = url.searchParams.get("source") || "";
   if (search !== null) state.prefs.search = search;
   if (status !== null) state.prefs.status = status;
   if (category !== null) state.prefs.category = category;
@@ -494,6 +503,26 @@ function renderFilterNotice() {
   els.clearActiveFilters.hidden = labels.length === 0;
 }
 
+function renderFollowNotice() {
+  if (!els.followNotice) return;
+  if (state.sourceHint !== "prowlarr" || !state.pendingReleaseTitle) {
+    els.followNotice.hidden = true;
+    els.followNotice.replaceChildren();
+    return;
+  }
+  const backLink = document.createElement("a");
+  backLink.className = "button secondary";
+  backLink.href = `${state.prowlarrPanelPrefix || "/prowlarr-panel"}/?view=search&query=${encodeURIComponent(state.pendingReleaseTitle)}`;
+  backLink.textContent = "Retourner a Prowlarr";
+  els.followNotice.hidden = false;
+  els.followNotice.replaceChildren(
+    Object.assign(document.createElement("span"), {
+      textContent: `Suivi cible pour "${state.pendingReleaseTitle}". L'apparition dans qBittorrent peut prendre quelques secondes.`,
+    }),
+    backLink,
+  );
+}
+
 function renderControls() {
   els.searchInput.value = state.prefs.search;
   els.autoRefreshToggle.checked = state.prefs.autoRefresh;
@@ -514,6 +543,7 @@ function renderControls() {
   els.sortSelect.value = state.prefs.sort;
   renderQuickFilters();
   renderFilterNotice();
+  renderFollowNotice();
 }
 
 function filteredTorrents() {
@@ -1120,11 +1150,30 @@ function detailRows(torrent) {
     ["Disponibilité", formatRatio(torrent.availability)],
     ["Catégorie", torrent.category || "—"],
     ["Tags", torrent.tags || "—"],
+    ["Limite DL", Number(torrent.downloadLimit) > 0 ? formatSpeed(torrent.downloadLimit) : "Illimitée"],
+    ["Limite UL", Number(torrent.uploadLimit) > 0 ? formatSpeed(torrent.uploadLimit) : "Illimitée"],
+    ["Séquentiel", torrent.sequentialDownload ? "Activé" : "Désactivé"],
     ["Tracker", torrent.tracker || "—"],
     ["Chemin", torrent.savePath || "—"],
     ["Ajout", formatDate(torrent.addedOn)],
     ["Fin", formatDate(torrent.completionOn)],
   ];
+}
+
+async function runAdvancedAction(hash, action, payload = {}, successMessage = "Action appliquée.") {
+  state.globalActionCount += 1;
+  try {
+    await api(route(`/api/torrents/${action}`), {
+      method: "POST",
+      body: JSON.stringify({ hashes: [hash], ...payload }),
+    });
+    showToast(successMessage);
+    await loadTorrents({ silent: true, force: true });
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.globalActionCount -= 1;
+  }
 }
 
 function openDetails(hash, trigger) {
@@ -1160,13 +1209,76 @@ function updateDetails() {
     }
     dl.append(dt, dd);
   }
-  els.detailBody.replaceChildren(dl);
+  const advanced = document.createElement("section");
+  advanced.className = "detail-advanced";
+  const title = document.createElement("h3");
+  title.textContent = "Plus";
+  const actions = document.createElement("div");
+  actions.className = "action-row";
+  actions.append(
+    button("Revérifier", "secondary", () => runAdvancedAction(torrent.hash, "recheck", {}, "Revérification demandée.")),
+    button("Nouvelle annonce", "secondary", () => runAdvancedAction(torrent.hash, "reannounce", {}, "Nouvelle annonce demandée.")),
+    button(
+      torrent.sequentialDownload ? "Séquentiel normal" : "Téléchargement séquentiel",
+      torrent.sequentialDownload ? "primary" : "secondary",
+      () => runAdvancedAction(
+        torrent.hash,
+        "set-sequential",
+        { enabled: !torrent.sequentialDownload },
+        torrent.sequentialDownload ? "Téléchargement séquentiel désactivé." : "Téléchargement séquentiel activé.",
+      ),
+    ),
+  );
+
+  const form = document.createElement("form");
+  form.className = "advanced-form";
+  form.innerHTML = `
+    <label>Catégorie
+      <input name="category" value="${String(torrent.category || "").replace(/"/g, "&quot;")}">
+    </label>
+    <label>Tags
+      <input name="tags" value="${String(torrent.tags || "").replace(/"/g, "&quot;")}">
+    </label>
+    <label>Limite DL (KiB/s)
+      <input name="downloadLimit" type="number" min="0" value="${Math.max(0, Math.floor((Number(torrent.downloadLimit) || 0) / 1024))}">
+    </label>
+    <label>Limite UL (KiB/s)
+      <input name="uploadLimit" type="number" min="0" value="${Math.max(0, Math.floor((Number(torrent.uploadLimit) || 0) / 1024))}">
+    </label>
+    <button type="submit" class="button primary">Appliquer</button>
+  `;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    await runAdvancedAction(torrent.hash, "set-category", { category: String(data.get("category") || "") }, "Catégorie mise à jour.");
+    if (String(data.get("tags") || "").trim()) {
+      await runAdvancedAction(torrent.hash, "add-tags", { tags: String(data.get("tags") || "") }, "Tags mis à jour.");
+    }
+    await runAdvancedAction(
+      torrent.hash,
+      "set-download-limit",
+      { limitKiB: Math.max(0, Number(data.get("downloadLimit") || 0)) },
+      "Limite de téléchargement mise à jour.",
+    );
+    await runAdvancedAction(
+      torrent.hash,
+      "set-upload-limit",
+      { limitKiB: Math.max(0, Number(data.get("uploadLimit") || 0)) },
+      "Limite d'envoi mise à jour.",
+    );
+  });
+  advanced.append(title, actions, form);
+  els.detailBody.replaceChildren(dl, advanced);
 }
 
 function configureLinks() {
   if (els.homeNavLink) els.homeNavLink.href = `${route("/")}?view=home`;
+  if (els.activityNavLink) els.activityNavLink.href = "/activity/";
   if (els.torrentsNavLink) els.torrentsNavLink.href = `${route("/")}?view=torrents`;
   if (els.prowlarrNavLink) els.prowlarrNavLink.href = `${state.prowlarrPanelPrefix || "/prowlarr-panel"}/`;
+  if (els.storageNavLink) els.storageNavLink.href = "/storage-panel/";
+  if (els.mediaNavLink) els.mediaNavLink.href = "/media-panel/";
+  if (els.healthNavLink) els.healthNavLink.href = "/health/";
 }
 
 async function submitMagnets(event) {

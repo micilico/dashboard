@@ -13,6 +13,8 @@ const state = {
   activeView: "indexers",
   searchAbort: null,
   sectionErrors: {},
+  partialFailures: [],
+  lastGrab: null,
   sectionLoaded: {
     overview: false,
     indexers: false,
@@ -37,8 +39,12 @@ const els = {
   alertText: document.querySelector("#alertText"),
   summaryGrid: document.querySelector("#summaryGrid"),
   homeLink: document.querySelector("#homeLink"),
+  activityLink: document.querySelector("#activityLink"),
   torrentLink: document.querySelector("#torrentLink"),
   prowlarrLink: document.querySelector("#prowlarrLink"),
+  storageLink: document.querySelector("#storageLink"),
+  mediaLink: document.querySelector("#mediaLink"),
+  healthLink: document.querySelector("#healthLink"),
   tabs: [...document.querySelectorAll(".tab")],
   views: {
     indexers: document.querySelector("#indexersView"),
@@ -67,6 +73,8 @@ const els = {
   clearIndexers: document.querySelector("#clearIndexers"),
   searchButton: document.querySelector("#searchButton"),
   searchSummary: document.querySelector("#searchSummary"),
+  searchPartialFailures: document.querySelector("#searchPartialFailures"),
+  grabNotice: document.querySelector("#grabNotice"),
   resultRows: document.querySelector("#resultRows"),
   resultsEmpty: document.querySelector("#resultsEmpty"),
   resultSearch: document.querySelector("#resultSearch"),
@@ -158,6 +166,27 @@ function showToast(message) {
   showToast.timer = window.setTimeout(() => {
     els.toast.hidden = true;
   }, 4200);
+}
+
+function normalizedTrackingQuery(title) {
+  return String(title || "")
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/[._]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function buildTorrentFollowUrl(title) {
+  const query = normalizedTrackingQuery(title);
+  const root = `${state.torrentPanelPrefix || "/torrent-panel"}/`;
+  const url = new URL(root, currentUrl());
+  url.searchParams.set("view", "torrents");
+  if (query) url.searchParams.set("search", query);
+  url.searchParams.set("refresh", "1");
+  url.searchParams.set("source", "prowlarr");
+  if (title) url.searchParams.set("pendingRelease", title);
+  return `${url.pathname}${url.search}`;
 }
 
 function showError(error) {
@@ -400,7 +429,21 @@ function renderResultFilters() {
 function renderResults() {
   renderResultFilters();
   const rows = filteredResults();
-  els.searchSummary.textContent = `${rows.length} resultat(s) affiche(s). Les URLs privees restent cote serveur.`;
+  const partialCount = state.partialFailures.length;
+  els.searchSummary.textContent = partialCount > 0
+    ? `${rows.length} resultat(s) affiche(s). ${partialCount} source(s) ont repondu avec une erreur partielle.`
+    : `${rows.length} resultat(s) affiche(s). Les URLs privees restent cote serveur.`;
+  if (els.searchPartialFailures) {
+    if (partialCount > 0) {
+      els.searchPartialFailures.hidden = false;
+      els.searchPartialFailures.textContent = state.partialFailures
+        .map((item) => text(item.message || item.error || item.indexer || "Erreur partielle"))
+        .join(" ");
+    } else {
+      els.searchPartialFailures.hidden = true;
+      els.searchPartialFailures.textContent = "";
+    }
+  }
   els.resultsEmpty.hidden = rows.length > 0;
   els.resultRows.replaceChildren(
     ...rows.map((item) => {
@@ -430,6 +473,27 @@ function renderResults() {
       );
       return row;
     }),
+  );
+}
+
+function renderGrabNotice() {
+  if (!els.grabNotice) return;
+  if (!state.lastGrab) {
+    els.grabNotice.hidden = true;
+    els.grabNotice.replaceChildren();
+    return;
+  }
+  const follow = element("a", {
+    className: "button primary",
+    text: "Suivre dans Torrent Panel",
+    attrs: { href: state.lastGrab.followUrl },
+  });
+  const dismiss = button("Fermer", "button secondary", { action: "dismiss-grab-notice" });
+  els.grabNotice.hidden = false;
+  els.grabNotice.replaceChildren(
+    element("strong", { text: `Envoye vers qBittorrent : ${state.lastGrab.title}` }),
+    element("span", { text: "Prowlarr a accepte la demande. Le torrent peut prendre quelques secondes avant d'apparaitre." }),
+    element("div", { className: "grab-actions", children: [follow, dismiss] }),
   );
 }
 
@@ -645,6 +709,7 @@ async function runSearch(event) {
       signal: state.searchAbort.signal,
     });
     state.results = payload.results || [];
+    state.partialFailures = payload.partialFailures || [];
     renderResults();
   } catch (error) {
     if (error.name !== "AbortError") showError(error);
@@ -667,6 +732,11 @@ async function grabRelease(buttonNode) {
         title: buttonNode.dataset.title,
       }),
     });
+    state.lastGrab = {
+      title: buttonNode.dataset.title,
+      followUrl: buildTorrentFollowUrl(buttonNode.dataset.title),
+    };
+    renderGrabNotice();
     showToast(`Envoye vers qBittorrent : ${buttonNode.dataset.title}`);
   } catch (error) {
     showError(error);
@@ -677,8 +747,12 @@ async function grabRelease(buttonNode) {
 
 function configureLinks() {
   if (els.homeLink) els.homeLink.href = "/";
+  if (els.activityLink) els.activityLink.href = "/activity/";
   if (els.torrentLink) els.torrentLink.href = `${state.torrentPanelPrefix || "/torrent-panel"}/`;
   if (els.prowlarrLink) els.prowlarrLink.href = prefixed("/");
+  if (els.storageLink) els.storageLink.href = "/storage-panel/";
+  if (els.mediaLink) els.mediaLink.href = "/media-panel/";
+  if (els.healthLink) els.healthLink.href = "/health/";
 }
 
 function handleTabKeydown(event) {
@@ -712,6 +786,10 @@ function bindEvents() {
     if (buttonNode.dataset.action === "test-indexer") testIndexer(buttonNode.dataset.id);
     if (buttonNode.dataset.action === "toggle-indexer") toggleIndexer(buttonNode);
     if (buttonNode.dataset.action === "grab") grabRelease(buttonNode);
+    if (buttonNode.dataset.action === "dismiss-grab-notice") {
+      state.lastGrab = null;
+      renderGrabNotice();
+    }
   });
   els.tabs.forEach((tab) => tab.addEventListener("keydown", handleTabKeydown));
   els.refreshButton.addEventListener("click", loadAll);
@@ -758,6 +836,7 @@ function bindEvents() {
 
 async function init() {
   configureLinks();
+  renderGrabNotice();
   renderReleaseCategories();
   bindEvents();
   applyUrlState();

@@ -97,7 +97,7 @@ const context = {
 const source = fs.readFileSync("torrent-panel/torrent_panel/static/app.js", "utf8");
 vm.runInNewContext(
   `${source}
-globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, state };`,
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, state, els };`,
   context,
 );
 
@@ -126,5 +126,11 @@ assert.equal(api.filteredTorrents()[0].hash, "b");
 
 api.state.prefs.search = "";
 assert.equal(api.filteredTorrents()[0].hash, "b");
+
+api.state.sourceHint = "prowlarr";
+api.state.pendingReleaseTitle = "Ubuntu ISO";
+api.renderFollowNotice();
+assert.equal(api.els.followNotice.hidden, false);
+assert.equal(api.els.followNotice.children.length > 0, true);
 
 console.log("frontend logic ok");

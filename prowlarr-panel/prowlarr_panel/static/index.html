@@ -16,8 +16,12 @@
         </div>
         <nav class="nav" aria-label="Navigation principale">
           <a id="homeLink" href="/">Accueil</a>
+          <a id="activityLink" href="/activity/">Activité</a>
           <a id="torrentLink" href="/torrent-panel/">Torrents</a>
           <a id="prowlarrLink" aria-current="page" href="./">Prowlarr</a>
+          <a id="storageLink" href="/storage-panel/">Stockage</a>
+          <a id="mediaLink" href="/media-panel/">Médias</a>
+          <a id="healthLink" href="/health/">Santé</a>
         </nav>
         <div class="topbar-actions">
           <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
@@ -86,6 +90,10 @@
               <h2 id="search-title">Recherche de releases</h2>
               <p id="searchSummary">Saisir une requête pour interroger Prowlarr.</p>
             </div>
+          </div>
+          <div id="searchFeedback" class="inline-stack">
+            <div id="searchPartialFailures" class="alert section-alert" hidden></div>
+            <div id="grabNotice" class="grab-notice" hidden></div>
           </div>
           <form id="searchForm" class="search-form">
             <label>Requête <input id="releaseQuery" name="query" type="search" autocomplete="off" required minlength="2"></label>

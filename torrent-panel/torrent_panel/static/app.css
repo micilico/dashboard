@@ -117,6 +117,19 @@ input:disabled {
   text-decoration: none;
   font-weight: 800;
 }
+.nav a.is-upcoming {
+  border-style: dashed;
+  color: var(--muted);
+}
+.nav a.is-upcoming::after {
+  content: "Bientôt";
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
 
 .nav-count {
   display: inline-grid;
@@ -237,6 +250,19 @@ label {
 .field-message,
 .row-status {
   color: var(--muted);
+}
+.follow-notice {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(96, 165, 250, 0.34);
+  border-radius: 8px;
+  background: rgba(96, 165, 250, 0.1);
+  color: #dbeafe;
+}
+.follow-notice a {
+  width: fit-content;
 }
 
 .magnet-form {
@@ -814,6 +840,19 @@ legend {
   font-size: 0.84rem;
 }
 
+.detail-advanced {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(51, 65, 85, 0.7);
+}
+
+.advanced-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
 .toast {
   position: fixed;
   right: 16px;
@@ -969,6 +1008,10 @@ legend {
   .detail-head,
   .detail-body dl {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .advanced-form {
     grid-template-columns: 1fr;
   }
 }

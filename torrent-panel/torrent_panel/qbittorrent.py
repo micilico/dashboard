@@ -186,6 +186,9 @@ class QBittorrentClient:
                 "tracker": item.get("tracker", ""),
                 "priority": item.get("priority", 0),
                 "message": item.get("last_activity") or "",
+                "downloadLimit": item.get("dl_limit", -1),
+                "uploadLimit": item.get("up_limit", -1),
+                "sequentialDownload": item.get("seq_dl", False),
             }
             for item in torrents
             if isinstance(item, dict) and item.get("hash") and item.get("name")
@@ -259,3 +262,70 @@ class QBittorrentClient:
         if save_path:
             data["savepath"] = save_path
         await self._request("POST", "/api/v2/torrents/add", data=data)
+
+    async def recheck_many(self, torrent_hashes: list[str]) -> None:
+        await self._request("POST", "/api/v2/torrents/recheck", data={"hashes": "|".join(torrent_hashes)})
+
+    async def reannounce_many(self, torrent_hashes: list[str]) -> None:
+        await self._request("POST", "/api/v2/torrents/reannounce", data={"hashes": "|".join(torrent_hashes)})
+
+    async def set_category_many(self, torrent_hashes: list[str], category: str) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/setCategory",
+            data={"hashes": "|".join(torrent_hashes), "category": category},
+        )
+
+    async def add_tags_many(self, torrent_hashes: list[str], tags: str) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/addTags",
+            data={"hashes": "|".join(torrent_hashes), "tags": tags},
+        )
+
+    async def set_download_limit_many(self, torrent_hashes: list[str], limit_bytes: int) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/setDownloadLimit",
+            data={"hashes": "|".join(torrent_hashes), "limit": str(limit_bytes)},
+        )
+
+    async def set_upload_limit_many(self, torrent_hashes: list[str], limit_bytes: int) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/setUploadLimit",
+            data={"hashes": "|".join(torrent_hashes), "limit": str(limit_bytes)},
+        )
+
+    async def set_sequential_download_many(self, torrent_hashes: list[str], enabled: bool) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/toggleSequentialDownload",
+            data={"hashes": "|".join(torrent_hashes)},
+        )
+        if not enabled:
+            await self._request(
+                "POST",
+                "/api/v2/torrents/toggleSequentialDownload",
+                data={"hashes": "|".join(torrent_hashes)},
+            )
+
+    async def trackers(self, torrent_hash: str) -> list[dict[str, Any]]:
+        response = await self._request("GET", "/api/v2/torrents/trackers", params={"hash": torrent_hash})
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise QbitError(502, "Réponse qBittorrent invalide.") from exc
+        if not isinstance(payload, list):
+            raise QbitError(502, "Réponse qBittorrent invalide.")
+        return [item for item in payload if isinstance(item, dict)]
+
+    async def files(self, torrent_hash: str) -> list[dict[str, Any]]:
+        response = await self._request("GET", "/api/v2/torrents/files", params={"hash": torrent_hash})
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise QbitError(502, "Réponse qBittorrent invalide.") from exc
+        if not isinstance(payload, list):
+            raise QbitError(502, "Réponse qBittorrent invalide.")
+        return [item for item in payload if isinstance(item, dict)]

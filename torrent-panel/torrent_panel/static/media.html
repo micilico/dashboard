@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Médias</title>
+    <link rel="stylesheet" href="./static/console.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Aller au contenu</a>
+    <main id="content" class="shell">
+      <header class="topbar panel">
+        <div>
+          <p class="eyebrow">Centre unifié</p>
+          <h1 id="pageTitle">Médias</h1>
+          <p id="pageSubtitle" class="muted"></p>
+        </div>
+        <nav class="nav" aria-label="Navigation principale">
+          <a id="homeLink" href="/">Accueil</a>
+          <a id="activityLink" href="/activity/">Activité</a>
+          <a id="torrentLink" href="/torrent-panel/">Torrents</a>
+          <a id="prowlarrLink" href="/prowlarr-panel/">Prowlarr</a>
+          <a id="storageLink" href="/storage-panel/">Stockage</a>
+          <a id="mediaLink" href="/media-panel/">Médias</a>
+          <a id="healthLink" href="/health/">Santé</a>
+        </nav>
+        <div class="toolbar">
+          <div id="refreshStatus" class="status-pill">Initialisation</div>
+          <button id="refreshButton" type="button" class="button">Actualiser</button>
+          <button id="primaryButton" type="button" class="button primary" hidden></button>
+        </div>
+      </header>
+      <section id="summaryGrid" class="summary-grid"></section>
+      <section class="content-grid">
+        <div id="contentA"></div>
+        <div id="contentB"></div>
+      </section>
+      <section id="cardsGrid" class="cards-grid" style="margin-top:16px;"></section>
+    </main>
+    <div id="toast" class="toast" hidden></div>
+    <script src="./config.js"></script>
+    <script src="./static/console.js" defer></script>
+  </body>
+  </html>
