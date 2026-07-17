@@ -4,7 +4,7 @@
         href: /torrent-panel/
         widget:
           type: qbittorrent
-          url: http://127.0.0.1:16141
+          url: http://host.docker.internal:16141
           username: "{{HOMEPAGE_VAR_QBITTORRENT_USERNAME}}"
           password: "{{HOMEPAGE_VAR_QBITTORRENT_PASSWORD}}"
           enableLeechProgress: true
@@ -14,14 +14,14 @@
         description: API ultra.cc via tunnel SSH local au VPS
         widget:
           type: prowlarr
-          url: http://127.0.0.1:16124/prowlarr
+          url: http://host.docker.internal:16124/prowlarr
           key: "{{HOMEPAGE_VAR_PROWLARR_API_KEY}}"
 
     - Jellyfin:
         description: Instance locale du 2e VPS
         widget:
           type: jellyfin
-          url: http://127.0.0.1:8096
+          url: http://host.docker.internal:8096
           key: "{{HOMEPAGE_VAR_JELLYFIN_API_KEY}}"
           enableBlocks: true
           enableNowPlaying: true
@@ -31,7 +31,7 @@
         description: Statistiques rc du montage /mnt/ultra-media
         widget:
           type: customapi
-          url: http://127.0.0.1:5572/core/stats
+          url: http://host.docker.internal:5572/core/stats
           method: POST
           requestBody: {}
           refreshInterval: 10000

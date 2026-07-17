@@ -1,8 +1,9 @@
 # Dashboard
 
 Stack retenue :
-- Homepage en Docker avec `network_mode: host`
-- `torrent-panel` en Docker avec `network_mode: host`, expose uniquement sur `127.0.0.1:3110`
+- Homepage en Docker expose uniquement sur `127.0.0.1:3001`
+- `torrent-panel` en Docker expose uniquement sur `127.0.0.1:3110`
+- les conteneurs joignent les services du host via `host.docker.internal`
 - `autossh` en service systemd pour joindre qBittorrent et Prowlarr sur ultra.cc
 - `rclone` avec `--rc` actif sur `127.0.0.1:5572`
 - `Caddy` en reverse proxy avec `basic_auth`, Homepage sur `/` et Torrent Panel sur `/torrent-panel/`
@@ -39,7 +40,7 @@ HOMEPAGE_VAR_JELLYFIN_API_KEY=change-me
 Creer aussi `torrent-panel/.env` a partir de [torrent-panel/.env.example](/Users/corentinkern/Documents/Dashboard/torrent-panel/.env.example:1) :
 
 ```env
-QBITTORRENT_URL=http://127.0.0.1:16141
+QBITTORRENT_URL=http://host.docker.internal:16141
 QBITTORRENT_USERNAME=change-me
 QBITTORRENT_PASSWORD=change-me
 QBITTORRENT_TIMEOUT_SECONDS=8
@@ -56,7 +57,7 @@ docker compose up -d
 docker compose logs -f homepage torrent-panel
 ```
 
-Homepage ecoute sur `127.0.0.1:3000` via le reseau host. Torrent Panel ecoute sur `127.0.0.1:3110` par defaut et n'est pas expose directement par Docker.
+Homepage est publie sur `127.0.0.1:3001`. Torrent Panel est publie sur `127.0.0.1:3110` par defaut. Aucun des deux ports n'est ouvert sur une interface publique.
 
 ## 3. Utiliser Torrent Panel
 
@@ -97,6 +98,8 @@ ss -ltnp | grep 16124
 Le tunnel doit exposer localement :
 - `127.0.0.1:16141` vers qBittorrent ultra.cc
 - `127.0.0.1:16124` vers Prowlarr ultra.cc
+
+Comme Homepage et Torrent Panel tournent en bridge Docker, ils appellent ces services avec `host.docker.internal`. Verifier sur le VPS que les ports bindes sur le host sont bien joignables depuis les conteneurs ; sinon il faudra adapter le bind du tunnel ou ajouter un relais local sans exposition publique.
 
 ## 5. Activer rclone rc
 
@@ -149,7 +152,7 @@ sudo systemctl reload caddy
 Verifier ensuite :
 
 ```bash
-curl -I http://127.0.0.1:3000
+curl -I http://127.0.0.1:3001
 curl -I http://127.0.0.1:3110/healthz
 curl -I https://dashboard.example.com
 curl -I https://dashboard.example.com/torrent-panel/

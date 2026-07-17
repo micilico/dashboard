@@ -3,7 +3,10 @@ services:
     image: ghcr.io/gethomepage/homepage:latest
     container_name: homepage
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "127.0.0.1:3001:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
     environment:
@@ -20,10 +23,13 @@ services:
     build: ./torrent-panel
     container_name: torrent-panel
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "127.0.0.1:${TORRENT_PANEL_PORT:-3110}:${TORRENT_PANEL_PORT:-3110}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: ./torrent-panel/.env
         required: false
     environment:
-      TORRENT_PANEL_HOST: 127.0.0.1
+      TORRENT_PANEL_HOST: 0.0.0.0
       TORRENT_PANEL_PORT: ${TORRENT_PANEL_PORT:-3110}
