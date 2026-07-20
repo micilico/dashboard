@@ -101,13 +101,14 @@ assert.equal(overviewHtml.includes("Votre espace média"), false);
 assert.equal(overviewHtml.includes("overview-storage-card"), false);
 assert.equal(overviewHtml.includes("storageVisualization"), false);
 assert.match(overviewHtml, /id="overviewMetrics"[\s\S]+class="overview-lower-grid"/);
+assert.match(overviewHtml, /class="selection-toolbar"[\s\S]+id="selectVisible"[\s\S]+class="torrent-table"/);
 assert.equal(source.includes("renderStorageCard"), false);
 assert.equal(source.includes("storageVisualization"), false);
 assert.equal(source.includes("Operationnel"), false);
 
 vm.runInNewContext(
   `${source}
-globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, state, els };`,
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, state, els };`,
   context,
 );
 
@@ -136,6 +137,11 @@ assert.equal(api.filteredTorrents()[0].hash, "b");
 
 api.state.prefs.search = "";
 assert.equal(api.filteredTorrents()[0].hash, "b");
+
+api.state.selected.add("a");
+api.renderSelection(api.state.torrents);
+assert.equal(api.els.selectVisible.indeterminate, true);
+assert.equal(api.els.visibleSelectionSummary.textContent, "1 sur 2 sélectionné");
 
 api.state.sourceHint = "prowlarr";
 api.state.pendingReleaseTitle = "Ubuntu ISO";

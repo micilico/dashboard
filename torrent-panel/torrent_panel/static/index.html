@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard · Centre de contrôle</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260720-overview-fix-2">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260720-selection-fix-3">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -237,6 +237,14 @@
           </div>
         </details>
 
+        <div class="selection-toolbar" aria-label="Sélection des résultats affichés">
+          <label class="select-visible-control" for="selectVisible">
+            <input id="selectVisible" type="checkbox">
+            <span id="selectVisibleLabel">Tout sélectionner</span>
+          </label>
+          <span id="visibleSelectionSummary" class="selection-summary" aria-live="polite">0 fichier affiché</span>
+        </div>
+
         <div id="bulkBar" class="bulk-bar" hidden>
           <strong id="bulkCount">0 sélectionné</strong>
           <button id="bulkPause" type="button" class="button secondary">Mettre en pause</button>
@@ -255,9 +263,7 @@
         <table class="torrent-table" aria-describedby="summary">
           <thead>
             <tr>
-              <th scope="col" class="select-col">
-                <input id="selectVisible" type="checkbox" aria-label="Sélectionner les résultats affichés">
-              </th>
+              <th scope="col" class="select-col" aria-label="Sélection"></th>
               <th scope="col"><button type="button" class="sort-head" data-sort="name">Nom</button></th>
               <th scope="col"><button type="button" class="sort-head" data-sort="state">État</button></th>
               <th scope="col"><button type="button" class="sort-head" data-sort="progress">Progression</button></th>
@@ -329,7 +335,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/common/js/focus-trap.js" defer></script>
-    <script src="./config.js?v=20260720-overview-fix-2"></script>
-    <script src="./static/dist/app.min.js?v=20260720-overview-fix-2" defer></script>
+    <script src="./config.js?v=20260720-selection-fix-3"></script>
+    <script src="./static/dist/app.min.js?v=20260720-selection-fix-3" defer></script>
   </body>
 </html>

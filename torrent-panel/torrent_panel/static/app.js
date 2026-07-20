@@ -104,6 +104,8 @@ const els = {
   filterNotice: document.querySelector("#filterNotice"),
   followNotice: document.querySelector("#followNotice"),
   selectVisible: document.querySelector("#selectVisible"),
+  selectVisibleLabel: document.querySelector("#selectVisibleLabel"),
+  visibleSelectionSummary: document.querySelector("#visibleSelectionSummary"),
   bulkBar: document.querySelector("#bulkBar"),
   bulkCount: document.querySelector("#bulkCount"),
   bulkPause: document.querySelector("#bulkPause"),
@@ -850,8 +852,14 @@ function renderSelection(visible = filteredTorrents()) {
   }
   const visibleHashes = visible.map((torrent) => torrent.hash);
   const selectedVisible = visibleHashes.filter((hash) => state.selected.has(hash));
-  els.selectVisible.checked = visibleHashes.length > 0 && selectedVisible.length === visibleHashes.length;
+  const allVisibleSelected = visibleHashes.length > 0 && selectedVisible.length === visibleHashes.length;
+  els.selectVisible.checked = allVisibleSelected;
   els.selectVisible.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleHashes.length;
+  els.selectVisible.disabled = visibleHashes.length === 0;
+  els.selectVisibleLabel.textContent = allVisibleSelected ? "Tout désélectionner" : "Tout sélectionner";
+  els.visibleSelectionSummary.textContent = visibleHashes.length
+    ? `${selectedVisible.length} sur ${visibleHashes.length} sélectionné${selectedVisible.length > 1 ? "s" : ""}`
+    : "Aucun fichier affiché";
   els.bulkBar.hidden = state.selected.size === 0;
   els.bulkCount.textContent = `${state.selected.size} sélectionné${state.selected.size > 1 ? "s" : ""}`;
 }
