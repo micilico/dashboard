@@ -1,7 +1,8 @@
-@media (max-width: 1439px) and (min-width: 1024px) {
+/* Laptop rail: keep the content useful when a full sidebar would crowd it. */
+@media (max-width: 1319px) and (min-width: 1024px) {
   .shell {
     grid-template-columns: 92px minmax(0, 1fr);
-    padding-right: 32px;
+    padding-right: clamp(24px, 3vw, 36px);
   }
 
   .topbar {
@@ -9,9 +10,18 @@
   }
 
   .brand-copy,
-  .nav-label,
   .sidebar-health p,
   .status-pill span {
+    display: none;
+  }
+
+  .sidebar-health {
+    justify-items: center;
+    padding: 0;
+  }
+
+  .sidebar-health-row > span:not(.status-dot),
+  .sidebar-footer .status-pill {
     display: none;
   }
 
@@ -22,8 +32,23 @@
   }
 
   .nav a {
-    justify-content: center;
-    padding: 12px 10px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    min-height: 54px;
+    padding: 6px 3px;
+  }
+
+  .nav-label {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    font-size: .64rem;
+    line-height: 1.15;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .nav-count {
@@ -39,7 +64,7 @@
   }
 
   .overview-view {
-    padding: 44px 0 0 36px;
+    padding: 40px 0 0 clamp(28px, 3vw, 40px);
   }
 
   .overview-title {
@@ -73,17 +98,32 @@
   }
 }
 
+@media (max-width: 1100px) and (min-width: 768px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-card {
+    grid-column: span 1;
+  }
+
+  .metric-card:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 1023px) {
   .shell {
-    width: min(100% - 40px, 1200px);
+    width: 100%;
     grid-template-columns: 80px minmax(0, 1fr);
-    gap: 20px;
-    padding: 16px 0 48px;
+    gap: 0;
+    padding: 0 clamp(20px, 3vw, 28px) 40px 0;
   }
 
   .topbar {
-    top: 16px;
-    padding: 18px 10px 12px;
+    top: 0;
+    min-height: 100dvh;
+    padding: 20px 10px 16px;
   }
 
   .brand-copy {
@@ -97,12 +137,23 @@
   }
 
   .nav a {
-    justify-content: center;
-    padding: 12px 10px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    min-height: 54px;
+    padding: 6px 3px;
   }
 
   .nav-label {
-    display: none;
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    font-size: .62rem;
+    line-height: 1.15;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .nav-count {
@@ -117,6 +168,16 @@
     display: none;
   }
 
+  .sidebar-health {
+    justify-items: center;
+    padding: 0;
+  }
+
+  .sidebar-health-row > span:not(.status-dot),
+  .sidebar-footer .status-pill {
+    display: none;
+  }
+
   .status-pill {
     padding-top: 10px;
     justify-items: center;
@@ -127,7 +188,7 @@
   }
 
   .overview-view {
-    padding: 22px 0 0;
+    padding: 32px 0 0 clamp(20px, 3vw, 28px);
   }
 
   .overview-header {
@@ -141,10 +202,6 @@
 
   .overview-actions {
     justify-content: flex-start;
-  }
-
-  .metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .metric-card {
@@ -174,26 +231,30 @@
 }
 
 @media (max-width: 767px) {
-  .shell { width: min(100% - 32px, 680px); display: block; padding: 16px 0 40px; }
-  .topbar { position: static; min-height: 0; display: grid; gap: 12px; margin-bottom: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 24px; }
+  .shell { width: 100%; display: block; padding: clamp(8px, 3vw, 16px) clamp(12px, 4vw, 24px) 40px; }
+  .topbar { position: static; min-height: 0; display: grid; gap: 12px; margin-bottom: 20px; padding: 14px 14px 12px; border: 1px solid var(--border); border-radius: 16px; }
   .brand-copy { display: grid; }
-  .brand-block { grid-template-columns: 52px 1fr; align-items: center; }
-  .brand-mark { margin: 0; width: 52px; height: 52px; }
+  .brand-block { grid-template-columns: 44px 1fr; align-items: center; gap: 12px; padding: 0; }
+  .brand-mark { margin: 0; width: 44px; height: 44px; }
   .brand-copy h1 { font-size: 1.25rem; }
-  .nav { grid-column: 1 / -1; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; padding-top: 12px; border-top: 1px solid var(--border); scrollbar-width: none; }
-  .nav a { width: auto; min-width: 52px; flex: 0 0 auto; }
-  .nav-label { display: none; }
+  .nav { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; overflow: visible; padding-top: 10px; border-top: 1px solid var(--border); }
+  .nav a { width: 100%; min-width: 0; min-height: 58px; display: grid; justify-items: center; align-content: center; gap: 3px; padding: 6px 3px; border-radius: 10px; }
+  .nav-label { display: block; width: 100%; overflow: hidden; font-size: .69rem; line-height: 1.2; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-icon, .nav-icon svg { width: 20px; height: 20px; }
+  .nav-count { right: 4px; top: 4px; }
+  .nav a[title]:hover::after { display: none; }
   .topbar-actions { margin: 0; display: grid; }
   .sidebar-footer { display: none; }
   .summary-grid, .toolbar, .content-panel { margin-top: 16px; }
   .summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
   .stat { min-height: 96px; padding: 16px; }
   .stat strong { font-size: 1.35rem; }
-  .overview-view { padding: 6px 0 0; }
+  .overview-view { padding: 0; }
   .overview-header { display: grid; }
   .overview-actions { justify-content: flex-start; }
+  .icon-button { width: 52px; height: 52px; }
   .overview-title { font-size: clamp(2.375rem, 11vw, 2.625rem); }
-  .overview-badge { width: 100%; justify-content: center; }
+  .overview-badge { width: fit-content; max-width: 100%; }
   .overview-grid, .metrics-grid, .overview-lower-grid { grid-template-columns: 1fr; }
   .metric-card, .services-card, .activity-card, .panel-head, .home-grid, .home-card { padding: 20px; }
   .metric-card { grid-column: 1; }
@@ -203,7 +264,82 @@
   .service-row-status { white-space: normal; }
   .activity-list { padding: 0; border: 0; }
   .filters { margin: 12px; padding: 14px; }
+  .page-header-panel { padding: 22px 18px 8px; }
+  .page-header-panel h2 { font-size: clamp(2rem, 10vw, 2.5rem); }
+  .page-header-actions { width: 100%; flex-wrap: wrap; }
+  .page-header-actions .button { flex: 1 1 180px; }
+  .toolbar summary { align-items: center; }
+  .summary-hint { display: none; }
   .torrent-table tr { border-color: var(--border); border-radius: var(--radius-panel); background: var(--surface-2); }
+}
+
+@media (min-width: 1320px) {
+  .nav a[title]:hover::after {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .form-grid,
+  .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .filters .button,
+  .dialog-actions .button {
+    width: 100%;
+  }
+
+  .service-row {
+    align-items: flex-start;
+  }
+
+  .service-row-status {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 430px) {
+  .overview-title {
+    font-size: clamp(2.15rem, 11vw, 2.5rem);
+  }
+
+  .metric-value {
+    font-size: clamp(2rem, 10vw, 2.5rem);
+  }
+
+  .metric-card,
+  .services-card,
+  .activity-card {
+    padding: 18px;
+  }
+}
+
+@media (max-height: 760px) and (min-width: 768px) {
+  .topbar {
+    gap: 14px;
+    padding-top: 18px;
+    padding-bottom: 14px;
+  }
+
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+  }
+
+  .nav {
+    gap: 4px;
+  }
+
+  .nav a {
+    min-height: 42px;
+    padding-block: 8px;
+  }
+
+  .sidebar-health p,
+  .status-pill span {
+    display: none;
+  }
 }
 
 /* Torrent list density: preserve readable columns, then switch to structured cards. */
@@ -457,7 +593,7 @@
   }
 
   .torrent-table .name-button {
-    min-height: 32px;
+    min-height: 44px;
     font-size: .98rem;
     line-height: 1.35;
   }
@@ -532,7 +668,7 @@
   .torrent-table td:nth-child(9) { grid-column: 9 / 11; grid-row: 3; }
 
   .torrent-table .name-button {
-    min-height: 32px;
+    min-height: 44px;
     font-size: .96rem;
     line-height: 1.35;
   }
@@ -554,7 +690,7 @@
 }
 
 @media (max-width: 375px) {
-  .shell { width: calc(100% - 16px); padding: 8px 0 32px; }
+  .shell { width: 100%; padding: 8px 8px 32px; }
   .summary-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
   .stat { min-height: 80px; padding: 12px; }
   .stat strong { font-size: 1.2rem; }
@@ -569,8 +705,8 @@
 }
 
 @media (min-width: 1440px) {
-  .shell { width: 100%; gap: 0; padding: 0 52px 48px 0; }
-  .overview-view { padding: 48px 0 0 60px; }
+  .shell { width: 100%; gap: 0; padding: 0 clamp(44px, 3.25vw, 64px) 48px 0; }
+  .overview-view { padding: 48px 0 0 clamp(48px, 3.75vw, 72px); }
   .summary-grid { gap: 16px; }
   .home-grid { gap: 24px; }
   .stat { min-height: 128px; padding: 28px; }

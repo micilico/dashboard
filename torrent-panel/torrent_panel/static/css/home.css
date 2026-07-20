@@ -29,15 +29,19 @@
 
 .shell {
   width: 100%;
-  grid-template-columns: 288px minmax(0, 1fr);
+  grid-template-columns: clamp(256px, 18vw, 288px) minmax(0, 1fr);
   gap: 0;
-  padding: 0 52px 48px 0;
+  padding: 0 clamp(28px, 3.25vw, 52px) 48px 0;
+}
+
+.shell > * {
+  min-width: 0;
 }
 
 .topbar {
   top: 0;
   min-height: 100dvh;
-  padding: 44px 30px 28px;
+  padding: 40px clamp(20px, 1.9vw, 30px) 28px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(9, 11, 17, 0.98), rgba(6, 8, 13, 0.96));
 }
@@ -58,7 +62,7 @@
   grid-column: 2;
   display: grid;
   gap: 24px;
-  padding: 48px 0 0 60px;
+  padding: 48px 0 0 clamp(36px, 3.75vw, 60px);
 }
 
 .overview-header {
