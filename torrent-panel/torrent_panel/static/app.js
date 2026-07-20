@@ -995,10 +995,6 @@ function renderHome() {
     : "Aucune alerte critique. Les services restent surveillés en direct.";
   const greeting = document.querySelector("#greeting");
   if (greeting) greeting.textContent = "Bonjour";
-  const statusSummary = document.querySelector("#statusSummary");
-  if (statusSummary) {
-    statusSummary.textContent = critical ? "Une attention est requise." : "Tout fonctionne. Parfaitement.";
-  }
   renderQuickActions();
   renderAlerts();
   renderServices();
