@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-_sys_path_root = Path(__file__).resolve().parents[2]
+_sys_path_root = next(
+    (parent for parent in Path(__file__).resolve().parents if (parent / "common" / "__init__.py").exists()),
+    Path(__file__).resolve().parent,
+)
 if str(_sys_path_root) not in sys.path:
     sys.path.insert(0, str(_sys_path_root))
 
@@ -115,7 +118,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Prowlarr Panel", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 api_router = APIRouter()
-_COMMON_CSS_DIR = Path(__file__).resolve().parents[2] / "common" / "css"
+_COMMON_CSS_DIR = Path(sys.modules["common"].__file__).resolve().parent / "css"
 app.mount("/common/css", StaticFiles(directory=str(_COMMON_CSS_DIR)), name="common-css")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if PUBLIC_PREFIX:
