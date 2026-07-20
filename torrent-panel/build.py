@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 STATIC = ROOT / "torrent_panel" / "static"
-COMMON = ROOT.parent / "common"
+COMMON = ROOT / "common"
 DIST = STATIC / "dist"
 
 DIST.mkdir(parents=True, exist_ok=True)
