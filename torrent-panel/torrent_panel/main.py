@@ -279,3 +279,5 @@ if PUBLIC_PREFIX:
 for prefix in CONSOLE_PREFIXES:
     if prefix:
         app.include_router(dashboard_router, prefix=f"{prefix}/api")
+        app.include_router(notifications_router, prefix=f"{prefix}/api")
+        app.include_router(media_automation_router, prefix=f"{prefix}/api")
