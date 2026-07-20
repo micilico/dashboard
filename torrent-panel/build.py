@@ -28,15 +28,24 @@ if css_module_dir.exists():
 
 (DIST / "app.min.css").write_text(css_content, encoding="utf-8")
 
-# JS
-js_files = [
+# JS - app.min.js (pour index.html)
+js_files_app = [
     COMMON / "js" / "api.js",
     STATIC / "app.js",
+]
+js_content_app = "\n".join(
+    f.read_text(encoding="utf-8") for f in js_files_app if f.exists()
+)
+(DIST / "app.min.js").write_text(js_content_app, encoding="utf-8")
+
+# JS - console.min.js (pour les pages console: activity, storage, media, health)
+js_files_console = [
+    COMMON / "js" / "api.js",
     STATIC / "console.js",
 ]
-js_content = "\n".join(
-    f.read_text(encoding="utf-8") for f in js_files if f.exists()
+js_content_console = "\n".join(
+    f.read_text(encoding="utf-8") for f in js_files_console if f.exists()
 )
-(DIST / "app.min.js").write_text(js_content, encoding="utf-8")
+(DIST / "console.min.js").write_text(js_content_console, encoding="utf-8")
 
-print(f"Build complete: {DIST}/app.min.css + app.min.js")
+print(f"Build complete: {DIST}/app.min.css + app.min.js + console.min.js")
