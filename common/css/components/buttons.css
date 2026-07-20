@@ -1,0 +1,12 @@
+.button, .tab {
+  min-height: 44px; border: 1px solid transparent; border-radius: var(--radius-control);
+  padding: 10px 14px; font-weight: 600;
+  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+.button:active, .tab:active { transform: translateY(1px); }
+.primary { background: var(--accent-action); color: #fff; }
+.primary:hover { background: var(--accent-action-hover); }
+.secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
+.secondary:hover { border-color: rgba(255,255,255,.18); background: var(--surface-3); }
+.danger { background: var(--danger); color: #fff; }
+.danger:hover { background: var(--danger-strong); }

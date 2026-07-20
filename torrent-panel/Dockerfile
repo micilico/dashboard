@@ -5,10 +5,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY torrent-panel/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY torrent_panel ./torrent_panel
+COPY common ./common
+RUN pip install --no-cache-dir ./common
+
+COPY torrent-panel/torrent_panel ./torrent_panel
+COPY torrent-panel/build.py ./build.py
+RUN python build.py
 RUN mkdir -p /app/data && chown nobody:nogroup /app/data
 
 USER nobody

@@ -5,10 +5,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY prowlarr-panel/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY prowlarr_panel ./prowlarr_panel
+COPY common ./common
+RUN pip install --no-cache-dir ./common
+
+COPY prowlarr-panel/prowlarr_panel ./prowlarr_panel
+COPY prowlarr-panel/build.py ./build.py
+RUN python build.py
 RUN chown -R nobody:nogroup /app
 
 USER nobody

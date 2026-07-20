@@ -1,0 +1,105 @@
+.dialog,
+.detail-dialog {
+  width: min(480px, calc(100% - 32px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0;
+}
+
+.detail-dialog {
+  width: min(560px, calc(100% - 32px));
+  margin-right: 24px;
+}
+
+.dialog::backdrop,
+.detail-dialog::backdrop {
+  background: rgba(2, 6, 23, 0.72);
+}
+
+.dialog form,
+.detail-shell {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+fieldset {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0;
+  padding: 12px;
+}
+
+legend {
+  padding: 0 6px;
+  color: var(--muted);
+}
+
+.radio-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.radio-line.danger {
+  color: #fecaca;
+}
+
+.strong-confirm {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detail-head h2 {
+  overflow-wrap: anywhere;
+}
+
+.detail-body dl {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.detail-body dt {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.detail-body dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-body code {
+  font-size: 0.84rem;
+}
+
+.detail-advanced {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(51, 65, 85, 0.7);
+}
+
+.advanced-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}

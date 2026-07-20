@@ -1,15 +1,27 @@
 import logging
 import os
-import secrets
-import time
-from collections import defaultdict, deque
+import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Deque
+from typing import Any
+
+_sys_path_root = Path(__file__).resolve().parents[2]
+if str(_sys_path_root) not in sys.path:
+    sys.path.insert(0, str(_sys_path_root))
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+
+from common import build_csp, client_key as _client_key, error_detail as _error_detail, RateLimiter
+from common.monitoring import init_sentry
+from common.csrf import (
+    cleanup_csrf_tokens as _cleanup_csrf_tokens,
+    csrf_cookie_matches as _csrf_cookie_matches,
+    csrf_token_is_valid as _csrf_token_is_valid,
+    set_csrf_cookie as _set_csrf_cookie,
+)
 
 from .prowlarr import ProwlarrClient, ProwlarrConfig, ProwlarrError
 
@@ -55,39 +67,6 @@ class GrabPayload(BaseModel):
     title: str = Field(default="", max_length=500)
 
 
-class RateLimiter:
-    def __init__(self, max_calls: int, period_seconds: int, max_keys: int) -> None:
-        self._max_calls = max_calls
-        self._period_seconds = period_seconds
-        self._max_keys = max_keys
-        self._hits: dict[str, Deque[float]] = defaultdict(deque)
-
-    def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        hits = self._hits[key]
-        while hits and now - hits[0] > self._period_seconds:
-            hits.popleft()
-        if len(hits) >= self._max_calls:
-            return False
-        hits.append(now)
-        self._cleanup(now)
-        return True
-
-    def _cleanup(self, now: float) -> None:
-        if len(self._hits) <= self._max_keys:
-            return
-        for key in list(self._hits.keys()):
-            hits = self._hits[key]
-            while hits and now - hits[0] > self._period_seconds:
-                hits.popleft()
-            if not hits:
-                del self._hits[key]
-            if len(self._hits) <= self._max_keys:
-                return
-        for key in list(self._hits.keys())[: max(0, len(self._hits) - self._max_keys)]:
-            del self._hits[key]
-
-
 def parse_rate_limits(raw: str) -> dict[str, tuple[int, int]]:
     defaults = {"search": (20, 60), "test": (20, 60), "modify": (10, 60), "grab": (10, 60)}
     if not raw:
@@ -113,33 +92,31 @@ def build_client() -> ProwlarrClient:
 
 
 def error_detail(code: str, message: str, recovery: str) -> dict[str, str]:
-    return {"code": code, "message": message, "recovery": recovery}
+    return _error_detail(code, message, recovery)
 
 
 def prowlarr_error_response(exc: ProwlarrError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, exc.public_message, exc.recovery))
 
 
-def build_csp() -> str:
-    return "; ".join(
-        [
-            "default-src 'self'",
-            "script-src 'self'",
-            "style-src 'self'",
-            "img-src 'self' data:",
-            "font-src 'self'",
-            "connect-src 'self'",
-            "object-src 'none'",
-            "frame-ancestors 'none'",
-            "base-uri 'self'",
-            "form-action 'self'",
-            "upgrade-insecure-requests",
-        ]
-    )
+init_sentry(os.getenv("SENTRY_DSN", ""), os.getenv("SENTRY_ENVIRONMENT", "production"))
 
 
-app = FastAPI(title="Prowlarr Panel", docs_url=None, redoc_url=None, openapi_url=None)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await app.state.prowlarr.discover()
+        logger.info("Prowlarr discovery completed")
+    except ProwlarrError as exc:
+        logger.warning("Prowlarr discovery pending: %s", exc.code)
+    yield
+    await app.state.prowlarr.close()
+
+
+app = FastAPI(title="Prowlarr Panel", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 api_router = APIRouter()
+_COMMON_CSS_DIR = Path(__file__).resolve().parents[2] / "common" / "css"
+app.mount("/common/css", StaticFiles(directory=str(_COMMON_CSS_DIR)), name="common-css")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if PUBLIC_PREFIX:
     app.mount(f"{PUBLIC_PREFIX}/static", StaticFiles(directory=STATIC_DIR), name="prefixed-static")
@@ -162,67 +139,25 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-@app.on_event("startup")
-async def startup() -> None:
-    try:
-        await app.state.prowlarr.discover()
-        logger.info("Prowlarr discovery completed")
-    except ProwlarrError as exc:
-        logger.warning("Prowlarr discovery pending: %s", exc.code)
-
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    await app.state.prowlarr.close()
-
-
 def cleanup_csrf_tokens(app_instance: FastAPI, now: float | None = None) -> None:
-    current = now if now is not None else time.monotonic()
-    tokens: dict[str, float] = app_instance.state.csrf_tokens
-    for token, created_at in list(tokens.items()):
-        if current - created_at > CSRF_TOKEN_TTL_SECONDS:
-            del tokens[token]
-    if len(tokens) <= MAX_CSRF_TOKENS:
-        return
-    for token, _created_at in sorted(tokens.items(), key=lambda item: item[1])[: len(tokens) - MAX_CSRF_TOKENS]:
-        del tokens[token]
+    _cleanup_csrf_tokens(app_instance, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS, now)
 
 
 def csrf_token_is_valid(app_instance: FastAPI, token: str) -> bool:
-    cleanup_csrf_tokens(app_instance)
-    return token in app_instance.state.csrf_tokens
+    return _csrf_token_is_valid(app_instance, token, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS)
 
 
 def csrf_cookie_matches(request: Request, token: str) -> bool:
-    for item in request.headers.get("cookie", "").split(";"):
-        name, separator, value = item.strip().partition("=")
-        if separator and name == CSRF_COOKIE and secrets.compare_digest(value, token):
-            return True
-    return False
+    return _csrf_cookie_matches(request, token, CSRF_COOKIE)
 
 
 def set_csrf_cookie(request: Request, response: Response) -> str:
-    is_https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
-    cleanup_csrf_tokens(app)
-    token = secrets.token_urlsafe(32)
-    app.state.csrf_tokens[token] = time.monotonic()
-    response.set_cookie(
-        CSRF_COOKIE,
-        token,
-        secure=is_https,
-        httponly=False,
-        samesite="strict",
-        path=f"{PUBLIC_PREFIX}/" if PUBLIC_PREFIX else "/",
-    )
-    return token
+    cookie_path = f"{PUBLIC_PREFIX}/" if PUBLIC_PREFIX else "/"
+    return _set_csrf_cookie(app, request, response, CSRF_COOKIE, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS, cookie_path=cookie_path)
 
 
 def client_key(request: Request) -> str:
-    client_host = request.client.host if request.client else "unknown"
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded and client_host in TRUSTED_PROXY_IPS:
-        return forwarded.split(",", 1)[0].strip()
-    return client_host
+    return _client_key(request, TRUSTED_PROXY_IPS)
 
 
 def require_action_guard(kind: str):

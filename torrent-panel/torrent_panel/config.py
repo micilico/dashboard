@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+
+STATIC_DIR = Path(__file__).parent / "static"
+HASH_RE = re.compile(r"^[A-Fa-f0-9]{40}([A-Fa-f0-9]{24})?$")
+PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
+ACTIVITY_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_ACTIVITY_PUBLIC_PREFIX", "/activity").rstrip("/")
+STORAGE_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")
+MEDIA_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_MEDIA_PUBLIC_PREFIX", "/media-panel").rstrip("/")
+HEALTH_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_HEALTH_PUBLIC_PREFIX", "/health").rstrip("/")
+CONSOLE_PREFIXES = [ACTIVITY_PUBLIC_PREFIX, STORAGE_PUBLIC_PREFIX, MEDIA_PUBLIC_PREFIX, HEALTH_PUBLIC_PREFIX]
+PROWLARR_PANEL_PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")
+CSRF_COOKIE = "torrent_panel_csrf"
+CSRF_HEADER = "X-Torrent-Panel-CSRF"
+PROWLARR_PANEL_INTERNAL_AUTH_SECRET = os.getenv("PROWLARR_PANEL_INTERNAL_AUTH_SECRET", "")
+MAX_RATE_KEYS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_KEYS", "2048"))
+RATE_LIMIT_CALLS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_CALLS", "40"))
+RATE_LIMIT_SECONDS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_SECONDS", "60"))
+CSRF_TOKEN_TTL_SECONDS = int(os.getenv("TORRENT_PANEL_CSRF_TOKEN_TTL_SECONDS", "43200"))
+MAX_CSRF_TOKENS = int(os.getenv("TORRENT_PANEL_CSRF_TOKEN_KEYS", "128"))
+TRUSTED_PROXY_IPS = {
+    item.strip()
+    for item in os.getenv("TORRENT_PANEL_TRUSTED_PROXY_IPS", "127.0.0.1,::1").split(",")
+    if item.strip()
+}
+ALLOWED_SAVE_PATHS = {
+    item.strip()
+    for item in os.getenv("TORRENT_PANEL_ALLOWED_SAVE_PATHS", "").split(",")
+    if item.strip()
+}
+MONITOR_HTTP_TIMEOUT_SECONDS = float(os.getenv("TORRENT_PANEL_MONITOR_HTTP_TIMEOUT_SECONDS", "4"))
+MONITOR_DISK_PATH = os.getenv("TORRENT_PANEL_MONITOR_DISK_PATH", "/mnt/ultra-media")
+MONITOR_DISK_WARNING_PERCENT = float(os.getenv("TORRENT_PANEL_MONITOR_DISK_WARNING_PERCENT", "10"))
+MONITOR_DISK_CRITICAL_PERCENT = float(os.getenv("TORRENT_PANEL_MONITOR_DISK_CRITICAL_PERCENT", "5"))
+HOMEPAGE_STATUS_URL = os.getenv("TORRENT_PANEL_HOMEPAGE_STATUS_URL", "http://host.docker.internal:3001/")
+PROWLARR_PANEL_READY_URL = os.getenv(
+    "TORRENT_PANEL_PROWLARR_PANEL_READY_URL",
+    f"http://host.docker.internal:3120{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/readyz",
+)
+PROWLARR_PANEL_OVERVIEW_URL = os.getenv(
+    "TORRENT_PANEL_PROWLARR_PANEL_OVERVIEW_URL",
+    f"http://host.docker.internal:3120{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/api/overview",
+)
+PROWLARR_PANEL_HEALTH_URL = os.getenv(
+    "TORRENT_PANEL_PROWLARR_PANEL_HEALTH_URL",
+    f"http://host.docker.internal:3120{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/api/health",
+)
+JELLYFIN_STATUS_URL = os.getenv("TORRENT_PANEL_JELLYFIN_STATUS_URL", "http://host.docker.internal:8096/health")
+JELLYFIN_PUBLIC_URL = os.getenv("TORRENT_PANEL_JELLYFIN_PUBLIC_URL", "http://127.0.0.1:8096")
+RCLONE_RC_URL = os.getenv("TORRENT_PANEL_RCLONE_RC_URL", "http://host.docker.internal:5572/core/stats")
+SSH_QBIT_HOST = os.getenv("TORRENT_PANEL_QBIT_TUNNEL_HOST", "host.docker.internal")
+SSH_QBIT_PORT = int(os.getenv("TORRENT_PANEL_QBIT_TUNNEL_PORT", "16141"))
+SSH_PROWLARR_HOST = os.getenv("TORRENT_PANEL_PROWLARR_TUNNEL_HOST", "host.docker.internal")
+SSH_PROWLARR_PORT = int(os.getenv("TORRENT_PANEL_PROWLARR_TUNNEL_PORT", "16124"))
+MEDIA_AUTOMATION_ENABLED = os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+MEDIA_AUTOMATION_POLL_SECONDS = float(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_POLL_SECONDS", "8"))
+MEDIA_AUTOMATION_DEBOUNCE_SECONDS = float(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_DEBOUNCE_SECONDS", "45"))
+MEDIA_AUTOMATION_JELLYFIN_DELAY_SECONDS = float(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_JELLYFIN_DELAY_SECONDS", "5"))
+MEDIA_AUTOMATION_MAX_RCLONE_RETRIES = int(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_MAX_RCLONE_RETRIES", "3"))
+MEDIA_AUTOMATION_MAX_MOUNT_RETRIES = int(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_MAX_MOUNT_RETRIES", "5"))
+MEDIA_AUTOMATION_MAX_JELLYFIN_RETRIES = int(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_MAX_JELLYFIN_RETRIES", "2"))
+MEDIA_AUTOMATION_HISTORY_LIMIT = int(os.getenv("TORRENT_PANEL_MEDIA_AUTOMATION_HISTORY_LIMIT", "60"))
+MEDIA_AUTOMATION_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_MEDIA_AUTOMATION_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "media-automation-state.json"),
+    )
+)
+NOTIFICATION_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_NOTIFICATION_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "notification-state.json"),
+    )
+)
+AUTOMATION_RULES_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_AUTOMATION_RULES_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "automation-rules.json"),
+    )
+)
+MEDIA_MOUNT_PATH = os.getenv("TORRENT_PANEL_MEDIA_MOUNT_PATH", MONITOR_DISK_PATH)
+RCLONE_REFRESH_MODE = os.getenv("TORRENT_PANEL_RCLONE_REFRESH_MODE", "auto").strip().lower()
+RCLONE_RC_REFRESH_URL = os.getenv("TORRENT_PANEL_RCLONE_RC_REFRESH_URL", "http://host.docker.internal:5572/vfs/refresh")
+RCLONE_RC_REFRESH_DIR = os.getenv("TORRENT_PANEL_RCLONE_RC_REFRESH_DIR", "")
+RCLONE_SYSTEMD_UNIT = os.getenv("TORRENT_PANEL_RCLONE_SYSTEMD_UNIT", "")
+RCLONE_SYSTEMD_RESTART_CMD = os.getenv("TORRENT_PANEL_RCLONE_SYSTEMD_RESTART_CMD", "")
+JELLYFIN_API_URL = os.getenv("TORRENT_PANEL_JELLYFIN_API_URL", "http://host.docker.internal:8096")
+JELLYFIN_API_KEY = os.getenv("TORRENT_PANEL_JELLYFIN_API_KEY", "")
+JELLYFIN_LIBRARY_MAP = os.getenv("TORRENT_PANEL_JELLYFIN_LIBRARY_MAP", "")
+JELLYFIN_GLOBAL_FALLBACK = os.getenv("TORRENT_PANEL_JELLYFIN_GLOBAL_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}

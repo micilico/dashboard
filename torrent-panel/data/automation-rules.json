@@ -1,0 +1,53 @@
+[
+  {
+    "id": "0a3bcc0e8d62",
+    "name": "Pause si disque critique",
+    "trigger": "disk_critical",
+    "conditions": [
+      "Stockage critique"
+    ],
+    "actions": [
+      "pause_downloads"
+    ],
+    "enabled": false,
+    "mode": "simulation",
+    "createdAt": "2026-07-20T08:00:19.344127+00:00",
+    "updatedAt": "2026-07-20T08:00:19.344127+00:00",
+    "lastExecutedAt": null,
+    "lastResult": "never"
+  },
+  {
+    "id": "6b3d83fb52d2",
+    "name": "Alerte torrent bloqué",
+    "trigger": "blocked_torrent",
+    "conditions": [
+      "Torrent bloqué plusieurs minutes"
+    ],
+    "actions": [
+      "notify_blocked_torrent"
+    ],
+    "enabled": true,
+    "mode": "simulation",
+    "createdAt": "2026-07-20T08:00:19.344127+00:00",
+    "updatedAt": "2026-07-20T08:00:19.344127+00:00",
+    "lastExecutedAt": null,
+    "lastResult": "never"
+  },
+  {
+    "id": "d61c2d199977",
+    "name": "Alerte backend indisponible",
+    "trigger": "backend_unavailable",
+    "conditions": [
+      "Service distant indisponible"
+    ],
+    "actions": [
+      "notify_backend_unavailable"
+    ],
+    "enabled": true,
+    "mode": "simulation",
+    "createdAt": "2026-07-20T08:00:19.344127+00:00",
+    "updatedAt": "2026-07-20T08:00:19.344127+00:00",
+    "lastExecutedAt": null,
+    "lastResult": "never"
+  }
+]

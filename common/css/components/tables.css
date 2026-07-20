@@ -1,0 +1,7 @@
+.data-table { width: 100%; border-collapse: collapse; }
+th, td { padding: 12px 10px; border-bottom: 1px solid rgba(51, 65, 85, 0.7); vertical-align: top; text-align: left; }
+th { color: var(--text-subtle); font-size: 0.76rem; font-weight: 800; text-transform: uppercase; white-space: nowrap; letter-spacing: .04em; }
+td { min-width: 90px; }
+.name-cell { min-width: 260px; overflow-wrap: anywhere; font-weight: 750; }
+.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.table-scroll { overflow-x: auto; }

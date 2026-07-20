@@ -1,0 +1,40 @@
+.topbar, .content-panel, .stat, .alert, .dialog, .card, .list-item {
+  border: 1px solid var(--border); background: var(--surface); border-radius: 8px;
+}
+
+.content-panel {
+  grid-column: 2;
+  margin-top: 0;
+  border-radius: var(--radius-card);
+  background: rgba(16,18,23,.94);
+  box-shadow: var(--shadow-panel);
+}
+
+.summary-grid {
+  grid-column: 2;
+  margin-top: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  min-height: 112px;
+  gap: 10px;
+  align-content: space-between;
+  padding: 20px;
+  border-radius: var(--radius-panel);
+  background: linear-gradient(145deg, var(--surface-2), var(--surface));
+  display: grid;
+}
+.stat:first-child { background: linear-gradient(145deg, rgba(124,108,255,.19), var(--surface) 70%); }
+.stat strong { font-size: 1.65rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--text-subtle); font-size: .75rem; letter-spacing: .045em; font-weight: 800; text-transform: uppercase; }
+
+.card, .list-item { padding: 14px; }
+.card dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px; margin: 10px 0 0; }
+.card dt { color: var(--muted); font-weight: 800; }
+.card dd { margin: 0; overflow-wrap: anywhere; }
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 20px; }
+.list { display: grid; gap: 10px; }
+.list-item { display: grid; gap: 4px; }

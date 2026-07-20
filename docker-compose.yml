@@ -25,7 +25,9 @@ services:
       start_period: 20s
 
   torrent-panel:
-    build: ./torrent-panel
+    build:
+      context: .
+      dockerfile: ./torrent-panel/Dockerfile
     container_name: torrent-panel
     restart: unless-stopped
     ports:
@@ -51,7 +53,9 @@ services:
       start_period: 20s
 
   prowlarr-panel:
-    build: ./prowlarr-panel
+    build:
+      context: .
+      dockerfile: ./prowlarr-panel/Dockerfile
     container_name: prowlarr-panel
     restart: unless-stopped
     ports:

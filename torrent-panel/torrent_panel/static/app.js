@@ -288,7 +288,7 @@ async function api(path, options = {}, retryCsrf = true) {
   if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if ((options.method || "GET").toUpperCase() !== "GET") headers.set("X-Torrent-Panel-CSRF", state.csrfToken);
 
-  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  const response = await fetchWithRetry(path, { ...options, headers, credentials: "same-origin" });
   const payload = await response.json().catch(() => ({}));
   if (response.ok) return payload;
 

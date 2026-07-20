@@ -1,0 +1,12 @@
+.dialog { width: min(480px, calc(100% - 32px)); color: var(--text); padding: 0; border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel); border: 1px solid var(--border); }
+.dialog::backdrop { background: rgba(0,0,0,.58); backdrop-filter: blur(8px); }
+.dialog form { display: grid; gap: 16px; padding: 28px; }
+.dialog-name { color: var(--muted); overflow-wrap: anywhere; }
+.toast {
+  position: fixed; right: 16px; bottom: 16px; z-index: 20;
+  max-width: min(380px, calc(100% - 32px));
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--surface-2); color: var(--text); padding: 12px 14px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+[hidden] { display: none !important; }
