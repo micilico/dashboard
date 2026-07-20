@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -115,15 +115,7 @@ class ProwlarrClient:
     def __init__(self, config: ProwlarrConfig) -> None:
         self._config = config
         self._api_root = "/api/v1"
-        self._client = httpx.AsyncClient(
-            base_url=config.url.rstrip("/"),
-            timeout=httpx.Timeout(config.timeout_seconds),
-            headers={
-                "User-Agent": "prowlarr-panel/1.0",
-                "X-Api-Key": config.api_key,
-                "Accept": "application/json",
-            },
-        )
+        self._client = self._build_client(config.url)
         self._release_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._capabilities: dict[str, Any] = {
             "detected": False,
@@ -137,6 +129,26 @@ class ProwlarrClient:
     @property
     def capabilities(self) -> dict[str, Any]:
         return dict(self._capabilities)
+
+    def _build_client(self, base_url: str) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            timeout=httpx.Timeout(self._config.timeout_seconds),
+            headers={
+                "User-Agent": "prowlarr-panel/1.0",
+                "X-Api-Key": self._config.api_key,
+                "Accept": "application/json",
+            },
+        )
+
+    def _localhost_fallback_url(self) -> str | None:
+        parsed = urlparse(self._config.url)
+        if parsed.hostname != "host.docker.internal":
+            return None
+        netloc = "127.0.0.1"
+        if parsed.port is not None:
+            netloc = f"{netloc}:{parsed.port}"
+        return urlunparse(parsed._replace(netloc=netloc))
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -182,6 +194,33 @@ class ProwlarrClient:
                 recovery="Réessayer",
             ) from exc
         except httpx.RequestError as exc:
+            fallback_url = self._localhost_fallback_url()
+            if fallback_url:
+                logger.info("Prowlarr request failed through host.docker.internal, retrying via 127.0.0.1")
+                fallback_client = self._build_client(fallback_url)
+                try:
+                    response = await fallback_client.request(method, path, params=params, data=data, json=json)
+                except httpx.TimeoutException as fallback_exc:
+                    await fallback_client.aclose()
+                    logger.warning("Prowlarr localhost fallback timed out on %s %s", method, path)
+                    raise ProwlarrError(
+                        504,
+                        "Prowlarr ne répond pas assez vite.",
+                        code="prowlarr_timeout",
+                        recovery="Réessayer",
+                    ) from fallback_exc
+                except httpx.RequestError:
+                    await fallback_client.aclose()
+                else:
+                    await self._client.aclose()
+                    self._client = fallback_client
+                    self._config = ProwlarrConfig(
+                        url=fallback_url,
+                        api_key=self._config.api_key,
+                        timeout_seconds=self._config.timeout_seconds,
+                        release_cache_ttl_seconds=self._config.release_cache_ttl_seconds,
+                    )
+                    return response
             raise self._request_error(exc) from exc
 
         if acceptable and response.status_code in acceptable:

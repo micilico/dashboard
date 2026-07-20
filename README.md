@@ -71,7 +71,7 @@ Pour l'automatisation medias :
 Creer aussi `prowlarr-panel/.env` a partir de [prowlarr-panel/.env.example](prowlarr-panel/.env.example) :
 
 ```env
-PROWLARR_URL=http://host.docker.internal:16124/prowlarr
+PROWLARR_URL=http://127.0.0.1:16124/prowlarr
 PROWLARR_API_KEY=change-me
 PROWLARR_TIMEOUT_SECONDS=8
 PROWLARR_RELEASE_CACHE_TTL_SECONDS=900
@@ -191,7 +191,7 @@ Le tunnel doit exposer localement :
 - `127.0.0.1:16141` vers qBittorrent ultra.cc
 - `127.0.0.1:16124` vers Prowlarr ultra.cc
 
-Comme Homepage et Torrent Panel tournent en bridge Docker, ils appellent ces services avec `host.docker.internal`. Verifier sur le VPS que les ports bindes sur le host sont bien joignables depuis les conteneurs ; sinon il faudra adapter le bind du tunnel ou ajouter un relais local sans exposition publique.
+`homepage` tourne en bridge Docker et appelle le host via `host.docker.internal`. En revanche `prowlarr-panel` et `torrent-panel` tournent en `network_mode: "host"` ; leurs backends doivent donc viser `127.0.0.1` pour joindre les tunnels et services locaux.
 
 ## 6. Activer rclone rc
 
