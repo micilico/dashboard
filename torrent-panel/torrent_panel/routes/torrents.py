@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
+import time
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -11,6 +15,7 @@ from .csrf_guard import require_action_guard
 from ..config import ALLOWED_SAVE_PATHS, HASH_RE
 from ..models import (
     AddMagnet,
+    AddTrackerPayload,
     DeleteTorrent,
     ForceStartTorrent,
     TorrentCategoryUpdate,
@@ -21,6 +26,17 @@ from ..models import (
 )
 from ..qbittorrent import QbitError
 from common import error_detail
+
+logger = logging.getLogger("torrent_panel.routes.trackers")
+
+_TRACKER_SPECIAL_PREFIXES = ("** [DHT]", "** [PeX]", "** [LSD]", "** [Metadata]")
+
+_TRACKER_INDEX_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
+_TRACKER_CACHE_TTL = 60
+_TRACKER_CONCURRENCY = 6
+
+TRACKER_VALID_SCHEMES = ("http://", "https://", "udp://", "ws://", "wss://")
+_URL_IN_TEXT_RE = re.compile(r"(?:https?|udp|wss?)://\S+", re.IGNORECASE)
 
 router = APIRouter()
 
@@ -175,7 +191,22 @@ async def set_torrent_sequential(request: Request, payload: TorrentSequentialUpd
 @router.get("/torrents/{torrent_hash}/trackers")
 async def torrent_trackers(request: Request, torrent_hash: str) -> dict[str, Any]:
     try:
-        return {"trackers": await request.app.state.qbit.trackers(validate_hash(torrent_hash))}
+        trackers = await request.app.state.qbit.trackers(validate_hash(torrent_hash))
+        public_trackers = []
+        for tracker in trackers:
+            if not isinstance(tracker, dict):
+                continue
+            public_tracker = {
+                key: value
+                for key, value in tracker.items()
+                if key in {"status", "tier", "num_peers", "num_seeds", "num_leeches", "num_downloaded", "msg"}
+            }
+            raw_url = str(tracker.get("url") or "")
+            public_tracker["url"] = raw_url if _is_special_tracker(raw_url) else _tracker_domain(raw_url)
+            if "msg" in public_tracker:
+                public_tracker["msg"] = _URL_IN_TEXT_RE.sub("[URL masquée]", str(public_tracker["msg"]))
+            public_trackers.append(public_tracker)
+        return {"trackers": public_trackers}
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
 
@@ -186,6 +217,143 @@ async def torrent_files(request: Request, torrent_hash: str) -> dict[str, Any]:
         return {"files": await request.app.state.qbit.files(validate_hash(torrent_hash))}
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
+
+
+def _is_special_tracker(url: str) -> bool:
+    return url.startswith(_TRACKER_SPECIAL_PREFIXES)
+
+
+def _tracker_domain(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port
+        if port and port not in {80, 443}:
+            return f"{host}:{port}"
+        return host
+    except Exception:
+        return url
+
+
+def _validate_tracker_url(url: str) -> str | None:
+    stripped = url.strip()
+    if not stripped:
+        return "Adresse vide."
+    if not stripped.startswith(TRACKER_VALID_SCHEMES):
+        return "Protocole non pris en charge. Utilisez http://, https://, udp://, ws:// ou wss://."
+    return None
+
+
+def _sanitize_tracker_for_logs(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        return f"{parsed.scheme}://{host}{':' + str(parsed.port) if parsed.port else ''}"
+    except Exception:
+        return "<tracker>"
+
+
+@router.get("/trackers/index")
+async def tracker_index(request: Request) -> dict[str, Any]:
+    now = time.monotonic()
+    cache = _TRACKER_INDEX_CACHE
+    if cache["data"] is not None and now - cache["ts"] < _TRACKER_CACHE_TTL:
+        return cache["data"]
+
+    try:
+        torrents = await request.app.state.qbit.torrents()
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+    sem = asyncio.Semaphore(_TRACKER_CONCURRENCY)
+
+    async def fetch_trackers(torrent_hash: str) -> list[dict[str, Any]]:
+        async with sem:
+            try:
+                return await request.app.state.qbit.trackers(torrent_hash)
+            except QbitError:
+                return []
+
+    results = await asyncio.gather(*[fetch_trackers(t["hash"]) for t in torrents], return_exceptions=False)
+
+    index: dict[str, list[str]] = {}
+    domain_counter: dict[str, int] = {}
+    for t, trackers in zip(torrents, results):
+        domains: set[str] = set()
+        for tr in trackers if isinstance(trackers, list) else []:
+            url = tr.get("url", "")
+            if _is_special_tracker(url):
+                continue
+            domain = _tracker_domain(url)
+            if domain:
+                domains.add(domain)
+        if domains:
+            index[t["hash"]] = sorted(domains)
+            for d in domains:
+                domain_counter[d] = domain_counter.get(d, 0) + 1
+
+    payload = {"index": index, "domains": domain_counter}
+    cache["data"] = payload
+    cache["ts"] = now
+    return payload
+
+
+@router.post("/torrents/add-tracker", dependencies=[Depends(require_action_guard)])
+async def add_tracker(request: Request, payload: AddTrackerPayload) -> dict[str, Any]:
+    hashes = validate_hashes(payload.hashes)
+    tracker_url = payload.trackerUrl.strip()
+    validation_error = _validate_tracker_url(tracker_url)
+    if validation_error:
+        raise HTTPException(status_code=422, detail=error_detail("tracker_url_invalid", validation_error, "Vérifier l'adresse"))
+
+    torrents = await request.app.state.qbit.torrents()
+    torrent_map = {t["hash"]: t for t in torrents}
+
+    private_hashes = [h for h in hashes if torrent_map.get(h, {}).get("isPrivate", False)]
+    if private_hashes:
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail(
+                "private_torrent_selected",
+                f"{len(private_hashes)} torrent(s) privé(s) détecté(s). Ajouter un tracker tiers peut enfreindre les règles.",
+                "Retirer la sélection",
+            ),
+        )
+
+    sem = asyncio.Semaphore(6)
+
+    async def add_to_one(torrent_hash: str) -> str:
+        async with sem:
+            if torrent_hash not in torrent_map:
+                return "missing"
+            existing = await request.app.state.qbit.trackers(torrent_hash)
+            for tr in existing if isinstance(existing, list) else []:
+                if isinstance(tr, dict) and tr.get("url", "").strip() == tracker_url:
+                    return "duplicate"
+            try:
+                await request.app.state.qbit.add_tracker(torrent_hash, tracker_url)
+                return "updated"
+            except QbitError:
+                return "failed"
+
+    logger.info("add-tracker: url=%s, hashes=%d", _sanitize_tracker_for_logs(tracker_url), len(hashes))
+    results = await asyncio.gather(*[add_to_one(h) for h in hashes], return_exceptions=False)
+
+    updated = results.count("updated")
+    duplicates = results.count("duplicate")
+    missing = results.count("missing")
+    failed = results.count("failed")
+
+    _TRACKER_INDEX_CACHE["ts"] = 0
+
+    return {
+        "status": "completed",
+        "updated": updated,
+        "duplicates": duplicates,
+        "missing": missing,
+        "failed": failed,
+        "total": len(hashes),
+    }
 
 
 @router.post("/torrents/add", dependencies=[Depends(require_action_guard)])

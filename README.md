@@ -37,10 +37,11 @@ HOMEPAGE_VAR_QBITTORRENT_PASSWORD=change-me
 TORRENT_PANEL_PORT=3110
 PROWLARR_PANEL_PORT=3120
 HOMEPAGE_VAR_PROWLARR_API_KEY=change-me
+HOMEPAGE_VAR_JELLYFIN_URL=https://media.example.com
 HOMEPAGE_VAR_JELLYFIN_API_KEY=change-me
 ```
 
-Creer aussi `torrent-panel/.env` a partir de [torrent-panel/.env.example](/Users/corentinkern/Documents/Dashboard/torrent-panel/.env.example:1) :
+Creer aussi `torrent-panel/.env` a partir de [torrent-panel/.env.example](torrent-panel/.env.example) :
 
 ```env
 QBITTORRENT_URL=http://host.docker.internal:16141
@@ -67,7 +68,7 @@ Pour l'automatisation medias :
 - `TORRENT_PANEL_JELLYFIN_LIBRARY_MAP` mappe les categories qBittorrent vers des identifiants Jellyfin fournis uniquement au backend
 - si la categorie n'est pas mappee, `TORRENT_PANEL_JELLYFIN_GLOBAL_FALLBACK=true` autorise un scan global
 
-Creer aussi `prowlarr-panel/.env` a partir de [prowlarr-panel/.env.example](/Users/corentinkern/Documents/Dashboard/prowlarr-panel/.env.example:1) :
+Creer aussi `prowlarr-panel/.env` a partir de [prowlarr-panel/.env.example](prowlarr-panel/.env.example) :
 
 ```env
 PROWLARR_URL=http://host.docker.internal:16124/prowlarr
@@ -168,11 +169,13 @@ docker compose logs prowlarr-panel
 
 ## 5. Installer le tunnel autossh
 
-Copier [autossh/autossh-ultra.service](/Users/corentinkern/Documents/Dashboard/autossh/autossh-ultra.service:1) sur le VPS dans :
+Copier [autossh/autossh-ultra.service](autossh/autossh-ultra.service) sur le VPS dans :
 
 ```text
 /etc/systemd/system/autossh-ultra.service
 ```
+
+Copier ensuite `autossh/dashboard-autossh.example` vers `/etc/default/dashboard-autossh`, puis renseigner la cible SSH et le chemin de la cle privee. Ce fichier contient des informations d'infrastructure privees et ne doit pas etre versionne.
 
 Puis activer le service :
 
@@ -199,7 +202,7 @@ systemctl cat rclone
 systemctl show -p ExecStart rclone
 ```
 
-Modifier ensuite [rclone/override.conf](/Users/corentinkern/Documents/Dashboard/rclone/override.conf:1) :
+Modifier ensuite [rclone/override.conf](rclone/override.conf) :
 - remplacer la ligne `ExecStart=` complete par la vraie commande actuelle
 - conserver a la fin : `--rc --rc-addr 127.0.0.1:5572 --rc-no-auth`
 
@@ -218,7 +221,7 @@ curl -X POST http://127.0.0.1:5572/core/stats
 
 ## 7. Configurer Caddy
 
-Mettre a jour [caddy/dashboard.conf](/Users/corentinkern/Documents/Dashboard/caddy/dashboard.conf:1) :
+Mettre a jour [caddy/dashboard.conf](caddy/dashboard.conf) :
 - remplacer `dashboard.example.com`
 - generer un hash de mot de passe
 - remplacer `admin` si besoin
@@ -283,7 +286,7 @@ docker compose stop torrent-panel
 docker compose rm torrent-panel
 ```
 
-Puis supprimer le bloc `torrent-panel` de [docker-compose.yml](/Users/corentinkern/Documents/Dashboard/docker-compose.yml:1), le bloc `/torrent-panel/` de [caddy/dashboard.conf](/Users/corentinkern/Documents/Dashboard/caddy/dashboard.conf:1), et le `href` de la carte qBittorrent dans [homepage/services.yaml](/Users/corentinkern/Documents/Dashboard/homepage/services.yaml:1).
+Puis supprimer le bloc `torrent-panel` de [docker-compose.yml](docker-compose.yml), le bloc `/torrent-panel/` de [caddy/dashboard.conf](caddy/dashboard.conf), et le `href` de la carte qBittorrent dans [homepage/services.yaml](homepage/services.yaml).
 
 Pour retirer Prowlarr Panel sans toucher a Homepage :
 
@@ -292,13 +295,13 @@ docker compose stop prowlarr-panel
 docker compose rm prowlarr-panel
 ```
 
-Puis supprimer le bloc `prowlarr-panel` de [docker-compose.yml](/Users/corentinkern/Documents/Dashboard/docker-compose.yml:1), le bloc `/prowlarr-panel/` de [caddy/dashboard.conf](/Users/corentinkern/Documents/Dashboard/caddy/dashboard.conf:1), et le `href` de la carte Prowlarr dans [homepage/services.yaml](/Users/corentinkern/Documents/Dashboard/homepage/services.yaml:1).
+Puis supprimer le bloc `prowlarr-panel` de [docker-compose.yml](docker-compose.yml), le bloc `/prowlarr-panel/` de [caddy/dashboard.conf](caddy/dashboard.conf), et le `href` de la carte Prowlarr dans [homepage/services.yaml](homepage/services.yaml).
 
 ## Notes
 
-- [homepage/services.yaml](/Users/corentinkern/Documents/Dashboard/homepage/services.yaml:1) utilise uniquement des endpoints locaux du VPS
+- [homepage/services.yaml](homepage/services.yaml) utilise uniquement des endpoints locaux du VPS
 - le lien Homepage pointe vers Torrent Panel, pas vers qBittorrent
 - aucun lien public vers qBittorrent ou Prowlarr n'est expose
-- [homepage/bookmarks.yaml](/Users/corentinkern/Documents/Dashboard/homepage/bookmarks.yaml:1) est vide par choix et peut etre complete plus tard
+- [homepage/bookmarks.yaml](homepage/bookmarks.yaml) est vide par choix et peut etre complete plus tard
 - Torrent Panel applique un jeton CSRF pour les actions, une limite simple d'actions par minute, des timeouts reseau et des messages d'erreur sans secrets
 - Prowlarr Panel applique un jeton CSRF pour les actions, des limites separees pour recherches/tests/modifications/grabs, des timeouts reseau et des messages d'erreur sans secrets

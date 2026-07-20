@@ -16,7 +16,10 @@ const state = {
 const els = {
   title: document.querySelector("#pageTitle"),
   subtitle: document.querySelector("#pageSubtitle"),
+  pageStatus: document.querySelector("#pageStatus"),
+  pageEyebrow: document.querySelector("#pageEyebrow"),
   refreshStatus: document.querySelector("#refreshStatus"),
+  lastCheck: document.querySelector("#lastCheck"),
   refreshButton: document.querySelector("#refreshButton"),
   primaryButton: document.querySelector("#primaryButton"),
   summaryGrid: document.querySelector("#summaryGrid"),
@@ -31,6 +34,8 @@ const els = {
   storageLink: document.querySelector("#storageLink"),
   mediaLink: document.querySelector("#mediaLink"),
   healthLink: document.querySelector("#healthLink"),
+  statusText: document.querySelector("#statusText"),
+  sidebarStatusDetail: document.querySelector("#sidebarStatusDetail"),
 };
 
 function showToast(message) {
@@ -74,9 +79,9 @@ function badge(label, kind = "info") {
   return span;
 }
 
-function card(label, value, hint = "") {
+function card(label, value, hint = "", className = "") {
   const article = document.createElement("article");
-  article.className = "stat panel";
+  article.className = `stat panel ${className}`.trim();
   const top = document.createElement("span");
   top.textContent = label;
   const strong = document.createElement("strong");
@@ -84,6 +89,37 @@ function card(label, value, hint = "") {
   article.append(top, strong);
   if (hint) article.append(Object.assign(document.createElement("p"), { className: "muted", textContent: hint }));
   return article;
+}
+
+function setRefreshStamp() {
+  const now = new Date();
+  if (els.lastCheck) {
+    els.lastCheck.textContent = now.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+    els.lastCheck.dateTime = now.toISOString();
+  }
+}
+
+function setSidebarStatus(label, detail, tone = "operational") {
+  if (els.statusText) els.statusText.textContent = label;
+  if (els.sidebarStatusDetail) els.sidebarStatusDetail.textContent = detail;
+  const dot = document.querySelector(".sidebar-health .status-dot");
+  if (dot?.classList) {
+    dot.classList.remove("degraded", "checking", "unavailable");
+    if (tone === "degraded") dot.classList.add("degraded");
+    if (tone === "checking") dot.classList.add("checking");
+    if (tone === "unavailable") dot.classList.add("unavailable");
+  }
+}
+
+function setPageStatus(message, tone = "info") {
+  if (!els.pageStatus) return;
+  els.pageStatus.hidden = !message;
+  els.pageStatus.textContent = message || "";
+  els.pageStatus.className = `page-status ${tone}`.trim();
+}
+
+function configureSummaryGrid(mode) {
+  els.summaryGrid.className = `summary-grid summary-grid-console ${mode}`.trim();
 }
 
 async function api(path, options = {}, retryCsrf = true) {
@@ -137,8 +173,10 @@ async function postJson(path, payload, successMessage) {
 }
 
 async function renderActivity() {
+  configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Centre d’activité";
   els.subtitle.textContent = "Synthèse transverse des services, des alertes et des simulations d’automatisation.";
+  if (els.pageEyebrow) els.pageEyebrow.textContent = "Journal";
   els.primaryButton.textContent = "Actualiser";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = load;
@@ -147,10 +185,14 @@ async function renderActivity() {
   els.summaryGrid.replaceChildren(
     card("Téléchargements actifs", String(summary.downloadsActive || 0)),
     card("Vitesse descendante", `${formatBytes(summary.downloadSpeedBytes || 0)}/s`),
-    card("Vitesse montante", `${formatBytes(summary.uploadSpeedBytes || 0)}/s`),
-    card("Torrents bloqués", String(summary.blockedTorrents || 0)),
-    card("Espace libre", formatBytes(summary.diskFreeBytes || 0)),
+    card("Alertes actives", String((payload.alerts || []).length)),
   );
+  setSidebarStatus(
+    (payload.alerts || []).length ? `${(payload.alerts || []).length} alerte(s) active(s)` : "Activité sous contrôle",
+    `${(payload.timeline || []).length} événement(s) consolidé(s).`,
+    (payload.alerts || []).length ? "degraded" : "operational",
+  );
+  setPageStatus((payload.alerts || []).length ? "Des alertes nécessitent un suivi." : "Aucune alerte active sur la chronologie.", (payload.alerts || []).length ? "warn" : "ok");
 
   const timelineItems = (payload.timeline || []).map((item) => {
     const article = document.createElement("article");
@@ -218,8 +260,10 @@ async function renderActivity() {
 }
 
 async function renderStorage() {
+  configureSummaryGrid("summary-grid-storage");
   els.title.textContent = "Panneau de stockage";
   els.subtitle.textContent = "État du montage, statistiques rclone et seuils d’occupation.";
+  if (els.pageEyebrow) els.pageEyebrow.textContent = "Système";
   els.primaryButton.textContent = "Actualiser rclone";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = async () => {
@@ -232,9 +276,15 @@ async function renderStorage() {
     card("Capacité totale", formatBytes(disk.totalBytes || 0)),
     card("Utilisé", formatBytes(disk.usedBytes || 0), `${disk.usedPercent || 0} %`),
     card("Disponible", formatBytes(disk.freeBytes || 0), `${disk.freePercent || 0} %`),
-    card("Vitesse rclone", rclone.speedLabel || "0 o/s"),
-    card("Erreurs", String(rclone.errors || 0)),
+    card("Vitesse rclone", rclone.speedLabel || "0 o/s", "", "stat-span-6 stat-compact"),
+    card("Erreurs", String(rclone.errors || 0), "", "stat-span-6 stat-compact"),
   );
+  setSidebarStatus(
+    disk.mounted ? "Montage opérationnel" : "Montage indisponible",
+    disk.path ? `Chemin surveillé: ${disk.path}` : "Surveillance du stockage active.",
+    disk.mounted ? "operational" : "unavailable",
+  );
+  setPageStatus(disk.mounted ? "Montage et seuils surveillés en continu." : "Le montage doit être vérifié.", disk.mounted ? "ok" : "error");
 
   const transfers = (rclone.transfers || []).map((item) => {
     const article = document.createElement("article");
@@ -265,8 +315,10 @@ async function renderStorage() {
 }
 
 async function renderMedia() {
+  configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Panneau médias";
   els.subtitle.textContent = "Vue légère Jellyfin: statut, tâches, lectures et derniers médias ajoutés.";
+  if (els.pageEyebrow) els.pageEyebrow.textContent = "Bibliothèque";
   els.primaryButton.textContent = "Scanner Jellyfin";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = async () => {
@@ -274,12 +326,16 @@ async function renderMedia() {
   };
   const payload = await api(`${state.apiPrefix}/media`, { cache: "no-store" });
   els.summaryGrid.replaceChildren(
-    card("Serveur", text(payload.serverName)),
-    card("Version", text(payload.version)),
+    card("Serveur", text(payload.serverName), text(payload.version)),
     card("Lectures en cours", String((payload.sessions || []).length)),
-    card("Utilisateurs", String((payload.activeUsers || []).length)),
-    card("Tâches", String((payload.tasks || []).length)),
+    card("Utilisateurs actifs", String((payload.activeUsers || []).length)),
   );
+  setSidebarStatus(
+    payload.serverName ? `${text(payload.serverName)} disponible` : "Jellyfin indisponible",
+    `${(payload.tasks || []).length} tâche(s) observée(s).`,
+    payload.serverName ? "operational" : "degraded",
+  );
+  setPageStatus((payload.errors || []).length ? (payload.errors || []).join(" ") : "Bibliothèque et tâches visibles sans données fictives.", (payload.errors || []).length ? "warn" : "ok");
 
   const recentItems = (payload.recentItems || []).map((item) => {
     const article = document.createElement("article");
@@ -320,8 +376,10 @@ async function renderMedia() {
 }
 
 async function renderHealth() {
+  configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Santé du système";
   els.subtitle.textContent = "Liveness, readiness et état global des services exposés via le backend contrôlé.";
+  if (els.pageEyebrow) els.pageEyebrow.textContent = "Observabilité";
   els.primaryButton.textContent = "Actualiser";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = load;
@@ -330,10 +388,14 @@ async function renderHealth() {
   els.summaryGrid.replaceChildren(
     card("État global", text(payload.globalStatus)),
     card("Opérationnels", String(summary.operational || 0)),
-    card("Dégradés", String(summary.degraded || 0)),
-    card("Indisponibles", String(summary.unavailable || 0)),
-    card("Alertes", String((payload.alerts || []).length)),
+    card("Incidents", String((summary.degraded || 0) + (summary.unavailable || 0) + (payload.alerts || []).length)),
   );
+  setSidebarStatus(
+    text(payload.globalStatus),
+    `${summary.operational || 0} opérationnel(s), ${(summary.degraded || 0) + (summary.unavailable || 0)} incident(s).`,
+    payload.globalStatus === "operational" ? "operational" : payload.globalStatus === "degraded" ? "degraded" : "unavailable",
+  );
+  setPageStatus((payload.alerts || []).length ? `${(payload.alerts || []).length} alerte(s) corrélée(s) active(s).` : "Aucune alerte corrélée en attente.", (payload.alerts || []).length ? "warn" : "ok");
 
   const rows = (payload.checks || []).map((item) => {
     const tr = document.createElement("tr");
@@ -385,16 +447,17 @@ async function renderHealth() {
 }
 
 async function load() {
-  els.refreshStatus.textContent = "Actualisation…";
+  setSidebarStatus("Actualisation en cours", "Synchronisation de la vue.", "checking");
   try {
     if (!state.csrfToken) await refreshSession();
     if (state.section === "activity") await renderActivity();
     if (state.section === "storage") await renderStorage();
     if (state.section === "media") await renderMedia();
     if (state.section === "health") await renderHealth();
-    els.refreshStatus.textContent = `À jour ${new Date().toLocaleTimeString("fr-FR")}`;
+    setRefreshStamp();
   } catch (error) {
-    els.refreshStatus.textContent = "Erreur";
+    setSidebarStatus("Erreur de synchronisation", error.message || "Erreur", "unavailable");
+    setPageStatus(error.message || "Erreur de chargement.", "error");
     showToast(error.message || "Erreur");
   }
 }

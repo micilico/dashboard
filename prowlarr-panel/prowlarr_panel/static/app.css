@@ -1,2 +1,275 @@
 @import url('./css/search.css');
 @import url('./css/responsive.css');
+
+.shell {
+  width: 100%;
+  grid-template-columns: 288px minmax(0, 1fr);
+  gap: 0;
+  padding: 0 52px 48px 0;
+}
+
+.topbar {
+  top: 0;
+  min-height: 100dvh;
+  padding: 44px 30px 28px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(9, 11, 17, 0.98), rgba(6, 8, 13, 0.96));
+}
+
+.topbar .brand-copy h1 {
+  margin: 0;
+  color: #a99eff;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.summary-grid-console {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-left: 60px;
+}
+
+.page-header {
+  padding-left: 60px;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: clamp(2.5rem, 3vw, 3rem);
+  line-height: 1.02;
+}
+
+.page-header .eyebrow {
+  color: #9d8cff;
+}
+
+.content-panel {
+  overflow: hidden;
+}
+
+.tabs {
+  padding: 0 24px;
+  margin: 0 24px;
+  border-bottom: 0;
+}
+
+.tab {
+  border-radius: 999px;
+  padding-inline: 16px;
+}
+
+.tab[aria-selected="true"] {
+  background: var(--accent-soft);
+  border-color: rgba(124, 108, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(124, 108, 255, 0.18);
+}
+
+.filters,
+.search-form {
+  margin: 0 20px 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
+}
+
+.panel-head {
+  padding: 24px 24px 8px;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 7fr 5fr;
+  gap: 20px;
+  padding: 20px;
+}
+
+.table-scroll {
+  padding: 0 20px 20px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 20px;
+}
+
+.view > .empty,
+.inline-stack {
+  margin-inline: 20px;
+}
+
+@media (max-width: 1439px) and (min-width: 1024px) {
+  .shell {
+    grid-template-columns: 92px minmax(0, 1fr);
+    padding-right: 32px;
+  }
+
+  .topbar {
+    padding: 24px 14px 18px;
+  }
+
+  .brand-copy,
+  .nav-label,
+  .sidebar-health p,
+  .status-pill span {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 52px;
+    height: 52px;
+    margin-inline: auto;
+  }
+
+  .nav a {
+    justify-content: center;
+    padding: 12px 10px;
+  }
+
+  .page-header,
+  .summary-grid-console {
+    padding-left: 36px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .shell {
+    width: min(100% - 40px, 1200px);
+    grid-template-columns: 80px minmax(0, 1fr);
+    gap: 20px;
+    padding: 16px 0 48px;
+  }
+
+  .topbar {
+    top: 16px;
+    min-height: calc(100dvh - 32px);
+    padding: 18px 10px 12px;
+  }
+
+  .brand-copy,
+  .nav-label,
+  .sidebar-health p,
+  .status-pill span {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+    margin-inline: auto;
+  }
+
+  .nav a {
+    justify-content: center;
+    padding: 12px 10px;
+  }
+
+  .page-header,
+  .summary-grid-console {
+    padding-left: 0;
+  }
+
+  .summary-grid-console {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .split,
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .shell {
+    width: min(100% - 32px, 680px);
+    display: block;
+    padding: 16px 0 40px;
+  }
+
+  .topbar {
+    position: static;
+    min-height: 0;
+    display: grid;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+  }
+
+  .brand-copy {
+    display: grid;
+  }
+
+  .brand-block {
+    grid-template-columns: 52px 1fr;
+    align-items: center;
+  }
+
+  .brand-mark {
+    margin: 0;
+    width: 52px;
+    height: 52px;
+  }
+
+  .brand-copy h1 {
+    font-size: 1.25rem;
+  }
+
+  .nav {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+
+  .nav a {
+    width: auto;
+    min-width: 52px;
+    flex: 0 0 auto;
+  }
+
+  .nav-label,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .page-header {
+    padding: 0;
+    display: grid;
+    gap: 16px;
+  }
+
+  .page-header h2 {
+    font-size: clamp(2.375rem, 11vw, 2.625rem);
+  }
+
+  .page-header-actions {
+    justify-content: flex-start;
+  }
+
+  .summary-grid-console {
+    padding-left: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .filters,
+  .search-form,
+  .tabs,
+  .table-scroll,
+  .split,
+  .card-grid {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+}

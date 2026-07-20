@@ -90,7 +90,7 @@
         </div>
       </header>
 
-      <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents"></section>
+      <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents" hidden></section>
 
       <section class="overview-view" id="homeView" aria-labelledby="homeTitle" hidden>
         <div class="overview-header">
@@ -172,13 +172,17 @@
         </form>
       </details>
 
-      <section class="content-panel" id="torrentsView" aria-labelledby="list-title">
-        <div class="panel-head">
-          <div>
+      <section class="content-panel torrents-panel" id="torrentsView" aria-labelledby="list-title">
+        <div class="page-header page-header-panel">
+          <div class="page-header-copy">
+            <p class="eyebrow">Téléchargements</p>
             <h2 id="list-title">Torrents</h2>
-            <p id="summary">Chargement de la liste...</p>
+            <p id="summary" class="page-subtitle">Chargement de la liste...</p>
           </div>
-          <button id="clearActiveFilters" type="button" class="button secondary" hidden>Effacer les filtres</button>
+          <div class="page-header-actions">
+            <button id="clearActiveFilters" type="button" class="button secondary" hidden>Effacer les filtres</button>
+            <button id="addTorrentButton" type="button" class="button primary">Ajouter un torrent</button>
+          </div>
         </div>
 
         <div class="quick-filters" id="quickFilters" aria-label="Filtres rapides torrents"></div>
@@ -202,6 +206,10 @@
           <label>
             Tag
             <select id="tagFilter"></select>
+          </label>
+          <label>
+            Tracker
+            <select id="trackerFilter"></select>
           </label>
           <label>
             Tri
@@ -234,6 +242,7 @@
           <button id="bulkPause" type="button" class="button secondary">Mettre en pause</button>
           <button id="bulkResume" type="button" class="button secondary">Reprendre</button>
           <button id="bulkForceShare" type="button" class="button secondary">Partage forcé</button>
+          <button id="bulkAddTracker" type="button" class="button secondary">Ajouter un tracker</button>
           <button id="bulkDelete" type="button" class="button danger">Supprimer</button>
         </div>
 
@@ -287,6 +296,23 @@
         <div class="dialog-actions">
           <button id="cancelDeleteButton" value="cancel" class="button secondary" type="button">Annuler</button>
           <button id="confirmDeleteButton" value="confirm" class="button danger" type="button">Supprimer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="addTrackerDialog" class="dialog">
+      <form method="dialog" id="addTrackerForm">
+        <h2 id="addTrackerTitle">Ajouter un tracker</h2>
+        <p id="addTrackerCount" class="dialog-name"></p>
+        <label>
+          Adresse du tracker
+          <input id="addTrackerUrlInput" type="url" autocomplete="off" placeholder="https://tracker.example.com/announce">
+        </label>
+        <p class="field-message">Protocoles acceptés : http://, https://, udp://, ws://, wss://</p>
+        <p class="field-message" id="addTrackerMessage" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelAddTrackerButton" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="confirmAddTrackerButton" value="confirm" class="button primary" type="button">Ajouter</button>
         </div>
       </form>
     </dialog>

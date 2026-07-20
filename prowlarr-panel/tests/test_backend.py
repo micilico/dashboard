@@ -89,6 +89,7 @@ class BackendTests(unittest.TestCase):
         response = self.client.get("/prowlarr-panel/api/session")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIn("httponly", response.headers["set-cookie"].lower())
 
     def test_csrf_required_for_actions(self):
         response = self.client.post("/prowlarr-panel/api/search", json={"query": "ubuntu"})

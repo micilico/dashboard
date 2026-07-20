@@ -103,3 +103,62 @@ legend {
   gap: 12px;
   margin-top: 16px;
 }
+
+.tracker-list {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.tracker-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.tracker-row {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 0.88rem;
+}
+
+.tracker-url {
+  overflow-wrap: anywhere;
+  font-family: monospace;
+  font-size: 0.84rem;
+}
+
+.tracker-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.tracker-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.tracker-status-working { color: var(--success-text); }
+.tracker-status-not_contacted { color: var(--warning-text); }
+.tracker-status-updating { color: var(--info-text); }
+.tracker-status-not_working { color: var(--danger-text); }
+.tracker-status-disabled { color: var(--text-subtle); }
+.tracker-status-unknown { color: var(--muted); }
+
+.tracker-msg {
+  color: var(--text-subtle);
+  font-style: italic;
+}
+
+.dialog label input[type="url"] {
+  width: 100%;
+}

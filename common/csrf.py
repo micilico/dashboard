@@ -48,7 +48,7 @@ def set_csrf_cookie(
         csrf_cookie_name,
         token,
         secure=is_https,
-        httponly=False,
+        httponly=True,
         samesite="strict",
         path=cookie_path,
     )

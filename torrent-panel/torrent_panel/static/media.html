@@ -10,27 +10,64 @@
     <a class="skip-link" href="#content">Aller au contenu</a>
     <main id="content" class="shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Centre de contrôle</p>
-          <h1 id="pageTitle">Médias</h1>
-          <p id="pageSubtitle" class="muted"></p>
+        <div class="brand-block">
+          <a class="brand-mark" href="/torrent-panel/?view=home" aria-label="Retour a la vue d'ensemble">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <defs>
+                <linearGradient id="brandGradientMedia" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#9d8cff"></stop>
+                  <stop offset="100%" stop-color="#6d5cff"></stop>
+                </linearGradient>
+              </defs>
+              <circle cx="32" cy="32" r="18" fill="none" stroke="url(#brandGradientMedia)" stroke-width="8"></circle>
+              <circle cx="32" cy="32" r="7" fill="url(#brandGradientMedia)"></circle>
+              <circle cx="49" cy="13" r="2.6" fill="#7c6cff"></circle>
+              <ellipse cx="26" cy="34" rx="28" ry="8" fill="none" stroke="rgba(157,140,255,0.55)" stroke-width="1.4" transform="rotate(-18 26 34)"></ellipse>
+            </svg>
+          </a>
+          <div class="brand-copy">
+            <p class="eyebrow">Centre de contrôle</p>
+            <h1>Dashboard</h1>
+          </div>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a id="homeLink" href="/torrent-panel/?view=home">Vue d’ensemble</a>
-          <a id="torrentLink" href="/torrent-panel/">Torrents</a>
-          <a id="prowlarrLink" href="/prowlarr-panel/">Prowlarr</a>
-          <a id="storageLink" href="/storage-panel/">Stockage</a>
-          <a id="mediaLink" href="/media-panel/">Médias</a>
-          <a id="healthLink" href="/health/">Santé</a>
-          <a id="activityLink" href="/activity/">Activité</a>
+          <a id="homeLink" href="/torrent-panel/?view=home"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.75 10.5 12 4l8.25 6.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-3.75V13.5h-6v6.75H5.25a1.5 1.5 0 0 1-1.5-1.5z"></path></svg></span><span class="nav-label">Vue d’ensemble</span></a>
+          <a id="torrentLink" href="/torrent-panel/"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"></path></svg></span><span class="nav-label">Torrents</span></a>
+          <a id="prowlarrLink" href="/prowlarr-panel/"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.25 4.25"></path></svg></span><span class="nav-label">Prowlarr</span></a>
+          <a id="storageLink" href="/storage-panel/"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"></rect><rect x="4" y="14" width="16" height="5" rx="1.5"></rect><path d="M8 7.5h.01M8 16.5h.01"></path></svg></span><span class="nav-label">Système</span></a>
+          <a id="mediaLink" href="/media-panel/"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8M8 12h5M8 15h8"></path></svg></span><span class="nav-label">Médias</span></a>
+          <a id="healthLink" href="/health/"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4.75 18.5 7v5.25c0 4.2-2.6 6.8-6.5 7.99-3.9-1.19-6.5-3.79-6.5-7.99V7z"></path><path d="M9 12h6M12 9v6"></path></svg></span><span class="nav-label">Santé</span></a>
+          <a id="activityLink" href="/activity/"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"></path></svg></span><span class="nav-label">Activité</span></a>
         </nav>
-        <div class="topbar-actions">
-          <div id="refreshStatus" class="status-pill">Initialisation</div>
-          <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
-          <button id="primaryButton" type="button" class="button primary" hidden></button>
+        <div class="topbar-actions sidebar-footer">
+          <div class="sidebar-health" aria-live="polite">
+            <div class="sidebar-health-row">
+              <span class="status-dot"></span>
+              <span id="statusText">Service prêt</span>
+            </div>
+            <p id="sidebarStatusDetail">Surveillance en direct.</p>
+          </div>
+          <div id="refreshStatus" class="status-pill" aria-live="polite">
+            <span>Dernière mise a jour</span>
+            <time id="lastCheck" datetime=""></time>
+          </div>
         </div>
       </header>
-      <section id="summaryGrid" class="summary-grid"></section>
+      <section class="page-header" aria-labelledby="pageTitle">
+        <div class="page-header-copy">
+          <p class="eyebrow" id="pageEyebrow">Bibliothèque</p>
+          <h2 id="pageTitle">Médias</h2>
+          <p id="pageSubtitle" class="page-subtitle"></p>
+          <div id="pageStatus" class="page-status" hidden></div>
+        </div>
+        <div class="page-header-actions">
+          <button id="refreshButton" type="button" class="icon-button" aria-label="Actualiser la page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"></path></svg>
+          </button>
+          <button id="primaryButton" type="button" class="button primary" hidden></button>
+        </div>
+      </section>
+      <section id="summaryGrid" class="summary-grid summary-grid-console"></section>
       <section class="content-grid">
         <div id="contentA"></div>
         <div id="contentB"></div>

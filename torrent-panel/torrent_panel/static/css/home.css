@@ -442,6 +442,28 @@
   margin-bottom: 0;
 }
 
+.page-header-panel {
+  grid-column: 1 / -1;
+  padding: 28px 24px 8px;
+}
+
+.page-header-panel h2 {
+  margin: 0;
+  font-size: clamp(2.5rem, 3vw, 3rem);
+  line-height: 1.02;
+}
+
+.page-header-panel .eyebrow {
+  color: #9d8cff;
+}
+
+.torrents-panel .quick-filters,
+.torrents-panel .active-filters,
+.torrents-panel .filter-notice,
+.torrents-panel .follow-notice {
+  margin-inline: 20px;
+}
+
 .overview-card .card-head-spread {
   display: flex;
   justify-content: space-between;

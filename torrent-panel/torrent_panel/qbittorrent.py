@@ -9,6 +9,18 @@ import httpx
 logger = logging.getLogger("torrent_panel.qbittorrent")
 
 
+def public_tracker_host(url: str) -> str:
+    """Return only the non-secret tracker endpoint for browser payloads."""
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if parsed.port and parsed.port not in {80, 443}:
+            return f"{host}:{parsed.port}"
+        return host
+    except ValueError:
+        return ""
+
+
 class QbitError(Exception):
     def __init__(
         self,
@@ -183,12 +195,13 @@ class QBittorrentClient:
                 "category": item.get("category", ""),
                 "tags": item.get("tags", ""),
                 "savePath": item.get("save_path", ""),
-                "tracker": item.get("tracker", ""),
+                "tracker": public_tracker_host(str(item.get("tracker") or "")),
                 "priority": item.get("priority", 0),
                 "message": item.get("last_activity") or "",
                 "downloadLimit": item.get("dl_limit", -1),
                 "uploadLimit": item.get("up_limit", -1),
                 "sequentialDownload": item.get("seq_dl", False),
+                "isPrivate": item.get("is_private", False),
             }
             for item in torrents
             if isinstance(item, dict) and item.get("hash") and item.get("name")
@@ -319,6 +332,13 @@ class QBittorrentClient:
         if not isinstance(payload, list):
             raise QbitError(502, "Réponse qBittorrent invalide.")
         return [item for item in payload if isinstance(item, dict)]
+
+    async def add_tracker(self, torrent_hash: str, tracker_url: str) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/addTrackers",
+            data={"hash": torrent_hash, "urls": tracker_url},
+        )
 
     async def files(self, torrent_hash: str) -> list[dict[str, Any]]:
         response = await self._request("GET", "/api/v2/torrents/files", params={"hash": torrent_hash})

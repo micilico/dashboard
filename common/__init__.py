@@ -2,11 +2,20 @@
 
 from pathlib import Path
 import re
+from typing import Optional
 
 from .rate_limiter import RateLimiter
-from .csrf import cleanup_csrf_tokens, client_key, csrf_cookie_matches, csrf_token_is_valid, set_csrf_cookie
 from .security import build_csp, error_detail
 from .types import ErrorDetail
+
+try:
+    from .csrf import cleanup_csrf_tokens, client_key, csrf_cookie_matches, csrf_token_is_valid, set_csrf_cookie
+except ModuleNotFoundError:  # pragma: no cover - allows frontend-only tooling without FastAPI installed
+    cleanup_csrf_tokens = None
+    client_key = None
+    csrf_cookie_matches = None
+    csrf_token_is_valid = None
+    set_csrf_cookie = None
 
 __all__ = [
     "RateLimiter",
@@ -24,7 +33,7 @@ __all__ = [
 _IMPORT_RE = re.compile(r"""@import\s+url\((['"])([^'"]+)\1\)\s*;?""", re.IGNORECASE)
 
 
-def resolve_css_imports(filepath: Path, seen: set | None = None) -> str:
+def resolve_css_imports(filepath: Path, seen: Optional[set] = None) -> str:
     if seen is None:
         seen = set()
     abs_file = filepath.resolve()

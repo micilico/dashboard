@@ -1,0 +1,3 @@
+# Copy to /etc/default/dashboard-autossh and keep the real values off Git.
+AUTOSSH_IDENTITY_FILE=/home/debian/.ssh/remote_service
+AUTOSSH_TARGET=remote-user@seedbox.example.com

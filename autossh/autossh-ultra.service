@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=debian
 Environment=AUTOSSH_GATETIME=0
-ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/debian/.ssh/known_hosts -i /home/debian/.ssh/ultra_cc -L 127.0.0.1:16141:127.0.0.1:16141 -L 127.0.0.1:16124:127.0.0.1:16124 micilico@lw901.usbx.me
+EnvironmentFile=/etc/default/dashboard-autossh
+ExecStart=/usr/bin/autossh -M 0 -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/debian/.ssh/known_hosts -i ${AUTOSSH_IDENTITY_FILE} -L 127.0.0.1:16141:127.0.0.1:16141 -L 127.0.0.1:16124:127.0.0.1:16124 ${AUTOSSH_TARGET}
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-

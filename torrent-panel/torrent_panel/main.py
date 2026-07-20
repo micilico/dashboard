@@ -115,9 +115,11 @@ async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Content-Security-Policy"] = build_csp()
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    if "/api/" in request.url.path:
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 

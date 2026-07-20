@@ -39,6 +39,7 @@ class FakeQbit:
     def __init__(self):
         self.calls = []
         self.torrents_payload = []
+        self.trackers_payload = []
 
     async def torrents(self):
         return list(self.torrents_payload)
@@ -57,6 +58,10 @@ class FakeQbit:
 
     async def add_magnet(self, magnet, **kwargs):
         self.calls.append(("add", magnet, kwargs))
+
+    async def trackers(self, torrent_hash):
+        self.calls.append(("trackers", torrent_hash))
+        return list(self.trackers_payload)
 
     async def ready(self):
         return True
@@ -181,6 +186,24 @@ class BackendTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIn("httponly", response.headers["set-cookie"].lower())
+
+    def test_tracker_details_hide_private_url_components(self):
+        app.state.qbit.trackers_payload = [
+            {
+                "url": "https://user:password@tracker.test/private/announce?passkey=secret",
+                "status": 2,
+                "msg": "failed https://tracker.test/announce?passkey=secret",
+            }
+        ]
+
+        response = self.client.get(f"/torrent-panel/api/torrents/{VALID_HASH}/trackers")
+
+        self.assertEqual(response.status_code, 200)
+        tracker = response.json()["trackers"][0]
+        self.assertEqual(tracker["url"], "tracker.test")
+        self.assertNotIn("secret", str(tracker))
+        self.assertNotIn("password", str(tracker))
 
     def test_group_actions_send_hashes_once(self):
         second_hash = "b" * 40
@@ -310,7 +333,7 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
                         "category": "Films",
                         "tags": "archive",
                         "save_path": "/downloads",
-                        "tracker": "https://tracker.test",
+                        "tracker": "https://user:password@tracker.test/announce?passkey=private",
                         "priority": 1,
                     }
                 ]
@@ -321,7 +344,7 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(torrents[0]["remaining"], 500)
         self.assertEqual(torrents[0]["eta"], 3600)
         self.assertEqual(torrents[0]["category"], "Films")
-        self.assertEqual(torrents[0]["tracker"], "https://tracker.test")
+        self.assertEqual(torrents[0]["tracker"], "tracker.test")
 
     async def test_bulk_actions_join_hashes_for_qbittorrent(self):
         self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))

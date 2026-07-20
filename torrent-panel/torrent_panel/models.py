@@ -75,6 +75,10 @@ class TorrentSequentialUpdate(TorrentHashesAction):
     enabled: bool = True
 
 
+class AddTrackerPayload(TorrentHashesAction):
+    trackerUrl: str = Field(..., min_length=8, max_length=2048)
+
+
 class AutomationRulePayload(BaseModel):
     name: str = Field(..., min_length=3, max_length=120)
     trigger: str = Field(..., min_length=3, max_length=80)

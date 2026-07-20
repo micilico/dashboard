@@ -1,2 +1,16 @@
 .env
 
+# Local runtimes and generated caches
+.venv*/
+venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# Runtime data may contain API keys, private URLs, media names or paths
+*.log
+logs/
+**/logs/
+torrent-panel/data/media-automation-state.json
+torrent-panel/data/notification-state.json

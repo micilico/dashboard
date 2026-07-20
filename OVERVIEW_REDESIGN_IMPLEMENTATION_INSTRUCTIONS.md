@@ -8,7 +8,7 @@ Appliquer à l’ensemble du Dashboard le langage visuel de la maquette ci-desso
 
 Fichier de référence absolu :
 
-`/Users/corentinkern/Documents/Dashboard/docs/mockups/overview-without-media-space.png`
+`docs/mockups/overview-without-media-space.png`
 
 La grande carte « Votre espace média » doit disparaître de cette page. L’espace récupéré doit être réellement redistribué aux métriques, aux services et à l’activité récente. Il ne faut ni laisser un trou, ni remplacer la carte par un élément décoratif de taille comparable.
 

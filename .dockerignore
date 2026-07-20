@@ -4,3 +4,7 @@
 **/.git
 **/.env
 **/*.tmp
+**/.venv*
+**/.pytest_cache
+**/logs
+**/*.log
