@@ -95,6 +95,16 @@ const context = {
 };
 
 const source = fs.readFileSync("torrent-panel/torrent_panel/static/app.js", "utf8");
+const overviewHtml = fs.readFileSync("torrent-panel/torrent_panel/static/index.html", "utf8");
+
+assert.equal(overviewHtml.includes("Votre espace média"), false);
+assert.equal(overviewHtml.includes("overview-storage-card"), false);
+assert.equal(overviewHtml.includes("storageVisualization"), false);
+assert.match(overviewHtml, /id="overviewMetrics"[\s\S]+class="overview-lower-grid"/);
+assert.equal(source.includes("renderStorageCard"), false);
+assert.equal(source.includes("storageVisualization"), false);
+assert.equal(source.includes("Operationnel"), false);
+
 vm.runInNewContext(
   `${source}
 globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, state, els };`,
