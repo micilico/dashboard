@@ -296,30 +296,6 @@ async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
         action={"kind": "open", "label": "Ouvrir le service", "url": JELLYFIN_PUBLIC_URL},
     )
 
-    rclone_details: dict[str, Any] = {}
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
-            response = await client.post(RCLONE_RC_URL, json={})
-        rclone_stats = response.json() if response.status_code == 200 else {}
-        rclone_details = rclone_stats if isinstance(rclone_stats, dict) else {}
-        error_count = int(rclone_details.get("errors", 0) or 0)
-        service_results["rclone"] = service_payload(
-            app,
-            "rclone",
-            "degraded" if error_count else "operational",
-            f"{error_count} erreur(s) remontée(s)." if error_count else "Statistiques rclone accessibles.",
-            action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
-            details={"errors": error_count},
-        )
-    except (httpx.HTTPError, ValueError):
-        service_results["rclone"] = service_payload(
-            app,
-            "rclone",
-            "unavailable",
-            "Endpoint rc inaccessible.",
-            action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
-        )
-
     service_results["Tunnel SSH qBittorrent"] = await socket_service_status(
         app,
         "Tunnel SSH qBittorrent",
@@ -334,40 +310,6 @@ async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
         SSH_PROWLARR_PORT,
         action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
     )
-
-    try:
-        stats = os.statvfs(MONITOR_DISK_PATH)
-        total_bytes = stats.f_frsize * stats.f_blocks
-        free_bytes = stats.f_frsize * stats.f_bavail
-        free_percent = (free_bytes / total_bytes * 100) if total_bytes else 0.0
-        if free_percent <= MONITOR_DISK_CRITICAL_PERCENT:
-            disk_status = "unavailable"
-            disk_message = f"Espace disque critique: {free_percent:.1f}% libre."
-        elif free_percent <= MONITOR_DISK_WARNING_PERCENT:
-            disk_status = "degraded"
-            disk_message = f"Espace disque faible: {free_percent:.1f}% libre."
-        else:
-            disk_status = "operational"
-            disk_message = f"Espace disque suffisant: {free_percent:.1f}% libre."
-        service_results["Espace disque"] = service_payload(
-            app,
-            "Espace disque",
-            disk_status,
-            disk_message,
-            service="Stockage",
-            action={"kind": "open", "label": "Afficher", "url": "/torrent-panel/?view=home"},
-            details={"path": MONITOR_DISK_PATH, "freePercent": round(free_percent, 1)},
-        )
-    except OSError:
-        service_results["Espace disque"] = service_payload(
-            app,
-            "Espace disque",
-            "checking",
-            "Chemin de surveillance indisponible.",
-            service="Stockage",
-            action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
-            details={"path": MONITOR_DISK_PATH},
-        )
 
     alerts: list[dict[str, Any]] = []
     blocked_torrents = [torrent for torrent in torrents if state_meta_from_qbit(torrent) == "error"]
@@ -400,28 +342,6 @@ async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
                 str(item.get("message") or item.get("type") or "Alerte Prowlarr."),
                 action={"kind": "open", "label": "Afficher", "url": prowlarr_health_url},
                 code=f"prowlarr_health_{item.get('type', 'warning')}",
-            )
-        )
-    rclone_errors = int(rclone_details.get("errors", 0) or 0)
-    if rclone_errors:
-        alerts.append(
-            build_alert(
-                "warning",
-                "rclone",
-                f"{rclone_errors} erreur(s) rclone détectée(s).",
-                action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
-                code="rclone_errors",
-            )
-        )
-    disk_service = service_results["Espace disque"]
-    if normalize_service_status(disk_service["status"]) != "operational":
-        alerts.append(
-            build_alert(
-                "critical" if disk_service["status"] == "unavailable" else "warning",
-                "Stockage",
-                disk_service["message"],
-                action=disk_service["action"],
-                code="disk_state",
             )
         )
     for tunnel_name in ("Tunnel SSH qBittorrent", "Tunnel SSH Prowlarr"):
