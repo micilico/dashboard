@@ -20,6 +20,7 @@ from torrent_panel.main import (  # noqa: E402
     validate_magnet,
 )
 from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
+from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
 
 
 VALID_HASH = "a" * 40
@@ -63,6 +64,9 @@ class FakeQbit:
         self.calls.append(("trackers", torrent_hash))
         return list(self.trackers_payload)
 
+    async def add_tracker(self, torrent_hash, tracker_url):
+        self.calls.append(("add_tracker", torrent_hash, tracker_url))
+
     async def ready(self):
         return True
 
@@ -76,6 +80,7 @@ class BackendTests(unittest.TestCase):
         self.original_media = app.state.media_automation
         self.original_limiter = app.state.action_limiter
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
+        self.original_tr4ker_announce_url = torrent_routes.TR4KER_ANNOUNCE_URL
         app.state.qbit = FakeQbit()
         temp_state = Path(tempfile.mkdtemp()) / "media.json"
         app.state.media_automation = MediaAutomationManager(
@@ -114,6 +119,7 @@ class BackendTests(unittest.TestCase):
         app.state.media_automation = self.original_media
         app.state.action_limiter = self.original_limiter
         app.state.csrf_tokens = self.original_csrf_tokens
+        torrent_routes.TR4KER_ANNOUNCE_URL = self.original_tr4ker_announce_url
 
     def post_action(self, path, payload):
         return self.client.post(
@@ -201,9 +207,29 @@ class BackendTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         tracker = response.json()["trackers"][0]
-        self.assertEqual(tracker["url"], "tracker.test")
+        self.assertEqual(tracker["url"], "https://tracker.test/private/announce")
         self.assertNotIn("secret", str(tracker))
         self.assertNotIn("password", str(tracker))
+
+    def test_configured_tr4ker_tracker_adds_private_announce_url(self):
+        tracker_url = "https://tr4ker.test/announce?passkey=secret"
+        torrent_routes.TR4KER_ANNOUNCE_URL = tracker_url
+        app.state.qbit.torrents_payload = [{"hash": VALID_HASH, "name": "Private", "isPrivate": True}]
+
+        response = self.post_action("/torrent-panel/api/torrents/add-tr4ker-tracker", {"hashes": [VALID_HASH]})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["updated"], 1)
+        self.assertIn(("add_tracker", VALID_HASH, tracker_url), app.state.qbit.calls)
+
+    def test_configured_tr4ker_tracker_reports_missing_env(self):
+        torrent_routes.TR4KER_ANNOUNCE_URL = ""
+        app.state.qbit.torrents_payload = [{"hash": VALID_HASH, "name": "Private", "isPrivate": True}]
+
+        response = self.post_action("/torrent-panel/api/torrents/add-tr4ker-tracker", {"hashes": [VALID_HASH]})
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "tr4ker_tracker_not_configured")
 
     def test_group_actions_send_hashes_once(self):
         second_hash = "b" * 40

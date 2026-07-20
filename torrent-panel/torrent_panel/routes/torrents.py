@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .csrf_guard import require_action_guard
-from ..config import ALLOWED_SAVE_PATHS, HASH_RE
+from ..config import ALLOWED_SAVE_PATHS, HASH_RE, TR4KER_ANNOUNCE_URL
 from ..models import (
     AddMagnet,
     AddTrackerPayload,
@@ -202,7 +202,7 @@ async def torrent_trackers(request: Request, torrent_hash: str) -> dict[str, Any
                 if key in {"status", "tier", "num_peers", "num_seeds", "num_leeches", "num_downloaded", "msg"}
             }
             raw_url = str(tracker.get("url") or "")
-            public_tracker["url"] = raw_url if _is_special_tracker(raw_url) else _tracker_domain(raw_url)
+            public_tracker["url"] = raw_url if _is_special_tracker(raw_url) else _public_announce_url(raw_url)
             if "msg" in public_tracker:
                 public_tracker["msg"] = _URL_IN_TEXT_RE.sub("[URL masquée]", str(public_tracker["msg"]))
             public_trackers.append(public_tracker)
@@ -233,6 +233,20 @@ def _tracker_domain(url: str) -> str:
         return host
     except Exception:
         return url
+
+
+def _public_announce_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if not parsed.scheme or not host:
+            return _tracker_domain(url)
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = f"{host}:{parsed.port}" if parsed.port else host
+        return f"{parsed.scheme}://{netloc}{parsed.path or ''}"
+    except Exception:
+        return _tracker_domain(url)
 
 
 def _validate_tracker_url(url: str) -> str | None:
@@ -302,6 +316,32 @@ async def tracker_index(request: Request) -> dict[str, Any]:
 async def add_tracker(request: Request, payload: AddTrackerPayload) -> dict[str, Any]:
     hashes = validate_hashes(payload.hashes)
     tracker_url = payload.trackerUrl.strip()
+    return await _add_tracker_to_hashes(request, hashes, tracker_url, allow_private=False)
+
+
+@router.post("/torrents/add-tr4ker-tracker", dependencies=[Depends(require_action_guard)])
+async def add_tr4ker_tracker(request: Request, payload: TorrentHashesAction) -> dict[str, Any]:
+    hashes = validate_hashes(payload.hashes)
+    tracker_url = TR4KER_ANNOUNCE_URL.strip()
+    if not tracker_url:
+        raise HTTPException(
+            status_code=422,
+            detail=error_detail(
+                "tr4ker_tracker_not_configured",
+                "Adresse d'annonce tr4ker non configurée.",
+                "Renseigner TORRENT_PANEL_TR4KER_ANNOUNCE_URL dans le .env",
+            ),
+        )
+    return await _add_tracker_to_hashes(request, hashes, tracker_url, allow_private=True)
+
+
+async def _add_tracker_to_hashes(
+    request: Request,
+    hashes: list[str],
+    tracker_url: str,
+    *,
+    allow_private: bool,
+) -> dict[str, Any]:
     validation_error = _validate_tracker_url(tracker_url)
     if validation_error:
         raise HTTPException(status_code=422, detail=error_detail("tracker_url_invalid", validation_error, "Vérifier l'adresse"))
@@ -310,7 +350,7 @@ async def add_tracker(request: Request, payload: AddTrackerPayload) -> dict[str,
     torrent_map = {t["hash"]: t for t in torrents}
 
     private_hashes = [h for h in hashes if torrent_map.get(h, {}).get("isPrivate", False)]
-    if private_hashes:
+    if private_hashes and not allow_private:
         raise HTTPException(
             status_code=422,
             detail=error_detail(
