@@ -11,7 +11,7 @@
   gap: 24px;
   padding: 24px 16px 16px;
   border: 1px solid var(--border);
-  background: rgba(11, 13, 18, 0.94);
+  background: var(--bg-secondary);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-panel);
 }
@@ -107,4 +107,21 @@
 
 .topbar-actions, .dialog-actions, .action-row {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+
+.nav a[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg-secondary);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius-control);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  z-index: 10;
+  border: 1px solid var(--border);
+  pointer-events: none;
 }

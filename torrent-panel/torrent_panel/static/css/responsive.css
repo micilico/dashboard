@@ -84,7 +84,7 @@
     padding: 14px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: rgba(15, 23, 42, 0.9);
+    background: var(--surface-2);
   }
 
   .torrent-table td {
@@ -99,7 +99,7 @@
     content: attr(data-label);
     color: var(--muted);
     font-size: 0.82rem;
-    font-weight: 800;
+    font-weight: 700;
   }
 
   .name-button {
@@ -517,4 +517,27 @@
   .torrent-table .row-status:empty {
     display: none;
   }
+}
+
+@media (max-width: 375px) {
+  .shell { width: calc(100% - 16px); padding: 8px 0 32px; }
+  .summary-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat { min-height: 80px; padding: 12px; }
+  .stat strong { font-size: 1.2rem; }
+  .panel-head { padding: 16px; flex-direction: column; align-items: stretch; }
+  .filters { margin: 8px; padding: 10px; }
+  .home-grid, .home-card { padding: 12px; }
+  .quick-actions { grid-template-columns: 1fr; }
+  .torrent-table tbody { padding: 0 8px 12px; gap: 8px; }
+  .torrent-table tr { padding: 12px; }
+  .name-button { font-size: 0.95rem; }
+  .dialog, .detail-dialog { width: calc(100% - 16px); }
+}
+
+@media (min-width: 1440px) {
+  .shell { width: min(1600px, calc(100% - 80px)); gap: 24px 40px; }
+  .summary-grid { gap: 16px; }
+  .home-grid { gap: 24px; }
+  .stat { min-height: 128px; padding: 28px; }
+  .stat strong { font-size: 1.85rem; }
 }

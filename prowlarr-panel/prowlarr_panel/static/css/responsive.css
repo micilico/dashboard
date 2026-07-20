@@ -15,14 +15,28 @@
     position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
   }
   .data-table tr {
-    margin: 12px; padding: 14px 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(15, 23, 42, 0.9);
+    margin: 12px; padding: 14px 12px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface-2);
   }
   .data-table td {
     display: grid; grid-template-columns: minmax(92px, 34%) minmax(0, 1fr); gap: 10px;
     border: 0; padding: 10px 0; min-height: 44px;
   }
   .data-table td::before {
-    content: attr(data-label); color: var(--muted); font-size: 0.82rem; font-weight: 800;
+    content: attr(data-label); color: var(--muted); font-size: 0.82rem; font-weight: 700;
   }
   th, td { padding: 10px 8px; }
+}
+@media (max-width: 375px) {
+  .shell { width: calc(100% - 16px); padding: 8px 0 32px; }
+  .summary-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat { min-height: 80px; padding: 12px; }
+  .stat strong { font-size: 1.2rem; }
+  .panel-head { padding: 16px; flex-direction: column; align-items: stretch; }
+  .data-table tr { margin: 8px; padding: 10px; }
+}
+@media (min-width: 1440px) {
+  .shell { width: min(1600px, calc(100% - 80px)); gap: 24px 40px; }
+  .summary-grid { gap: 16px; }
+  .stat { min-height: 128px; padding: 28px; }
+  .stat strong { font-size: 1.85rem; }
 }

@@ -1,5 +1,5 @@
 .dialog { width: min(480px, calc(100% - 32px)); color: var(--text); padding: 0; border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel); border: 1px solid var(--border); }
-.dialog::backdrop { background: rgba(0,0,0,.58); backdrop-filter: blur(8px); }
+.dialog::backdrop { background: rgba(0,0,0,0.5); backdrop-filter: blur(8px); }
 .dialog form { display: grid; gap: 16px; padding: 28px; }
 .dialog-name { color: var(--muted); overflow-wrap: anywhere; }
 .toast {

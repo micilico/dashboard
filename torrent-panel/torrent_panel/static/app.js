@@ -498,10 +498,32 @@ function activeFilterLabels() {
   return labels;
 }
 
+function renderFilterChips() {
+  const container = document.querySelector("#activeFilters");
+  if (!container) return;
+  const labels = activeFilterLabels();
+  container.replaceChildren(
+    ...labels.map((label) => {
+      const chip = document.createElement("span");
+      chip.className = "filter-chip";
+      const text = document.createElement("span");
+      text.textContent = label;
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = "×";
+      close.setAttribute("aria-label", `Retirer le filtre : ${label}`);
+      close.addEventListener("click", resetFilters);
+      chip.append(text, close);
+      return chip;
+    }),
+  );
+}
+
 function renderFilterNotice() {
   const labels = activeFilterLabels();
   els.filterNotice.textContent = labels.length ? `Filtres actifs : ${labels.join(" · ")}` : "Aucun filtre actif.";
   els.clearActiveFilters.hidden = labels.length === 0;
+  renderFilterChips();
 }
 
 function renderFollowNotice() {
@@ -971,6 +993,12 @@ function renderHome() {
   els.homeSummary.textContent = critical
     ? `${critical} alerte(s) critique(s) demandent une attention immédiate.`
     : "Aucune alerte critique. Les services restent surveillés en direct.";
+  const greeting = document.querySelector("#greeting");
+  if (greeting) greeting.textContent = "Bonjour";
+  const statusSummary = document.querySelector("#statusSummary");
+  if (statusSummary) {
+    statusSummary.textContent = critical ? "Une attention est requise." : "Tout fonctionne. Parfaitement.";
+  }
   renderQuickActions();
   renderAlerts();
   renderServices();
@@ -1034,7 +1062,16 @@ async function loadTorrents({ silent = false, force = false } = {}) {
       }
       clearError();
       render();
-      els.refreshStatus.textContent = `À jour ${state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" })}`;
+      const statusText = els.refreshStatus.querySelector("#statusText");
+      const lastCheck = els.refreshStatus.querySelector("#lastCheck");
+      if (statusText) statusText.textContent = "Opérationnel";
+      if (lastCheck) {
+        lastCheck.textContent = state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
+        lastCheck.setAttribute("datetime", state.lastUpdatedAt.toISOString());
+      }
+      if (!statusText && !lastCheck) {
+        els.refreshStatus.textContent = `À jour ${state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" })}`;
+      }
     } catch (error) {
       showError(error);
       els.refreshStatus.textContent = state.lastUpdatedAt
@@ -1103,6 +1140,7 @@ function openDeleteDialog(torrents, trigger) {
   els.deleteForm.deleteMode.value = "torrent";
   els.confirmText.value = "";
   updateDeleteConfirm();
+  if (typeof trapFocus === "function") trapFocus(els.deleteDialog);
   els.deleteDialog.showModal();
 }
 
@@ -1182,6 +1220,7 @@ function openDetails(hash, trigger) {
   state.detailHash = hash;
   state.lastFocus = trigger || document.activeElement;
   updateDetails();
+  if (typeof trapFocus === "function") trapFocus(els.detailDialog);
   els.detailDialog.showModal();
 }
 

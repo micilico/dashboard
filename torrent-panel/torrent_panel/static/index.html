@@ -24,7 +24,10 @@
           <a id="activityNavLink" href="/activity/">Activité</a>
         </nav>
         <div class="topbar-actions">
-          <div class="status-pill" id="refreshStatus" aria-live="polite">Initialisation</div>
+          <div class="status-pill" id="refreshStatus" aria-live="polite">
+            <span id="statusText">Opérationnel</span>
+            <time id="lastCheck" datetime=""></time>
+          </div>
           <button id="openAddPanelButton" type="button" class="button primary">Ajouter un torrent</button>
           <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
         </div>
@@ -35,10 +38,16 @@
       <section class="content-panel" id="homeView" aria-labelledby="homeTitle" hidden>
         <div class="panel-head">
           <div>
+            <p class="greeting" id="greeting">Bonjour</p>
             <h2 id="homeTitle">État du système</h2>
-            <p id="homeSummary">Vérification globale des services et alertes critiques.</p>
+            <p class="status-summary" id="statusSummary">Tout fonctionne. Parfaitement.</p>
           </div>
         </div>
+
+        <section class="card-hero" aria-labelledby="storageTitle">
+          <h3 id="storageTitle">Votre espace média</h3>
+          <div id="storageVisualization"></div>
+        </section>
 
         <div id="criticalAlerts" class="alert-strip" hidden></div>
 
@@ -117,6 +126,7 @@
         </div>
 
         <div class="quick-filters" id="quickFilters" aria-label="Filtres rapides torrents"></div>
+        <div id="activeFilters" class="active-filters" aria-label="Filtres actifs"></div>
         <p id="filterNotice" class="filter-notice" aria-live="polite"></p>
         <div id="followNotice" class="follow-notice" hidden></div>
 
@@ -236,6 +246,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="/common/js/focus-trap.js" defer></script>
     <script src="./config.js?v=20260717-activity-fix"></script>
     <script src="./static/dist/app.min.js?v=BUILD" defer></script>
   </body>

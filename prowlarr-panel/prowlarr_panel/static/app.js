@@ -654,7 +654,9 @@ function confirmAction(title, message) {
     els.cancelConfirm.onclick = () => cleanup(false);
     els.acceptConfirm.onclick = () => cleanup(true);
     els.confirmDialog.addEventListener("cancel", () => cleanup(false), { once: true });
+    if (typeof trapFocus === "function") trapFocus(els.confirmDialog);
     els.confirmDialog.showModal();
+    els.cancelConfirm.focus();
   });
 }
 

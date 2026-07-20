@@ -9,17 +9,17 @@
   padding: 4px 8px; border-radius: 999px; background: var(--surface-3);
   color: var(--text); font-size: 0.86rem; white-space: nowrap;
 }
-.badge.ok { color: #9bf0c8; background: rgba(94,230,168,.11); }
-.badge.warn, .badge.disabled { color: #ffd792; background: rgba(244,189,98,.11); }
-.badge.error { color: #ffadb1; background: rgba(255,107,114,.12); }
+.badge.ok { color: var(--success-text); background: var(--success-soft); }
+.badge.warn, .badge.disabled { color: var(--warning-text); background: var(--warning-soft); }
+.badge.error { color: var(--danger-text); background: var(--danger-soft); }
 .status-pill {
   min-width: 0; min-height: 44px; display: flex; align-items: center;
   border-color: transparent; border-radius: var(--radius-control);
   background: rgba(255,255,255,.035); padding: 10px 12px;
   text-align: left; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums;
 }
-.badge.downloading, .badge.sharing, .badge.complete { color: #9bf0c8; background: rgba(94,230,168,.11); }
-.badge.waiting, .badge.checking, .badge.paused { color: #ffd792; background: rgba(244,189,98,.11); }
+.badge.downloading, .badge.sharing, .badge.complete { color: var(--success-text); background: var(--success-soft); }
+.badge.waiting, .badge.checking, .badge.paused { color: var(--warning-text); background: var(--warning-soft); }
 .empty { padding: 36px 20px; color: var(--muted); text-align: center; }
 .inline-stack { display: grid; gap: 12px; padding: 16px 20px 0; }
 .inline-stack .alert { margin: 0; }
@@ -27,6 +27,11 @@
 .alert {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin: 16px 20px 0;
-  border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.12);
-  color: #fecaca; padding: 12px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.5);
+  border-color: var(--danger-border); background: var(--danger-soft);
+  color: var(--danger-text); padding: 12px; border-radius: var(--radius-control); border: 1px solid var(--danger-border);
 }
+.status-operational { color: var(--success); }
+.status-degraded { color: var(--warning); }
+.status-unavailable { color: var(--danger); }
+.content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; grid-column: 2; }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 24px; grid-column: 2; }

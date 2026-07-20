@@ -1,12 +1,14 @@
 :root {
   color-scheme: dark;
   --bg: #07080b;
+  --bg-secondary: #0B0D12;
   --surface: #101217;
   --surface-2: #151821;
   --surface-3: #1a1e29;
+  --surface-interactive: #1A1E29;
   --text: #f5f5f7;
   --muted: #a7abb5;
-  --text-subtle: #8b919e;
+  --text-subtle: #7E8491;
   --border: rgba(255, 255, 255, 0.09);
   --accent: #7c6cff;
   --accent-strong: #6b5bea;
@@ -19,11 +21,27 @@
   --focus: #a89dff;
   --info: #8ea7ff;
   --success: #5ee6a8;
+  --success-soft: rgba(94, 230, 168, 0.11);
+  --success-border: rgba(34, 197, 94, 0.25);
+  --success-text: #9bf0c8;
+  --warning-soft: rgba(244, 189, 98, 0.11);
+  --warning-border: rgba(245, 158, 11, 0.25);
+  --warning-text: #ffd792;
+  --danger-soft: rgba(255, 107, 114, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.25);
+  --danger-text: #fecaca;
+  --info-soft: rgba(96, 165, 250, 0.11);
+  --info-border: rgba(96, 165, 250, 0.25);
+  --info-text: #dbeafe;
   --radius-control: 12px;
   --radius-panel: 18px;
   --radius-card: 24px;
+  --radius-hero: 32px;
   --shadow-panel: 0 24px 70px rgba(0, 0, 0, 0.22);
   --motion-fast: 160ms;
   --motion-base: 220ms;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --motion-open: 280ms;
+  --motion-close: 200ms;
+  --font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
 }

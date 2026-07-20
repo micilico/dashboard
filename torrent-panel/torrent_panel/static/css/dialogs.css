@@ -2,7 +2,7 @@
 .detail-dialog {
   width: min(480px, calc(100% - 32px));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-card);
   background: var(--surface);
   color: var(--text);
   padding: 0;
@@ -15,7 +15,7 @@
 
 .dialog::backdrop,
 .detail-dialog::backdrop {
-  background: rgba(2, 6, 23, 0.72);
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .dialog form,
@@ -75,7 +75,7 @@ legend {
 
 .detail-body dt {
   color: var(--muted);
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .detail-body dd {
@@ -94,7 +94,7 @@ legend {
 .detail-advanced {
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid rgba(51, 65, 85, 0.7);
+  border-top: 1px solid var(--border);
 }
 
 .advanced-form {
