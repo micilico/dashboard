@@ -88,7 +88,7 @@ init_sentry(os.getenv("SENTRY_DSN", ""), os.getenv("SENTRY_ENVIRONMENT", "produc
 
 app = FastAPI(title="Torrent Panel", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
-_COMMON_CSS_DIR = Path(__file__).resolve().parents[1] / "common" / "css"
+_COMMON_CSS_DIR = Path(sys.modules["common"].__file__).resolve().parent / "css"
 app.mount("/common/css", StaticFiles(directory=str(_COMMON_CSS_DIR)), name="common-css")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if PUBLIC_PREFIX:

@@ -619,7 +619,7 @@ async def activity_snapshot(app: FastAPI) -> dict[str, Any]:
             }
         )
     timeline.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
-    notifications_snapshot = notifications.reconcile(list(dashboard.get("alerts", [])))
+    notifications_snapshot = [n for n in notifications.reconcile(list(dashboard.get("alerts", []))) if n.get("status") != "acknowledged"]
     simulations = automation_rules.simulate(dashboard)
     return {
         "generatedAt": dashboard.get("generatedAt"),

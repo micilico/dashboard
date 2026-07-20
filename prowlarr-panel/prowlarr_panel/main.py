@@ -44,7 +44,7 @@ TRUSTED_PROXY_IPS = {
 
 
 class SearchPayload(BaseModel):
-    query: str = Field(..., min_length=2, max_length=200)
+    query: str = Field(default="", max_length=200)
     categories: list[int] = Field(default_factory=list, max_length=20)
     indexerIds: list[int] = Field(default_factory=list, max_length=100)
 
@@ -308,8 +308,11 @@ async def set_indexer_enabled(payload: IndexerEnabled) -> dict[str, Any]:
 
 @api_router.post("/search", dependencies=[Depends(require_action_guard("search"))])
 async def search(payload: SearchPayload) -> dict[str, Any]:
+    query = payload.query.strip()
+    if not query:
+        return {"results": [], "partialFailures": []}
     try:
-        return await app.state.prowlarr.search(payload.query.strip(), payload.categories, payload.indexerIds)
+        return await app.state.prowlarr.search(query, payload.categories, payload.indexerIds)
     except ProwlarrError as exc:
         raise prowlarr_error_response(exc) from exc
 

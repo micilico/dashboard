@@ -72,9 +72,6 @@ class NotificationCenter:
             record["lastSeenAt"] = alert.get("date") or now_iso()
             record["occurrences"] = int(record.get("occurrences", 0) or 0) + 1
             record["action"] = alert.get("action")
-            if record.get("status") == "acknowledged":
-                record["status"] = "reopened"
-                record["lastResult"] = "reopened"
         for code, record in self._records.items():
             if code not in seen_codes and record.get("status") == "open":
                 record["lastResult"] = "stable"
