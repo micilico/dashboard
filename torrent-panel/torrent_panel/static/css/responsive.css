@@ -1,14 +1,22 @@
 @media (max-width: 1180px) {
-  .topbar {
-    grid-template-columns: 1fr;
-  }
-
   .summary-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .overview-grid,
   .home-grid {
     grid-template-columns: 1fr;
+  }
+
+  .overview-main,
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .services-card,
+  .activity-card,
+  .metric-card {
+    grid-column: auto;
   }
 
   .form-grid,
@@ -135,37 +143,43 @@
 @media (max-width: 1023px) {
   .shell { width: min(100% - 40px, 1200px); grid-template-columns: 80px minmax(0,1fr); gap: 20px; }
   .topbar { padding: 18px 10px 12px; }
-  .topbar > div:first-child { text-align: center; padding-inline: 0; }
-  .topbar .eyebrow { display: none; }
-  .topbar h1 { font-size: 0; }
-  .topbar h1::before { content: "DC"; font-size: 1rem; color: var(--text); }
-  .nav a { justify-content: center; padding: 10px; font-size: 0; }
-  .nav a::before { position: static; width: 18px; height: 18px; }
+  .brand-copy { display: none; }
+  .brand-mark { width: 44px; height: 44px; margin-inline: auto; }
+  .nav a { justify-content: center; padding: 12px 10px; }
+  .nav-label { display: none; }
   .nav-count { position: absolute; right: 2px; top: 2px; font-size: .65rem; }
-  .topbar-actions .button { padding-inline: 8px; font-size: .72rem; }
-  .status-pill { font-size: 0; justify-content: center; }
-  .status-pill::before { content: "●"; color: var(--success); font-size: .8rem; }
+  .sidebar-health p, .status-pill span { display: none; }
+  .status-pill { padding-top: 10px; justify-items: center; }
   .summary-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .overview-header { gap: 16px; }
+  .overview-title { font-size: clamp(2.6rem, 7vw, 3.4rem); }
+  .metrics-grid { grid-template-columns: 1fr; }
   .home-grid, .services-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 767px) {
   .shell { width: min(100% - 32px, 680px); display: block; padding: 16px 0 40px; }
-  .topbar { position: static; min-height: 0; display: grid; grid-template-columns: 1fr auto; gap: 12px; margin-bottom: 16px; padding: 16px; }
-  .topbar > div:first-child { text-align: left; padding: 0; }
-  .topbar .eyebrow { display: block; }
-  .topbar h1 { font-size: 1.25rem; }
-  .topbar h1::before { content: none; }
+  .topbar { position: static; min-height: 0; display: grid; gap: 12px; margin-bottom: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 24px; }
+  .brand-copy { display: grid; }
+  .brand-block { grid-template-columns: 52px 1fr; align-items: center; }
+  .brand-mark { margin: 0; width: 52px; height: 52px; }
+  .brand-copy h1 { font-size: 1.25rem; }
   .nav { grid-column: 1 / -1; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; padding-top: 12px; border-top: 1px solid var(--border); scrollbar-width: none; }
-  .nav a { width: auto; min-width: 48px; flex: 0 0 auto; }
-  .topbar-actions { margin: 0; display: flex; align-items: start; }
-  .topbar-actions .status-pill, .topbar-actions .secondary { display: none; }
-  .topbar-actions .button { font-size: .78rem; }
+  .nav a { width: auto; min-width: 52px; flex: 0 0 auto; }
+  .nav-label { display: none; }
+  .topbar-actions { margin: 0; display: grid; }
+  .sidebar-footer { display: none; }
   .summary-grid, .toolbar, .content-panel { margin-top: 16px; }
   .summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
   .stat { min-height: 96px; padding: 16px; }
   .stat strong { font-size: 1.35rem; }
-  .panel-head, .home-grid, .home-card { padding: 20px; }
+  .overview-view { padding-top: 6px; }
+  .overview-header { display: grid; }
+  .overview-actions { justify-content: flex-start; }
+  .overview-title { font-size: 2.5rem; }
+  .overview-badge { width: 100%; justify-content: center; }
+  .overview-main, .metrics-grid { grid-template-columns: 1fr; }
+  .overview-storage-card, .metric-card, .services-card, .activity-card, .panel-head, .home-grid, .home-card { padding: 20px; }
   .service-card { margin: 0 20px 16px; padding: 20px; }
   .quick-actions, .services-grid { grid-template-columns: 1fr; }
   .filters { margin: 12px; padding: 14px; }

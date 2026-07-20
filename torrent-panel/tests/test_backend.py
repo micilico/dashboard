@@ -257,6 +257,27 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "ok")
         self.assertEqual(calls, ["jellyfin-refresh"])
 
+    def test_dashboard_exposes_overview_blocks(self):
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Ubuntu",
+                "state": "downloading",
+                "downloadSpeed": 4096,
+                "uploadSpeed": 1024,
+            }
+        ]
+
+        response = self.client.get("/torrent-panel/api/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("overview", body)
+        self.assertIn("recentActivity", body)
+        self.assertIn("storage", body)
+        self.assertEqual(body["overview"]["activeTorrents"], 1)
+        self.assertGreaterEqual(body["overview"]["downloadSpeedBytes"], 4096)
+
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):

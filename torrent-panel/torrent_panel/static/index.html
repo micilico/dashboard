@@ -10,81 +10,148 @@
     <a class="skip-link" href="#content">Aller au contenu</a>
     <main id="content" class="shell">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Centre de contrôle</p>
-          <h1>Dashboard</h1>
+        <div class="brand-block">
+          <a class="brand-mark" href="./?view=home" aria-label="Retour a la vue d'ensemble">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <defs>
+                <linearGradient id="brandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#9d8cff"></stop>
+                  <stop offset="100%" stop-color="#6d5cff"></stop>
+                </linearGradient>
+              </defs>
+              <circle cx="32" cy="32" r="18" fill="none" stroke="url(#brandGradient)" stroke-width="8"></circle>
+              <circle cx="32" cy="32" r="7" fill="url(#brandGradient)"></circle>
+              <circle cx="49" cy="13" r="2.6" fill="#7c6cff"></circle>
+              <ellipse cx="26" cy="34" rx="28" ry="8" fill="none" stroke="rgba(157,140,255,0.55)" stroke-width="1.4" transform="rotate(-18 26 34)"></ellipse>
+            </svg>
+          </a>
+          <div class="brand-copy">
+            <p class="eyebrow">Centre de controle</p>
+            <h1>Dashboard</h1>
+          </div>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a id="homeNavLink" href="./?view=home">Vue d’ensemble <span id="navAlertCount" class="nav-count" hidden>0</span></a>
-          <a id="torrentsNavLink" aria-current="page" href="./?view=torrents">Torrents</a>
-          <a id="prowlarrNavLink" href="/prowlarr-panel/">Prowlarr</a>
-          <a id="storageNavLink" href="/storage-panel/">Stockage</a>
-          <a id="mediaNavLink" href="/media-panel/">Médias</a>
-          <a id="healthNavLink" href="/health/">Santé</a>
-          <a id="activityNavLink" href="/activity/">Activité</a>
+          <a id="homeNavLink" href="./?view=home">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3.75 10.5 12 4l8.25 6.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-3.75V13.5h-6v6.75H5.25a1.5 1.5 0 0 1-1.5-1.5z"></path></svg>
+            </span>
+            <span class="nav-label">Vue d’ensemble</span>
+            <span id="navAlertCount" class="nav-count" hidden>0</span>
+          </a>
+          <a id="torrentsNavLink" aria-current="page" href="./?view=torrents">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"></path></svg>
+            </span>
+            <span class="nav-label">Torrents</span>
+          </a>
+          <a id="prowlarrNavLink" href="/prowlarr-panel/">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.25 4.25"></path></svg>
+            </span>
+            <span class="nav-label">Prowlarr</span>
+          </a>
+          <a id="mediaNavLink" href="/media-panel/">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8M8 12h5M8 15h8"></path></svg>
+            </span>
+            <span class="nav-label">Médias</span>
+          </a>
+          <a id="storageNavLink" href="/storage-panel/">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"></rect><rect x="4" y="14" width="16" height="5" rx="1.5"></rect><path d="M8 7.5h.01M8 16.5h.01"></path></svg>
+            </span>
+            <span class="nav-label">Système</span>
+          </a>
+          <a id="healthNavLink" href="/health/">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 4.75 18.5 7v5.25c0 4.2-2.6 6.8-6.5 7.99-3.9-1.19-6.5-3.79-6.5-7.99V7z"></path><path d="M9 12h6M12 9v6"></path></svg>
+            </span>
+            <span class="nav-label">Santé</span>
+          </a>
+          <a id="activityNavLink" href="/activity/">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"></path></svg>
+            </span>
+            <span class="nav-label">Activité</span>
+          </a>
         </nav>
-        <div class="topbar-actions">
+        <div class="topbar-actions sidebar-footer">
+          <div class="sidebar-health" aria-live="polite">
+            <div class="sidebar-health-row">
+              <span class="status-dot"></span>
+              <span id="statusText">Tous les services sont operationnels</span>
+            </div>
+            <p id="sidebarStatusDetail">Surveillance en direct.</p>
+          </div>
           <div class="status-pill" id="refreshStatus" aria-live="polite">
-            <span id="statusText">Opérationnel</span>
+            <span>Dernière mise a jour</span>
             <time id="lastCheck" datetime=""></time>
           </div>
-          <button id="openAddPanelButton" type="button" class="button primary">Ajouter un torrent</button>
-          <button id="refreshButton" type="button" class="button secondary">Actualiser</button>
         </div>
       </header>
 
       <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents"></section>
 
-      <section class="content-panel" id="homeView" aria-labelledby="homeTitle" hidden>
-        <div class="panel-head">
-          <div>
-            <p class="greeting" id="greeting">Bonjour</p>
-            <h2 id="homeTitle">État du système</h2>
-            <p id="homeSummary" class="status-summary">Tout fonctionne. Parfaitement.</p>
+      <section class="overview-view" id="homeView" aria-labelledby="homeTitle" hidden>
+        <div class="overview-header">
+          <div class="overview-copy">
+            <p class="eyebrow greeting" id="greeting">Bonsoir</p>
+            <h2 id="homeTitle" class="overview-title">Tout fonctionne.<br>Parfaitement.</h2>
+            <p id="homeSummary" class="status-summary">Aucune alerte critique. Les services restent surveillés en direct.</p>
+            <div id="homeStatusBadge" class="overview-badge" aria-live="polite">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="homeStatusText">Tous les services sont operationnels</span>
+            </div>
+          </div>
+          <div class="overview-actions" aria-label="Actions globales">
+            <button id="refreshButton" type="button" class="icon-button" aria-label="Actualiser">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"></path></svg>
+            </button>
+            <button id="openAddPanelButton" type="button" class="icon-button icon-button-accent" aria-label="Ajouter un torrent">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
           </div>
         </div>
-
-        <section class="card-hero" aria-labelledby="storageTitle">
-          <h3 id="storageTitle">Votre espace média</h3>
-          <div id="storageVisualization"></div>
-        </section>
 
         <div id="criticalAlerts" class="alert-strip" hidden></div>
 
-        <div class="home-grid">
-          <section class="home-card" aria-labelledby="quickActionsTitle">
-            <div class="card-head">
-              <h3 id="quickActionsTitle">Actions rapides</h3>
-              <p>Raccourcis directs vers les vues utiles.</p>
+        <div class="overview-grid">
+          <section class="overview-card overview-storage-card" aria-labelledby="storageTitle">
+            <div class="card-head card-head-spread">
+              <div>
+                <h3 id="storageTitle">Votre espace média</h3>
+                <p id="storageSummary">Capacité et occupation du stockage surveillé.</p>
+              </div>
             </div>
-            <div id="quickActions" class="quick-actions"></div>
+            <div id="storageVisualization" class="storage-visualization"></div>
           </section>
 
-          <section class="home-card" aria-labelledby="alertsTitle">
-            <div class="card-head">
-              <h3 id="alertsTitle">Centre d’alertes</h3>
-              <p id="alertsSummary">Aucune alerte chargée.</p>
-            </div>
-            <div id="alertsList" class="alert-list"></div>
-          </section>
+          <div class="overview-main">
+            <div id="overviewMetrics" class="metrics-grid" aria-label="Indicateurs clés"></div>
+
+            <section class="overview-card services-card" aria-labelledby="servicesTitle">
+              <div class="card-head card-head-spread">
+                <div>
+                  <h3 id="servicesTitle">Services</h3>
+                  <p id="servicesSummary">Dernières vérifications et statuts.</p>
+                </div>
+                <a id="servicesLink" class="card-link" href="/health/">Tout voir</a>
+              </div>
+              <div id="servicesGrid" class="services-list"></div>
+            </section>
+
+            <section class="overview-card activity-card" aria-labelledby="activityTitle">
+              <div class="card-head card-head-spread">
+                <div>
+                  <h3 id="activityTitle">Activité récente</h3>
+                  <p id="activitySummary">Trois événements récents au maximum.</p>
+                </div>
+                <a class="card-link" href="/activity/">Tout voir</a>
+              </div>
+              <div id="activityList" class="activity-list"></div>
+            </section>
+          </div>
         </div>
-
-        <section class="home-card service-card" aria-labelledby="servicesTitle">
-          <div class="card-head">
-            <h3 id="servicesTitle">État des services</h3>
-            <p id="servicesSummary">Dernières vérifications et services exposés.</p>
-          </div>
-          <div id="servicesGrid" class="services-grid"></div>
-        </section>
-
-        <section class="home-card service-card" id="mediaAutomation" aria-labelledby="mediaAutomationTitle">
-          <div class="card-head">
-            <h3 id="mediaAutomationTitle">Automatisation médias</h3>
-            <p id="mediaAutomationSummary">Historique du traitement après téléchargement.</p>
-          </div>
-          <div id="mediaAutomationNotice" class="media-notice" hidden></div>
-          <div id="mediaAutomationList" class="media-list"></div>
-        </section>
       </section>
 
       <details class="toolbar" id="addPanel">

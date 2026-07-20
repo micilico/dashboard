@@ -207,6 +207,57 @@ def build_alert(
     }
 
 
+def build_overview_metrics(
+    torrents: list[dict[str, Any]],
+    prowlarr_overview: dict[str, Any],
+) -> dict[str, Any]:
+    active_torrents = len(
+        [item for item in torrents if state_meta_from_qbit(item) in {"downloading", "sharing", "waiting", "checking"}]
+    )
+    return {
+        "downloadSpeedBytes": sum(int(item.get("downloadSpeed", 0) or 0) for item in torrents),
+        "uploadSpeedBytes": sum(int(item.get("uploadSpeed", 0) or 0) for item in torrents),
+        "activeTorrents": active_torrents,
+        "blockedTorrents": len([item for item in torrents if state_meta_from_qbit(item) == "error"]),
+        "indexersTotal": int(prowlarr_overview.get("indexersTotal", 0) or 0),
+        "indexersActive": int(prowlarr_overview.get("indexersActive", 0) or 0),
+        "indexersError": int(prowlarr_overview.get("indexersError", 0) or 0),
+    }
+
+
+def build_recent_activity(
+    alerts: list[dict[str, Any]],
+    media_history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for entry in media_history[:8]:
+        state_label = str(entry.get("stateLabel") or entry.get("state") or "Terminé")
+        events.append(
+            {
+                "date": entry.get("updatedAt") or entry.get("completedAt"),
+                "service": "Automatisation médias",
+                "title": str(entry.get("torrentName") or "Téléchargement terminé"),
+                "detail": state_label,
+                "kind": "download",
+                "status": "success" if entry.get("state") == "completed" else "warning",
+            }
+        )
+    for alert in alerts[:8]:
+        severity = str(alert.get("severity") or "warning")
+        events.append(
+            {
+                "date": alert.get("date"),
+                "service": str(alert.get("service") or "Surveillance"),
+                "title": str(alert.get("message") or "Alerte de service"),
+                "detail": "Surveillance automatique",
+                "kind": "alert" if severity == "critical" else "scan",
+                "status": "danger" if severity == "critical" else "warning",
+            }
+        )
+    events.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
+    return events[:3]
+
+
 async def prowlarr_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
@@ -370,12 +421,18 @@ async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
         )
     alerts.extend(media_automation.dashboard_alerts())
 
+    storage = await storage_snapshot(app)
+    overview = build_overview_metrics(torrents, prowlarr_overview)
+    recent_activity = build_recent_activity(alerts, media_automation.snapshot().get("entries", []))
     critical_alerts = [item for item in alerts if item["severity"] == "critical"]
     return {
         "generatedAt": now_iso(),
         "alerts": alerts,
         "criticalCount": len(critical_alerts),
         "services": list(service_results.values()),
+        "overview": overview,
+        "recentActivity": recent_activity,
+        "storage": storage.get("disk", {}),
         "mediaAutomation": media_automation.snapshot(),
         "quickActions": [
             {"id": "add-torrent", "label": "Ajouter un torrent", "url": f"{torrents_url}&add=1"},
@@ -582,13 +639,14 @@ async def activity_snapshot(app: FastAPI) -> dict[str, Any]:
         torrents = []
     prowlarr_overview, _prowlarr_health = await prowlarr_snapshot()
     media_history = media_automation.snapshot().get("entries", [])
+    overview = build_overview_metrics(torrents, prowlarr_overview)
     summary = {
         "downloadsActive": len([item for item in torrents if state_meta_from_qbit(item) == "downloading"]),
-        "downloadSpeedBytes": sum(int(item.get("downloadSpeed", 0) or 0) for item in torrents),
-        "uploadSpeedBytes": sum(int(item.get("uploadSpeed", 0) or 0) for item in torrents),
+        "downloadSpeedBytes": overview["downloadSpeedBytes"],
+        "uploadSpeedBytes": overview["uploadSpeedBytes"],
         "completedRecently": len([item for item in torrents if int(item.get("completionOn", 0) or 0) > 0]),
-        "blockedTorrents": len([item for item in torrents if state_meta_from_qbit(item) == "error"]),
-        "indexersError": int(prowlarr_overview.get("indexersError", 0) or 0),
+        "blockedTorrents": overview["blockedTorrents"],
+        "indexersError": overview["indexersError"],
         "transfersRcloneActive": int(storage.get("rclone", {}).get("transfersActive", 0) or 0),
         "rcloneErrors": int(storage.get("rclone", {}).get("errors", 0) or 0),
         "diskFreeBytes": int(storage.get("disk", {}).get("freeBytes", 0) or 0),
