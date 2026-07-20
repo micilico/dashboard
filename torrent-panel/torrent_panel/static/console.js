@@ -110,7 +110,7 @@ async function refreshSession() {
 }
 
 function configureLinks() {
-  els.homeLink.href = "/";
+  els.homeLink.href = `${state.torrentPanelPrefix}/?view=home`;
   els.activityLink.href = `${state.activityPrefix}/`;
   els.torrentLink.href = `${state.torrentPanelPrefix}/?view=torrents`;
   els.prowlarrLink.href = `${state.prowlarrPanelPrefix}/`;

@@ -746,7 +746,7 @@ async function grabRelease(buttonNode) {
 }
 
 function configureLinks() {
-  if (els.homeLink) els.homeLink.href = "/";
+  if (els.homeLink) els.homeLink.href = `${state.torrentPanelPrefix}/?view=home`;
   if (els.activityLink) els.activityLink.href = "/activity/";
   if (els.torrentLink) els.torrentLink.href = `${state.torrentPanelPrefix || "/torrent-panel"}/`;
   if (els.prowlarrLink) els.prowlarrLink.href = prefixed("/");
