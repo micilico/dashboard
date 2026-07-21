@@ -13,14 +13,9 @@
         <div class="brand-block">
           <a class="brand-mark" href="./?view=home" aria-label="Retour a la vue d'ensemble">
             <svg viewBox="0 0 64 64" aria-hidden="true">
-              <defs>
-                <linearGradient id="brandGradientMark" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stop-color="#4a9eff"/>
-                  <stop offset="100%" stop-color="#0071e3"/>
-                </linearGradient>
-              </defs>
-              <circle cx="32" cy="32" r="18" fill="none" stroke="url(#brandGradientMark)" stroke-width="6"/>
-              <circle cx="32" cy="32" r="5" fill="url(#brandGradientMark)"/>
+              <polygon points="18,14 41,14 50,30 27,30" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/>
+              <polygon points="14,34 37,34 46,50 23,50" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+              <polygon points="27,30 41,30 37,34 23,34" fill="var(--accent)" opacity="0.15"/>
             </svg>
           </a>
           <div class="brand-copy">
@@ -295,8 +290,8 @@
           </label>
         </fieldset>
         <div id="strongConfirm" class="strong-confirm" hidden>
-          <label for="confirmText">Tapez SUPPRIMER pour confirmer la suppression des fichiers</label>
-          <input id="confirmText" autocomplete="off">
+          <label for="confirmText" id="confirmLabel">Tapez SUPPRIMER pour confirmer la suppression des fichiers</label>
+          <input id="confirmText" type="text" autocomplete="off" aria-describedby="confirmLabel">
         </div>
         <div class="dialog-actions">
           <button id="cancelDeleteButton" value="cancel" class="button secondary" type="button">Annuler</button>
@@ -311,9 +306,9 @@
         <p id="addTrackerCount" class="dialog-name"></p>
         <label>
           Adresse du tracker
-          <input id="addTrackerUrlInput" type="url" autocomplete="off" placeholder="https://tracker.example.com/announce">
+          <input id="addTrackerUrlInput" type="url" autocomplete="off" placeholder="https://tracker.example.com/announce" aria-describedby="trackerProtoHelp">
         </label>
-        <p class="field-message">Protocoles acceptés : http://, https://, udp://, ws://, wss://</p>
+        <p class="field-message" id="trackerProtoHelp">Protocoles acceptés : http://, https://, udp://, ws://, wss://</p>
         <p class="field-message" id="addTrackerMessage" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="cancelAddTrackerButton" value="cancel" class="button secondary" type="button">Annuler</button>

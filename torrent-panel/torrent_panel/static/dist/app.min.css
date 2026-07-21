@@ -69,7 +69,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.47;
   font-family: var(--font-family);
   font-variant-numeric: tabular-nums;
 }
@@ -389,6 +389,22 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   border-radius: 999px;
   background: var(--success);
   box-shadow: 0 0 0 5px rgba(94, 230, 168, 0.12);
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+.status-dot.degraded,
+.status-dot.unavailable {
+  animation: none;
+}
+
+@keyframes pulse-dot {
+  0% { box-shadow: 0 0 0 0 rgba(94, 230, 168, 0.4); }
+  70% { box-shadow: 0 0 0 12px rgba(94, 230, 168, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(94, 230, 168, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot { animation: none; }
+  .sparkline circle { opacity: 0 !important; }
 }
 
 .status-dot.degraded,
@@ -802,24 +818,26 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   width: 54px;
   height: 54px;
   border-radius: 16px;
-  border: 1px solid color-mix(in oklab, var(--accent), transparent 58%);
-  background: color-mix(in oklab, var(--accent), transparent 82%);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .activity-icon {
   width: 46px;
   height: 46px;
   border-radius: 15px;
-  border: 1px solid color-mix(in oklab, var(--accent), transparent 58%);
-  background: color-mix(in oklab, var(--accent), transparent 82%);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .metric-copy,
@@ -867,12 +885,21 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   height: 100%;
 }
 
-.sparkline path {
+.sparkline path:first-child {
   fill: none;
   stroke: var(--accent);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.sparkline path:last-child {
+  display: none;
+}
+.sparkline circle {
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+.sparkline:hover circle {
+  opacity: 1;
 }
 
 .services-card,
@@ -983,17 +1010,20 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 }
 
 .activity-icon.success {
-  background: color-mix(in oklab, var(--accent), transparent 88%);
+  background: var(--success-soft);
+  color: var(--success-text);
 }
 
 .activity-icon.warning {
-  background: rgba(94, 230, 168, 0.08);
-  border-color: rgba(94, 230, 168, 0.22);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .activity-icon.danger {
-  background: rgba(255, 107, 114, 0.08);
-  border-color: rgba(255, 107, 114, 0.22);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
 }
 
 .activity-copy strong,
@@ -1613,6 +1643,10 @@ td input[type="checkbox"] {
 }
 
 tr { min-height: 56px; }
+tr:hover { background: rgba(255,255,255,0.02); }
+tr:hover { background: rgba(255,255,255,0.02); }
+.sort-arrow { vertical-align: middle; margin-left: 3px; }
+.sort-head:hover { color: var(--text); }
 
 .dialog,
 .detail-dialog {
@@ -2553,7 +2587,7 @@ legend {
 body {
   background: var(--bg);
   font-size: 16px;
-  line-height: 1.55;
+  line-height: 1.47;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3134,24 +3168,26 @@ legend {
   width: 54px;
   height: 54px;
   border-radius: 16px;
-  border: 1px solid color-mix(in oklab, var(--accent), transparent 58%);
-  background: color-mix(in oklab, var(--accent), transparent 82%);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .activity-icon {
   width: 46px;
   height: 46px;
   border-radius: 15px;
-  border: 1px solid color-mix(in oklab, var(--accent), transparent 58%);
-  background: color-mix(in oklab, var(--accent), transparent 82%);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .metric-copy,
@@ -3199,12 +3235,21 @@ legend {
   height: 100%;
 }
 
-.sparkline path {
+.sparkline path:first-child {
   fill: none;
   stroke: var(--accent);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+.sparkline path:last-child {
+  display: none;
+}
+.sparkline circle {
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+.sparkline:hover circle {
+  opacity: 1;
 }
 
 .services-card,
@@ -3315,17 +3360,20 @@ legend {
 }
 
 .activity-icon.success {
-  background: color-mix(in oklab, var(--accent), transparent 88%);
+  background: var(--success-soft);
+  color: var(--success-text);
 }
 
 .activity-icon.warning {
-  background: rgba(94, 230, 168, 0.08);
-  border-color: rgba(94, 230, 168, 0.22);
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .activity-icon.danger {
-  background: rgba(255, 107, 114, 0.08);
-  border-color: rgba(255, 107, 114, 0.22);
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
 }
 
 .activity-copy strong,
@@ -4677,3 +4725,4 @@ td input[type="checkbox"] {
 }
 
 tr { min-height: 56px; }
+tr:hover { background: rgba(255,255,255,0.02); }

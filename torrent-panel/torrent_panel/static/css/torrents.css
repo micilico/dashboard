@@ -183,3 +183,6 @@
 }
 
 tr { min-height: 56px; }
+tr:hover { background: rgba(255,255,255,0.02); }
+.sort-arrow { vertical-align: middle; margin-left: 3px; }
+.sort-head:hover { color: var(--text); }

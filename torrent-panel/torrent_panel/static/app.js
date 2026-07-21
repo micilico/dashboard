@@ -870,7 +870,12 @@ function renderSortHeaders() {
     const key = head.dataset.sort;
     const active = key === state.prefs.sort;
     head.setAttribute("aria-sort", active ? (state.prefs.direction === "asc" ? "ascending" : "descending") : "none");
-    head.textContent = `${head.textContent.replace(/\s+[↑↓]$/, "")}${active ? (state.prefs.direction === "asc" ? " ↑" : " ↓") : ""}`;
+    const label = head.textContent.replace(/\s+[↑↓]$/, "").trim();
+    const arrowAsc = `<svg class="sort-arrow" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 2v6M3 5l2-3 2 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const arrowDesc = `<svg class="sort-arrow" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 2v6M3 5l2 3 2-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    head.innerHTML = active
+      ? `${label} ${state.prefs.direction === "asc" ? arrowAsc : arrowDesc}`
+      : label;
   });
 }
 
@@ -986,7 +991,16 @@ function sparklineSvg(points) {
     const y = 100 - ((value - min) / range) * 72 - 14;
     return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
   }).join(" ");
-  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="${path}" pathLength="100"></path></svg>`;
+  const fillPath = values.length > 1
+    ? `M${(0).toFixed(2)} 100 L${path.slice(1)} L${((values.length - 1) / Math.max(values.length - 1, 1) * 100).toFixed(2)} 100 Z`
+    : "";
+  const lastX = values.length > 1 ? ((values.length - 1) / Math.max(values.length - 1, 1) * 100).toFixed(2) : "0";
+  const lastY = 100 - ((values.at(-1) - min) / range) * 72 - 14;
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">`
+    + (fillPath ? `<path d="${fillPath}" fill="var(--accent)" opacity="0.08" pathLength="100"></path>` : "")
+    + `<path d="${path}" pathLength="100"></path>`
+    + `<circle cx="${lastX}" cy="${lastY.toFixed(2)}" r="3" fill="var(--accent)" opacity="0"></circle>`
+    + `</svg>`;
 }
 
 function trendText(points) {
@@ -1144,7 +1158,12 @@ function renderHome() {
     ? `${critical} incident(s) nécessitent une action`
     : "Tous les services sont opérationnels";
   const greeting = document.querySelector("#greeting");
-  if (greeting) greeting.textContent = "Bonsoir";
+  if (greeting) {
+    const hour = new Date().getHours();
+    greeting.textContent = hour >= 6 && hour < 12 ? "Bonjour"
+      : hour >= 12 && hour < 18 ? "Bon après-midi"
+      : "Bonsoir";
+  }
   if (els.statusText) {
     els.statusText.textContent = critical
       ? `${critical} alerte(s) critique(s)`
