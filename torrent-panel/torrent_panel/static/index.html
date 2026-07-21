@@ -111,6 +111,25 @@
         <div class="overview-grid">
           <div id="overviewMetrics" class="metrics-grid" aria-label="Indicateurs clés" data-od-id="metrics-row"></div>
           <div class="overview-lower-grid">
+            <section class="overview-card bandwidth-card" aria-labelledby="bandwidthTitle" data-od-id="bandwidth-section">
+              <div class="card-head card-head-spread">
+                <div>
+                  <h3 id="bandwidthTitle">Bande passante</h3>
+                  <p id="bandwidthSummary">Débit descendant et montant en direct.</p>
+                </div>
+              </div>
+              <div id="bandwidthChart" class="bandwidth-chart" aria-label="Graphique débit download/upload">
+                <div class="bandwidth-legend">
+                  <span class="legend-item"><span class="legend-swatch swatch-dl"></span> Download</span>
+                  <span class="legend-item"><span class="legend-swatch swatch-ul"></span> Upload</span>
+                </div>
+                <svg id="bandwidthSvg" class="bandwidth-svg" viewBox="0 0 400 160" preserveAspectRatio="none" aria-hidden="true"></svg>
+                <div id="bandwidthValues" class="bandwidth-values">
+                  <span id="bandwidthDl" class="bw-value bw-dl">—</span>
+                  <span id="bandwidthUl" class="bw-value bw-ul">—</span>
+                </div>
+              </div>
+            </section>
             <section class="overview-card services-card" aria-labelledby="servicesTitle" data-od-id="services-section">
               <div class="card-head card-head-spread">
                 <div>

@@ -1178,6 +1178,51 @@ function renderHome() {
   renderOverviewMetrics();
   renderServices();
   renderRecentActivity();
+  renderBandwidthChart();
+}
+
+function renderBandwidthChart() {
+  const svg = document.querySelector("#bandwidthSvg");
+  if (!svg) return;
+  const dl = state.metricHistory.downloadSpeedBytes || [];
+  const ul = state.metricHistory.uploadSpeedBytes || [];
+  const len = Math.max(dl.length, ul.length);
+  if (len < 2) {
+    svg.replaceChildren();
+    return;
+  }
+  const padL = 10, padR = 10, padT = 8, padB = 20;
+  const w = 400, h = 160;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  function seriesPath(data) {
+    const max = Math.max(...data, 1);
+    return data.map((v, i) => {
+      const x = padL + (i / Math.max(data.length - 1, 1)) * plotW;
+      const y = padT + plotH - (v / max) * plotH;
+      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(" ");
+  }
+  function fillPath(data) {
+    const max = Math.max(...data, 1);
+    const firstX = padL;
+    const lastX = padL + ((data.length - 1) / Math.max(data.length - 1, 1)) * plotW;
+    const pts = data.map((v, i) => {
+      const x = padL + (i / Math.max(data.length - 1, 1)) * plotW;
+      const y = padT + plotH - (v / max) * plotH;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return `M${firstX.toFixed(1)},${(padT + plotH).toFixed(1)} L${pts} L${lastX.toFixed(1)},${(padT + plotH).toFixed(1)} Z`;
+  }
+  svg.innerHTML = ""
+    + `<path d="${fillPath(dl)}" fill="var(--accent)" opacity="0.08"></path>`
+    + `<path d="${seriesPath(dl)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>`
+    + `<path d="${fillPath(ul)}" fill="var(--success)" opacity="0.06"></path>`
+    + `<path d="${seriesPath(ul)}" fill="none" stroke="var(--success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>`;
+  const dlEl = document.querySelector("#bandwidthDl");
+  const ulEl = document.querySelector("#bandwidthUl");
+  if (dlEl) dlEl.textContent = formatSpeed((dl.at(-1) || 0));
+  if (ulEl) ulEl.textContent = formatSpeed((ul.at(-1) || 0));
 }
 
 function render() {
