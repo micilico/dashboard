@@ -47,7 +47,7 @@ legend {
 }
 
 .radio-line.danger {
-  color: #fecaca;
+  color: var(--danger-text);
 }
 
 .strong-confirm {

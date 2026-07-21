@@ -14,15 +14,13 @@
           <a class="brand-mark" href="./?view=home" aria-label="Retour a la vue d'ensemble">
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <defs>
-                <linearGradient id="brandGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stop-color="#9d8cff"></stop>
-                  <stop offset="100%" stop-color="#6d5cff"></stop>
+                <linearGradient id="brandGradientMark" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#4a9eff"/>
+                  <stop offset="100%" stop-color="#0071e3"/>
                 </linearGradient>
               </defs>
-              <circle cx="32" cy="32" r="18" fill="none" stroke="url(#brandGradient)" stroke-width="8"></circle>
-              <circle cx="32" cy="32" r="7" fill="url(#brandGradient)"></circle>
-              <circle cx="49" cy="13" r="2.6" fill="#7c6cff"></circle>
-              <ellipse cx="26" cy="34" rx="28" ry="8" fill="none" stroke="rgba(157,140,255,0.55)" stroke-width="1.4" transform="rotate(-18 26 34)"></ellipse>
+              <circle cx="32" cy="32" r="18" fill="none" stroke="url(#brandGradientMark)" stroke-width="6"/>
+              <circle cx="32" cy="32" r="5" fill="url(#brandGradientMark)"/>
             </svg>
           </a>
           <div class="brand-copy">
@@ -92,8 +90,8 @@
 
       <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents" hidden></section>
 
-      <section class="overview-view" id="homeView" aria-labelledby="homeTitle" hidden>
-        <div class="overview-header">
+      <section class="overview-view" id="homeView" aria-labelledby="homeTitle" hidden data-od-id="overview-section">
+        <div class="overview-header" data-od-id="overview-header">
           <div class="overview-copy">
             <p class="eyebrow greeting" id="greeting">Bonsoir</p>
             <h2 id="homeTitle" class="overview-title">Tout fonctionne.<br>Parfaitement.</h2>
@@ -116,9 +114,9 @@
         <div id="criticalAlerts" class="alert-strip" hidden></div>
 
         <div class="overview-grid">
-          <div id="overviewMetrics" class="metrics-grid" aria-label="Indicateurs clés"></div>
+          <div id="overviewMetrics" class="metrics-grid" aria-label="Indicateurs clés" data-od-id="metrics-row"></div>
           <div class="overview-lower-grid">
-            <section class="overview-card services-card" aria-labelledby="servicesTitle">
+            <section class="overview-card services-card" aria-labelledby="servicesTitle" data-od-id="services-section">
               <div class="card-head card-head-spread">
                 <div>
                   <h3 id="servicesTitle">Services</h3>
@@ -129,7 +127,7 @@
               <div id="servicesGrid" class="services-list"></div>
             </section>
 
-            <section class="overview-card activity-card" aria-labelledby="activityTitle">
+            <section class="overview-card activity-card" aria-labelledby="activityTitle" data-od-id="activity-section">
               <div class="card-head card-head-spread">
                 <div>
                   <h3 id="activityTitle">Activité récente</h3>

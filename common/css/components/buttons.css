@@ -1,7 +1,7 @@
 .button, .tab {
   min-height: 44px; border: 1px solid transparent; border-radius: var(--radius-control);
   padding: 10px 14px; font-weight: 600;
-  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
 }
 .button:active, .tab:active { transform: translateY(1px); }
 .primary { background: var(--accent-action); color: #fff; }

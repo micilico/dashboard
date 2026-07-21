@@ -428,7 +428,7 @@
     padding: 22px;
     border: 1px solid var(--border);
     border-radius: var(--radius-panel);
-    background: linear-gradient(145deg, rgba(255,255,255,.024), transparent 65%), var(--surface-2);
+    background: var(--surface-2);
   }
 
   .torrent-table td {

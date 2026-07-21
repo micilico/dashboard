@@ -43,12 +43,12 @@
   min-height: 100dvh;
   padding: 40px clamp(20px, 1.9vw, 30px) 28px;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(9, 11, 17, 0.98), rgba(6, 8, 13, 0.96));
+  background: var(--bg-secondary);
 }
 
 .topbar .brand-copy h1 {
   margin: 0;
-  color: #a99eff;
+  color: var(--accent);
   font-size: 1.05rem;
   line-height: 1.2;
 }
@@ -78,18 +78,12 @@
   min-width: 0;
 }
 
-.greeting {
-  color: #9d8cff;
-  font-size: 0.88rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
 .overview-title {
   max-width: 760px;
+  font-family: var(--font-display);
   font-size: clamp(3.6rem, 4vw, 4rem);
   line-height: 1.02;
-  letter-spacing: 0;
+  letter-spacing: var(--tracking-display);
   font-weight: 700;
 }
 
@@ -106,10 +100,10 @@
   width: fit-content;
   min-height: 44px;
   padding: 9px 18px;
-  border: 1px solid rgba(94, 230, 168, 0.22);
+  border: 1px solid var(--success-border);
   border-radius: 999px;
-  background: rgba(94, 230, 168, 0.09);
-  color: #d7ffe7;
+  background: var(--success-soft);
+  color: var(--success-text);
 }
 
 .overview-badge.is-warning {
@@ -135,7 +129,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background var(--motion-fast) ease, border-color var(--motion-fast) ease, transform var(--motion-fast) ease;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
 }
 
 .icon-button:hover {
@@ -144,13 +138,13 @@
 }
 
 .icon-button-accent {
-  border-color: rgba(124, 108, 255, 0.45);
-  background: var(--accent);
-  box-shadow: 0 12px 34px rgba(124, 108, 255, 0.28);
+  border-color: transparent;
+  background: var(--accent-action);
+  box-shadow: 0 8px 24px color-mix(in oklab, var(--accent), transparent 82%);
 }
 
 .icon-button-accent:hover {
-  background: var(--accent-strong);
+  background: var(--accent-action-hover);
 }
 
 .icon-button svg {
@@ -173,9 +167,9 @@
 
 .overview-card {
   border: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(17, 20, 28, 0.98), rgba(11, 14, 20, 0.98));
+  background: var(--surface);
   border-radius: var(--radius-card);
-  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.08);
 }
 
 .metrics-grid,
@@ -194,7 +188,7 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  color: #a99eff;
+  color: var(--accent);
   text-decoration: none;
   font-weight: 600;
   white-space: nowrap;
@@ -222,8 +216,8 @@
   width: 54px;
   height: 54px;
   border-radius: 16px;
-  border: 1px solid rgba(124, 108, 255, 0.42);
-  background: rgba(124, 108, 255, 0.18);
+  border: 1px solid color-mix(in oklab, var(--accent), transparent 58%);
+  background: color-mix(in oklab, var(--accent), transparent 82%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -234,8 +228,8 @@
   width: 46px;
   height: 46px;
   border-radius: 15px;
-  border: 1px solid rgba(124, 108, 255, 0.42);
-  background: rgba(124, 108, 255, 0.18);
+  border: 1px solid color-mix(in oklab, var(--accent), transparent 58%);
+  background: color-mix(in oklab, var(--accent), transparent 82%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -289,7 +283,7 @@
 
 .sparkline path {
   fill: none;
-  stroke: #8c7dff;
+  stroke: var(--accent);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -356,7 +350,7 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  color: #d7ffe7;
+  color: var(--success-text);
   white-space: nowrap;
 }
 
@@ -375,7 +369,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #d7d2ff;
+  color: color-mix(in oklab, var(--accent), transparent 20%);
 }
 
 .ui-icon svg {
@@ -403,7 +397,7 @@
 }
 
 .activity-icon.success {
-  background: rgba(124, 108, 255, 0.12);
+  background: color-mix(in oklab, var(--accent), transparent 88%);
 }
 
 .activity-icon.warning {
@@ -453,12 +447,14 @@
 
 .page-header-panel h2 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: clamp(2.5rem, 3vw, 3rem);
   line-height: 1.02;
+  letter-spacing: var(--tracking-display);
 }
 
 .page-header-panel .eyebrow {
-  color: #9d8cff;
+  color: var(--accent);
 }
 
 .torrents-panel .quick-filters,
@@ -645,7 +641,7 @@ td input[type="checkbox"] {
   min-height: 88px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: linear-gradient(180deg, var(--success-soft), var(--surface-2));
+  background: var(--surface-2);
   padding: 14px;
   color: var(--text);
   text-align: left;
