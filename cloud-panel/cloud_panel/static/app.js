@@ -59,7 +59,8 @@ async function api(path, opts = {}, retry = true) {
   const se = opts.body instanceof URLSearchParams;
   if (opts.body && !fd && !se && !h.has("Content-Type")) h.set("Content-Type", "application/json");
   if ((opts.method || "GET").toUpperCase() !== "GET") h.set("X-Cloud-Panel-CSRF", S.csrf);
-  const r = await fetchWithRetry(path, { ...opts, headers: h, credentials: "same-origin" });
+  const r = await fetchWithRetry(path, { timeout: 60000, ...opts, headers: h, credentials: "same-origin" });
+  if (typeof hideReconnectNotice === 'function') hideReconnectNotice();
   const p = await r.json().catch(() => ({}));
   if (r.ok) return p;
   const d = typeof p.detail === "object" && p.detail ? p.detail : {};
