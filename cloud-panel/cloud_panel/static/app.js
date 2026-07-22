@@ -203,6 +203,9 @@ function renderFiles() {
       const dl = document.createElement("a"); dl.className = "action-btn"; dl.href = au(`/files/download?path=${encodeURIComponent(f.path)}`);
       dl.setAttribute("aria-label", "Telecharger"); dl.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>';
       acts.append(dl);
+      const pv = document.createElement("button"); pv.className = "action-btn"; pv.setAttribute("aria-label", "Apercu");
+      pv.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.25"/><path d="M12 8v4l3 3"/></svg>';
+      pv.addEventListener("click", (e) => { e.stopPropagation(); openPreview(f); }); acts.append(pv);
     }
     const sh = document.createElement("button"); sh.className = "action-btn"; sh.setAttribute("aria-label", "Partager");
     sh.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>';
@@ -331,7 +334,12 @@ $("confirmShareBtn").addEventListener("click", async () => {
     qs("#shareUrl", $("shareDialog")).value = shareUrl;
     qs("#shareResult", $("shareDialog")).hidden = false;
     msg.textContent = "Lien genere avec succes.";
-    generateQR(shareUrl);
+    if (r.qrDataUrl) {
+      const c = $("qrCanvas"); const img = new Image();
+      img.onload = () => { const ctx = c.getContext("2d"); c.width = img.width; c.height = img.height; ctx.drawImage(img, 0, 0); };
+      img.src = r.qrDataUrl;
+      qs("#shareQR", $("shareDialog")).hidden = false;
+    }
   } catch (e) { msg.textContent = "Erreur: " + e.message; console.error("Share failed", e); }
 });
 $("copyLinkBtn").addEventListener("click", () => {
@@ -340,29 +348,25 @@ $("copyLinkBtn").addEventListener("click", () => {
 });
 $("cancelShareBtn").addEventListener("click", () => { $("shareDialog").close(); S.shareTarget = null; });
 
-function generateQR(url) {
-  const c = $("qrCanvas"); const sz = 140;
-  c.width = sz; c.height = sz; const ctx = c.getContext("2d");
-  // Simple QR-like visual indicator when URL is present
-  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, sz, sz);
-  ctx.fillStyle = "#000"; const n = 17, bs = sz / (n + 4), off = bs * 2;
-  // Finder patterns
-  for (const [ox, oy] of [[0,0],[n-7,0],[0,n-7]]) {
-    ctx.fillRect(ox*bs+off, oy*bs+off, 7*bs, 7*bs);
-    ctx.fillStyle = "#fff"; ctx.fillRect(ox*bs+off+bs, oy*bs+off+bs, 5*bs, 5*bs);
-    ctx.fillStyle = "#000"; ctx.fillRect(ox*bs+off+bs*2, oy*bs+off+bs*2, 3*bs, 3*bs);
-    ctx.fillStyle = "#000";
-  }
-  // Dot pattern based on URL hash
-  const h = url.split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0);
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    if ((x < 7 && y < 7) || (x >= n-7 && y < 7) || (x < 7 && y >= n-7)) continue;
-    if ((h >> ((x + y * n) % 31)) & 1) ctx.fillRect(x * bs + off, y * bs + off, bs, bs);
-  }
-  $("qr-wrap")?.classList.remove("hidden"); // class hidden not used, use attribute
-  qs("#shareQR", $("shareDialog")).hidden = false;
-}
 
+
+// ── Preview ──
+function openPreview(f) {
+  const ext = (f.name || "").split(".").pop().toLowerCase();
+  const imgExts = ["jpg","jpeg","png","gif","webp","svg","bmp","ico"];
+  const vidExts = ["mp4","webm","ogg","mov"];
+  const audExts = ["mp3","wav","flac","ogg","m4a","aac"];
+  const txtExts = ["txt","md","json","xml","csv","log","ini","cfg","yml","yaml","conf","env","sh","bat","ps1","py","js","ts","css","html","htm","sql","rss","atom"];
+  const body = $("previewBody"); const title = $("previewTitle");
+  title.textContent = f.name;
+  const dlUrl = au(`/files/download?path=${encodeURIComponent(f.path)}`);
+  if (imgExts.includes(ext)) body.innerHTML = `<img src="${dlUrl}" alt="${f.name}" loading="lazy">`;
+  else if (vidExts.includes(ext)) body.innerHTML = `<video controls autoplay><source src="${dlUrl}"></video>`;
+  else if (audExts.includes(ext)) body.innerHTML = `<audio controls autoplay><source src="${dlUrl}"></audio>`;
+  else if (txtExts.includes(ext)) fetch(dlUrl).then(r => r.text()).then(t => body.innerHTML = `<pre>${t.replace(/</g,"&lt;")}</pre>`).catch(() => body.innerHTML = "<p>Impossible de lire le fichier.</p>");
+  else body.innerHTML = `<p>Apercu non disponible pour ce type de fichier. <a href="${dlUrl}" target="_blank">Telecharger</a></p>`;
+  $("previewDialog").showModal();
+}
 // ── Dialogs ──
 function openRename(f) { S.renameTarget = f; $("renameInput").value = f.name; qs("#renameMessage", $("renameDialog")).textContent = ""; $("renameDialog").showModal(); }
 function openDelete(f) { S.deleteTarget = f; qs("#deleteName", $("deleteDialog")).textContent = f.name; $("deleteDialog").showModal(); }
@@ -389,7 +393,11 @@ function switchView(v) {
   ["files","history","links","stats"].forEach(x => {
     const el = $(x + "View"); if (el) el.hidden = x !== v;
   });
-  qsa(".sidebar-link").forEach(b => b.classList.toggle("active", b.dataset.nav === v));
+  qsa(".nav-btn").forEach(b => {
+    const isActive = b.dataset.nav === v;
+    b.classList.toggle("active", isActive);
+    if (isActive) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
   if (v === "history") loadHistory();
   if (v === "links") loadLinks();
   if (v === "stats") loadStats();
@@ -407,7 +415,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowUp" && S.focusedIdx > 0) { S.focusedIdx--; e.preventDefault(); scrollToRow(); renderFiles(); }
   if (e.key === "Enter" && S.focusedIdx >= 0) {
     const f = items[S.focusedIdx]; if (f.is_dir) navigate(f.path);
-    else window.location.href = au(`/files/download?path=${encodeURIComponent(f.path)}`);
+    else openPreview(f);
   }
   if (e.key === "Delete" && S.focusedIdx >= 0) openDelete(items[S.focusedIdx]);
   if (e.key === "F2" && S.focusedIdx >= 0) { e.preventDefault(); openRename(items[S.focusedIdx]); }
@@ -545,10 +553,18 @@ $("bulkShare").addEventListener("click", async () => {
   const detail = errors && lastErr ? ` — Derniere erreur: ${lastErr}` : "";
   toast(`${results.length} lien(s) genere(s)${errors ? `, ${errors} erreur(s)${detail}` : ""}${results.length ? " et copie(s)" : ""}.`);
 });
-$("bulkDownload").addEventListener("click", () => {
+$("bulkDownload").addEventListener("click", async () => {
   const it = [...S.selected]; if (!it.length) return;
-  // Download first selected file (single file download for now)
-  window.location.href = au(`/files/download?path=${encodeURIComponent(it[0])}`);
+  if (it.length === 1) {
+    window.location.href = au(`/files/download?path=${encodeURIComponent(it[0])}`);
+    return;
+  }
+  try {
+    const fd = new FormData(); fd.append("paths", it.join("\n"));
+    const blob = await fetch(au("/files/download-zip"), { method: "POST", headers: { "X-Cloud-Panel-CSRF": S.csrf }, body: fd }).then(r => { if (!r.ok) throw new Error("Erreur ZIP"); return r.blob(); });
+    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "cloud-panel-bulk.zip"; a.click(); URL.revokeObjectURL(url);
+    toast("Archive ZIP telechargee.");
+  } catch (e) { showError(e); }
 });
 
 // ── History ──

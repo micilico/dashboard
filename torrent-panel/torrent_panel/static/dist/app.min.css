@@ -41,6 +41,15 @@
   --info-soft: rgba(96, 165, 250, 0.11);
   --info-border: rgba(96, 165, 250, 0.25);
   --info-text: #dbeafe;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-48: 48px;
   --radius-control: 12px;
   --radius-panel: 18px;
   --radius-card: 24px;

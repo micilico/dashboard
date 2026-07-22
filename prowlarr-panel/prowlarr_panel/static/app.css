@@ -1,49 +1,6 @@
 @import url('./css/search.css');
 @import url('./css/responsive.css');
 
-.shell {
-  width: 100%;
-  grid-template-columns: 288px minmax(0, 1fr);
-  gap: 0;
-  padding: 0 52px 48px 0;
-}
-
-.topbar {
-  top: 0;
-  min-height: 100dvh;
-  padding: 44px 30px 28px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: var(--bg-secondary);
-}
-
-.topbar .brand-copy h1 {
-  margin: 0;
-  color: var(--accent);
-  font-size: 1.05rem;
-  line-height: 1.2;
-}
-
-.summary-grid-console {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding-left: 60px;
-}
-
-.page-header {
-  padding-left: 60px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: clamp(2.5rem, 3vw, 3rem);
-  line-height: 1.02;
-  letter-spacing: var(--tracking-display);
-}
-
-.page-header .eyebrow {
-  color: var(--accent);
-}
-
 .content-panel {
   overflow: hidden;
 }

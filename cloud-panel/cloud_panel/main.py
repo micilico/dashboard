@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -17,6 +18,8 @@ from common.monitoring import init_sentry
 
 from .config import (
     PUBLIC_PREFIX,
+    CSRF_TOKEN_TTL_SECONDS,
+    MAX_CSRF_TOKENS,
     MAX_RATE_KEYS,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_SECONDS,
@@ -47,6 +50,7 @@ app.state.action_limiter = RateLimiter(
     period_seconds=RATE_LIMIT_SECONDS,
     max_keys=MAX_RATE_KEYS,
 )
+app.state.last_csrf_cleanup = 0.0
 
 
 @app.middleware("http")
@@ -56,9 +60,15 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
     if "/api/" in request.url.path:
         response.headers["Cache-Control"] = "no-store"
+    now = time.monotonic()
+    if now - request.app.state.last_csrf_cleanup > 300:
+        from .routes.csrf_guard import cleanup_csrf_tokens
+        cleanup_csrf_tokens(request.app)
+        request.app.state.last_csrf_cleanup = now
     return response
 
 

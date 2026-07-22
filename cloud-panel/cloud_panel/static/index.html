@@ -3,62 +3,65 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cloud Panel</title>
+    <title>Cloud Panel · Dashboard</title>
     <link rel="stylesheet" href="./static/dist/app.min.css?v=20260722-b">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
-
-    <div class="app-layout">
-      <aside class="sidebar" id="sidebar" aria-label="Navigation">
-        <div class="sidebar-header">
-          <a class="sidebar-brand" href="./" aria-label="Accueil Cloud Panel">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--accent)" stroke-width="2" aria-hidden="true"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg>
-            <span>Cloud Panel</span>
+    <main id="content" class="shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <a class="brand-mark" href="./" aria-label="Accueil Cloud Panel">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <polygon points="18,14 41,14 50,30 27,30" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/>
+              <polygon points="14,34 37,34 46,50 23,50" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+              <polygon points="27,30 41,30 37,34 23,34" fill="var(--accent)" opacity="0.15"/>
+            </svg>
           </a>
-        </div>
-
-        <nav class="sidebar-nav" aria-label="Dossiers">
-          <button class="sidebar-link" data-nav="root" title="Racine">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>
-            Racine
-          </button>
-          <button class="sidebar-link" data-nav="parent" title="Dossier parent">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 12h16M13 5l7 7-7 7"/></svg>
-            Dossier parent
-          </button>
-          <button class="sidebar-link" data-nav="history" title="Historique">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.5V12l3 3"/></svg>
-            Historique
-          </button>
-          <button class="sidebar-link" data-nav="links" title="Liens de partage">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>
-            Liens
-          </button>
-          <button class="sidebar-link" data-nav="stats" title="Statistiques">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20h16M6 16l4-6 4 4 4-8"/></svg>
-            Statistiques
-          </button>
-        </nav>
-
-        <div class="sidebar-section">
-          <div class="sidebar-section-title">Favoris</div>
-          <div id="favoritesList" class="favorites-list">
-            <p class="sidebar-empty">Aucun favori</p>
+          <div class="brand-copy">
+            <p class="eyebrow">Stockage cloud</p>
+            <h1>Cloud Panel</h1>
           </div>
         </div>
-
-        <div class="sidebar-footer">
-          <div id="sidebarDisk" class="sidebar-disk" hidden>
+        <nav class="nav nav-cloud" aria-label="Navigation cloud">
+          <button class="nav-btn" data-nav="root" title="Racine" data-od-id="nav-root">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg></span>
+            <span class="nav-label">Racine</span>
+          </button>
+          <button class="nav-btn" data-nav="parent" title="Dossier parent" data-od-id="nav-parent">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M13 5l7 7-7 7"/></svg></span>
+            <span class="nav-label">Dossier parent</span>
+          </button>
+          <button class="nav-btn" data-nav="history" title="Historique" data-od-id="nav-history">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.5V12l3 3"/></svg></span>
+            <span class="nav-label">Historique</span>
+          </button>
+          <button class="nav-btn" data-nav="links" title="Liens de partage" data-od-id="nav-links">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg></span>
+            <span class="nav-label">Liens</span>
+          </button>
+          <button class="nav-btn" data-nav="stats" title="Statistiques" data-od-id="nav-stats">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M6 16l4-6 4 4 4-8"/></svg></span>
+            <span class="nav-label">Statistiques</span>
+          </button>
+        </nav>
+        <div class="topbar-actions sidebar-footer" data-od-id="cloud-sidebar-footer">
+          <div class="sidebar-section" data-od-id="cloud-favorites">
+            <div class="sidebar-section-title">Favoris</div>
+            <div id="favoritesList" class="favorites-list">
+              <p class="sidebar-empty">Aucun favori</p>
+            </div>
+          </div>
+          <div class="sidebar-disk-box" id="sidebarDisk" hidden>
             <div class="sidebar-disk-label">Espace disque</div>
             <div class="sidebar-disk-bar"><div class="sidebar-disk-fill" id="sidebarDiskFill"></div></div>
             <div class="sidebar-disk-text" id="sidebarDiskText">-- / --</div>
           </div>
           <div class="sidebar-path" id="sidebarPath">/mnt/ultra-media/</div>
         </div>
-      </aside>
+      </header>
 
-      <main class="main-content" id="content">
+      <div class="content-panel cloud-content" id="cloudContent" data-od-id="cloud-content">
 
         <div class="view-files" id="filesView">
           <header class="toolbar">
@@ -144,8 +147,8 @@
           <div class="page-head"><h2>Statistiques</h2></div>
           <div class="stats-grid" id="statsGrid"></div>
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
 
     <dialog id="shareDialog" class="dialog">
       <form method="dialog" id="shareForm">

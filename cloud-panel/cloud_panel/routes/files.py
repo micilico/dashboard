@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response
+import tempfile
+import zipfile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form, Response
 from fastapi.responses import FileResponse
 
 from ..config import MOUNT_PATH
+from ..security import resolve_path_within
 from ..storage import (
     list_directory,
     upload_file_streaming,
@@ -106,6 +109,37 @@ async def delete(
         return result
     except ValueError as e:
         raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+
+
+@router.post("/files/download-zip")
+async def download_zip(
+    request: Request,
+    tasks: BackgroundTasks,
+    _=Depends(require_action_guard),
+    paths: str = Form(...),
+):
+    """Download multiple files as a ZIP archive."""
+    try:
+        file_list = [p.strip() for p in paths.split("\n") if p.strip()]
+        if not file_list:
+            raise HTTPException(status_code=400, detail={"code": "no_files", "message": "Aucun fichier selectionne.", "recovery": "Selectionner des fichiers"})
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+            for rel_path in file_list:
+                abs_path = resolve_path_within(MOUNT_PATH, rel_path, must_exist=True)
+                if os.path.isfile(abs_path):
+                    zf.write(abs_path, os.path.basename(abs_path))
+        tmp.close()
+        tmp_path = tmp.name
+        tasks.add_task(os.unlink, tmp_path)
+
+        return FileResponse(tmp_path, filename="cloud-panel-bulk.zip", media_type="application/zip",
+                            headers={"Content-Disposition": "attachment; filename=cloud-panel-bulk.zip"})
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"code": "zip_error", "message": str(e), "recovery": "Reessayer"})
 
 
 @router.post("/files/refresh")

@@ -141,12 +141,36 @@ def get_share_download_path(token: str) -> tuple[str, str]:
     return file_path, link["filename"]
 
 
+def generate_qr_data_url(token: str, base_url: str) -> str:
+    """Generate a QR code PNG data URL for a share link."""
+    try:
+        import qrcode
+        from io import BytesIO
+        import base64
+        qr = qrcode.make(f"{base_url}/api/download/{token}", border=1)
+        buf = BytesIO()
+        qr.save(buf, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return ""
+
+
 def cleanup_expired_zips() -> int:
     count = 0
     if not TEMP_ZIP_DIR.exists():
         return 0
+    from ..models import get_share_links
+    active_tokens = {
+        l["token"]
+        for l in get_share_links(limit=10000)
+        if l.get("is_zip") and not l.get("is_revoked")
+        and (l.get("expires_at") is None or l["expires_at"] > time.time())
+    }
     for f in TEMP_ZIP_DIR.iterdir():
-        if f.suffix == ".zip" and f.stat().st_mtime < time.time() - 86400:
+        if f.suffix != ".zip":
+            continue
+        token = f.stem
+        if token not in active_tokens:
             f.unlink(missing_ok=True)
             count += 1
     return count

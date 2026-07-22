@@ -9,18 +9,22 @@ from typing import Any
 
 from .config import DB_PATH
 
-_local = threading.local()
+_conn: sqlite3.Connection | None = None
+_conn_lock = threading.Lock()
 
 
 def _get_conn() -> sqlite3.Connection:
-    if not hasattr(_local, "conn") or _local.conn is None:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _local.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-        _local.conn.row_factory = sqlite3.Row
-        _local.conn.execute("PRAGMA journal_mode=WAL")
-        _local.conn.execute("PRAGMA foreign_keys=ON")
-        _init_db(_local.conn)
-    return _local.conn
+    global _conn
+    if _conn is None:
+        with _conn_lock:
+            if _conn is None:
+                DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+                _conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+                _conn.row_factory = sqlite3.Row
+                _conn.execute("PRAGMA journal_mode=WAL")
+                _conn.execute("PRAGMA foreign_keys=ON")
+                _init_db(_conn)
+    return _conn
 
 
 def _init_db(conn: sqlite3.Connection) -> None:
@@ -70,13 +74,14 @@ def _init_db(conn: sqlite3.Connection) -> None:
 @contextmanager
 def get_db():
     conn = _get_conn()
-    try:
-        yield conn
-    except Exception:
-        conn.rollback()
-        raise
-    else:
-        conn.commit()
+    with _conn_lock:
+        try:
+            yield conn
+        except Exception:
+            conn.rollback()
+            raise
+        else:
+            conn.commit()
 
 
 # ── Favorites ──

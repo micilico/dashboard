@@ -155,6 +155,7 @@ def create_directory(relative_path: str, dirname: str) -> dict:
     if not os.path.isdir(parent_dir):
         raise ValueError('Dossier parent introuvable')
 
+    dirname = sanitize_filename(dirname)
     new_dir = os.path.join(parent_dir, dirname)
     if os.path.exists(new_dir):
         raise ValueError('Ce dossier existe deja')
@@ -173,6 +174,7 @@ def rename_item(relative_path: str, old_name: str, new_name: str) -> dict:
     """Rename a file or directory."""
     parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
     old_path = os.path.join(parent_dir, old_name)
+    new_name = sanitize_filename(new_name)
     new_path = os.path.join(parent_dir, new_name)
 
     if not os.path.exists(old_path):
