@@ -65,7 +65,8 @@ function apiUrl(path) {
 async function api(path, options = {}, retryCsrf = true) {
   const headers = new Headers(options.headers || {});
   headers.set("Accept", "application/json");
-  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const isFormData = options.body instanceof FormData;
+  if (options.body && !isFormData && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if ((options.method || "GET").toUpperCase() !== "GET") headers.set("X-Cloud-Panel-CSRF", state.csrfToken);
 
   const response = await fetchWithRetry(path, { ...options, headers, credentials: "same-origin" });
