@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import time
 from pathlib import Path
+
+from fastapi import UploadFile
 
 from .config import MOUNT_PATH, SCANDIR_CACHE_TTL, UPLOAD_CHUNK_SIZE
 from .security import resolve_path_within
@@ -82,12 +85,26 @@ def list_directory(relative_path: str = '') -> dict:
     }
 
 
+_INVALID_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
+
+
+def sanitize_filename(filename: str) -> str:
+    """Remove path separators and dangerous characters from filename."""
+    name = _INVALID_FILENAME_RE.sub('_', filename)
+    if not name or name in ('.', '..'):
+        raise ValueError('Nom de fichier invalide')
+    return name
+
+
 async def upload_file_streaming(
     relative_path: str,
-    filename: str,
-    stream,
+    file: UploadFile,
 ) -> dict:
     """Upload file with streaming chunk-by-chunk, write to .tmp then atomic rename."""
+    if not file.filename:
+        raise ValueError('Nom de fichier requis')
+
+    filename = sanitize_filename(file.filename)
     target_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
     if not os.path.isdir(target_dir):
         raise ValueError('Dossier destination introuvable')
@@ -98,7 +115,7 @@ async def upload_file_streaming(
     try:
         total_size = 0
         with open(tmp_path, 'wb') as f:
-            async for chunk in stream:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
                 f.write(chunk)
                 total_size += len(chunk)
 

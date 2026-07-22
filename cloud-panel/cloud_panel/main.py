@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -14,19 +14,13 @@ if str(_sys_path_root) not in sys.path:
 
 from common import build_csp, RateLimiter
 from common.monitoring import init_sentry
-from common.csrf import cleanup_csrf_tokens as _common_cleanup
-from common.csrf import csrf_cookie_matches, csrf_token_is_valid
 
 from .config import (
     PUBLIC_PREFIX,
-    CSRF_COOKIE,
-    CSRF_TOKEN_TTL_SECONDS,
-    MAX_CSRF_TOKENS,
     MAX_RATE_KEYS,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_SECONDS,
     STATIC_DIR,
-    TRUSTED_PROXY_IPS,
 )
 from .routes.files import router as files_router
 
@@ -64,35 +58,6 @@ async def add_security_headers(request: Request, call_next):
     if "/api/" in request.url.path:
         response.headers["Cache-Control"] = "no-store"
     return response
-
-
-def cleanup_csrf_tokens(app_instance, now=None):
-    return _common_cleanup(app_instance, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS, now)
-
-
-def client_key(request: Request) -> str:
-    from common.csrf import client_key as _ck
-    return _ck(request, TRUSTED_PROXY_IPS)
-
-
-def require_action_guard(request: Request, x_cloud_panel_csrf: str | None = None):
-    from fastapi import Header
-    if x_cloud_panel_csrf is None:
-        x_cloud_panel_csrf = request.headers.get("X-Cloud-Panel-CSRF")
-    if (
-        not x_cloud_panel_csrf
-        or not csrf_cookie_matches(request, x_cloud_panel_csrf, CSRF_COOKIE)
-        or not csrf_token_is_valid(request.app, x_cloud_panel_csrf, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS)
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "csrf_expired", "message": "Session de protection expiree.", "recovery": "Actualiser la session"},
-        )
-    if not request.app.state.action_limiter.allow(client_key(request)):
-        raise HTTPException(
-            status_code=429,
-            detail={"code": "rate_limited", "message": "Trop d'actions en peu de temps.", "recovery": "Reessayer"},
-        )
 
 
 @app.get("/")
