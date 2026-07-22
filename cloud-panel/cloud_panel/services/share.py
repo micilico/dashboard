@@ -118,7 +118,7 @@ def create_zip_share_link(
     return result
 
 
-def get_share_download_path(token: str) -> tuple[str, str]:
+def get_share_download_path(token: str, increment: bool = True) -> tuple[str, str]:
     link = get_share_link(token)
     if not link:
         raise ValueError("Lien introuvable")
@@ -127,7 +127,8 @@ def get_share_download_path(token: str) -> tuple[str, str]:
     if link["expires_at"] and link["expires_at"] < time.time():
         raise ValueError("Ce lien a expire")
 
-    increment_download_count(token)
+    if increment:
+        increment_download_count(token)
 
     if link["is_zip"]:
         zip_path = TEMP_ZIP_DIR / f"{token}.zip"
