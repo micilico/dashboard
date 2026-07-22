@@ -69,7 +69,11 @@ async function api(path, opts = {}, retry = true) {
   throw e;
 }
 async function refreshSession() {
-  try { const r = await api(au("/session"), { cache: "no-store" }, false); S.csrf = r.csrfToken; } catch {}
+  for (let i = 0; i < 3; i++) {
+    try { const r = await api(au("/session"), { cache: "no-store" }, false); S.csrf = r.csrfToken; if (S.csrf) return; } catch {}
+    await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+  }
+  toast("Erreur: impossible d'initialiser la session. Rechargez la page.");
 }
 
 // ── Toast ──
@@ -133,19 +137,28 @@ function getSortedFiltered() {
 }
 
 // ── Render ──
+function changePage(delta) {
+  const all = getSortedFiltered();
+  const totalPages = Math.max(1, Math.ceil(all.length / S.pageSize));
+  S.page = Math.max(1, Math.min(totalPages, S.page + delta));
+  renderFiles();
+}
+
 function renderFiles() {
   const all = getSortedFiltered();
-  const totalPages = Math.ceil(all.length / S.pageSize);
+  const totalPages = Math.max(1, Math.ceil(all.length / S.pageSize));
+  S.page = Math.min(S.page, totalPages);
   const start = (S.page - 1) * S.pageSize;
   const items = all.slice(0, start + S.pageSize);
   const body = $("fileBody");
   const empty = $("emptyState");
   const sentinel = $("scrollSentinel");
+  const pagBar = $("paginationBar");
 
   if (items.length === 0) {
     body.replaceChildren(); empty.hidden = false;
     qs("p", empty).textContent = S.search ? "Aucun resultat." : "Ce dossier est vide.";
-    sentinel.classList.remove("loading"); return;
+    sentinel.classList.remove("loading"); pagBar.hidden = true; return;
   }
   empty.hidden = true;
 
@@ -208,6 +221,17 @@ function renderFiles() {
 
   renderBreadcrumb();
   renderBulkBar();
+
+  // Pagination
+  const pagBar = $("paginationBar");
+  if (all.length > S.pageSize) {
+    pagBar.hidden = false;
+    $("pageInfo").textContent = `Page ${S.page} / ${totalPages} · ${all.length} element(s)`;
+    $("prevPageBtn").disabled = S.page <= 1;
+    $("nextPageBtn").disabled = S.page >= totalPages;
+  } else {
+    pagBar.hidden = true;
+  }
 }
 
 function renderBreadcrumb() {
@@ -393,8 +417,12 @@ function scrollToRow() {
   if (row) row.scrollIntoView({ block: "nearest" });
 }
 
-// Form submit prevention
-qsa("dialog form[method=dialog]").forEach(f => f.addEventListener("submit", e => e.preventDefault()));
+// ── Dialog form handling ──
+// Use form submit for Enter key support on action forms
+$("mkdirForm").addEventListener("submit", (e) => { e.preventDefault(); $("confirmMkdirBtn").click(); });
+$("renameForm").addEventListener("submit", (e) => { e.preventDefault(); $("confirmRenameBtn").click(); });
+$("deleteForm").addEventListener("submit", (e) => { e.preventDefault(); $("confirmDeleteBtn").click(); });
+$("shareForm").addEventListener("submit", (e) => { e.preventDefault(); $("confirmShareBtn").click(); });
 
 // ── Confirm buttons ──
 $("confirmMkdirBtn").addEventListener("click", async () => {
@@ -451,7 +479,13 @@ async function uploadOne(file) {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", au("/files/upload")); xhr.setRequestHeader("X-Cloud-Panel-CSRF", S.csrf);
     xhr.upload.addEventListener("progress", e => { if (e.lengthComputable && fill && st) { const p = Math.round(e.loaded / e.total * 100); fill.style.width = p + "%"; st.textContent = p + "%"; } });
-    await new Promise((res, rej) => { xhr.onload = () => xhr.status < 300 ? res() : rej(new Error("Upload echoue")); xhr.onerror = () => rej(new Error("Erreur")); xhr.send(fd); });
+    xhr.timeout = 300000;
+    await new Promise((res, rej) => {
+      xhr.onload = () => xhr.status < 300 ? res() : rej(new Error("Upload echoue (HTTP " + xhr.status + ")"));
+      xhr.onerror = () => rej(new Error("Erreur reseau"));
+      xhr.ontimeout = () => rej(new Error("Timeout: fichier trop volumineux ou connexion lente"));
+      xhr.send(fd);
+    });
   } catch (e) { if (st) st.textContent = "Erreur"; showError(e); }
 }
 
@@ -472,6 +506,10 @@ function renderSortHeaders() {
     th.classList.toggle("desc", th.dataset.sort === S.sortKey && S.sortDir === "desc");
   });
 }
+
+// ── Pagination ──
+$("prevPageBtn").addEventListener("click", () => changePage(-1));
+$("nextPageBtn").addEventListener("click", () => changePage(1));
 
 // ── Search ──
 $("searchInput").addEventListener("input", () => { S.search = $("searchInput").value.trim(); S.page = 1; renderFiles(); });

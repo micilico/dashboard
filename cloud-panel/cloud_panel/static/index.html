@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cloud Panel</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260722">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260722-b">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -123,6 +123,11 @@
           <div id="scrollSentinel" class="scroll-sentinel" aria-hidden="true">
             <div class="scroll-loader"><span></span></div>
           </div>
+          <div id="paginationBar" class="pagination-bar" hidden>
+            <button id="prevPageBtn" class="button secondary" type="button">← Precedent</button>
+            <span id="pageInfo">Page 1 / 1</span>
+            <button id="nextPageBtn" class="button secondary" type="button">Suivant →</button>
+          </div>
         </div>
 
         <div class="view-page" id="historyView" hidden>
@@ -163,7 +168,7 @@
           <div id="shareQR" class="qr-wrap" hidden><canvas id="qrCanvas"></canvas></div>
         </div>
         <div class="dialog-actions">
-          <button id="cancelShareBtn" value="cancel" class="button secondary" type="button">Fermer</button>
+          <button id="cancelShareBtn" class="button secondary" type="button">Fermer</button>
           <button id="confirmShareBtn" class="button primary" type="button">Generer le lien</button>
         </div>
       </form>
@@ -179,7 +184,7 @@
         </div>
         <div id="uploadProgress" class="upload-progress" hidden></div>
         <p id="uploadMessage" class="field-message"></p>
-        <div class="dialog-actions"><button id="cancelUploadBtn" value="cancel" class="button secondary" type="button">Fermer</button></div>
+        <div class="dialog-actions"><button id="cancelUploadBtn" class="button secondary" type="button">Fermer</button></div>
       </form>
     </dialog>
 
@@ -187,7 +192,7 @@
       <form method="dialog" id="mkdirForm"><h2>Nouveau dossier</h2>
         <label>Nom <input id="mkdirNameInput" type="text" autocomplete="off" required placeholder="Mon dossier"></label>
         <p id="mkdirMessage" class="field-message"></p>
-        <div class="dialog-actions"><button id="cancelMkdirBtn" class="button secondary" type="button">Annuler</button><button id="confirmMkdirBtn" class="button primary" type="button">Creer</button></div>
+          <div class="dialog-actions"><button id="cancelMkdirBtn" class="button secondary" type="button">Annuler</button><button id="confirmMkdirBtn" class="button primary" type="submit">Creer</button></div>
       </form>
     </dialog>
 
@@ -195,7 +200,7 @@
       <form method="dialog" id="renameForm"><h2>Renommer</h2>
         <label>Nouveau nom <input id="renameInput" type="text" autocomplete="off" required></label>
         <p id="renameMessage" class="field-message"></p>
-        <div class="dialog-actions"><button id="cancelRenameBtn" class="button secondary" type="button">Annuler</button><button id="confirmRenameBtn" class="button primary" type="button">Renommer</button></div>
+        <div class="dialog-actions"><button id="cancelRenameBtn" class="button secondary" type="button">Annuler</button><button id="confirmRenameBtn" class="button primary" type="submit">Renommer</button></div>
       </form>
     </dialog>
 
@@ -203,7 +208,7 @@
       <form method="dialog" id="deleteForm"><h2>Supprimer</h2>
         <p id="deleteName" class="dialog-name"></p>
         <p style="color:var(--danger)">Action irreversible.</p>
-        <div class="dialog-actions"><button id="cancelDeleteBtn" class="button secondary" type="button">Annuler</button><button id="confirmDeleteBtn" class="button danger" type="button">Supprimer</button></div>
+        <div class="dialog-actions"><button id="cancelDeleteBtn" class="button secondary" type="button">Annuler</button><button id="confirmDeleteBtn" class="button danger" type="submit">Supprimer</button></div>
       </form>
     </dialog>
 
@@ -217,7 +222,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-    <script src="./config.js"></script>
-    <script src="./static/dist/app.min.js" defer></script>
+    <script src="./config.js?v=20260722-b"></script>
+    <script src="./static/dist/app.min.js?v=20260722-b" defer></script>
   </body>
 </html>
