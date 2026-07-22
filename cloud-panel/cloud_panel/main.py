@@ -23,6 +23,8 @@ from .config import (
     STATIC_DIR,
 )
 from .routes.files import router as files_router
+from .routes.favorites import router as favorites_router
+from .routes.share import router as share_router
 
 from logging import basicConfig, getLogger
 
@@ -118,5 +120,9 @@ if PUBLIC_PREFIX:
 
 
 app.include_router(files_router, prefix="/api")
+app.include_router(favorites_router, prefix="/api")
+app.include_router(share_router, prefix="/api")
 if PUBLIC_PREFIX:
     app.include_router(files_router, prefix=f"{PUBLIC_PREFIX}/api")
+    app.include_router(favorites_router, prefix=f"{PUBLIC_PREFIX}/api")
+    app.include_router(share_router, prefix=f"{PUBLIC_PREFIX}/api")

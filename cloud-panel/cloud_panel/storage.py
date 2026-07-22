@@ -122,6 +122,12 @@ async def upload_file_streaming(
         os.rename(tmp_path, final_path)
         clear_scandir_cache()
 
+        try:
+            from .models import add_history_entry
+            add_history_entry(filename, total_size, os.path.relpath(final_path, MOUNT_PATH), action="upload")
+        except Exception:
+            pass
+
         return {
             'success': True,
             'filename': filename,
