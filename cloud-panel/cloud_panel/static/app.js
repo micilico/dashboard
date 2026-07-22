@@ -408,6 +408,11 @@ function openMkdirDialog() {
   els.mkdirDialog.showModal();
 }
 
+els.mkdirDialog.querySelector("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  els.confirmMkdirButton.click();
+});
+
 els.confirmMkdirButton.addEventListener("click", async () => {
   const name = els.mkdirNameInput.value.trim();
   if (!name) {
@@ -441,6 +446,11 @@ function openRenameDialog(file) {
   els.renameDialog.showModal();
 }
 
+els.renameDialog.querySelector("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  els.confirmRenameButton.click();
+});
+
 els.confirmRenameButton.addEventListener("click", async () => {
   const newName = els.renameInput.value.trim();
   if (!newName || !state.renameTarget) return;
@@ -470,6 +480,11 @@ function openDeleteDialog(file) {
   els.deleteName.textContent = file.name;
   els.deleteDialog.showModal();
 }
+
+els.deleteDialog.querySelector("form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  els.confirmDeleteButton.click();
+});
 
 els.confirmDeleteButton.addEventListener("click", async () => {
   if (!state.deleteTarget) return;
