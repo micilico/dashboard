@@ -325,13 +325,14 @@ $("confirmShareBtn").addEventListener("click", async () => {
     let ep = "/share/file";
     if (f.is_dir && mode === "zip") ep = "/share/zip";
     else if (f.is_dir && mode === "folder") ep = "/share/folder";
+    msg.textContent = "Generation en cours...";
     const r = await api(au(ep), { method: "POST", body: fd });
     const shareUrl = `${window.location.origin}${PP}/api/download/${r.token}`;
     qs("#shareUrl", $("shareDialog")).value = shareUrl;
     qs("#shareResult", $("shareDialog")).hidden = false;
     msg.textContent = "Lien genere avec succes.";
     generateQR(shareUrl);
-  } catch (e) { msg.textContent = e.message; }
+  } catch (e) { msg.textContent = "Erreur: " + e.message; console.error("Share failed", e); }
 });
 $("copyLinkBtn").addEventListener("click", () => {
   const inp = qs("#shareUrl", $("shareDialog")); inp.select(); navigator.clipboard?.writeText(inp.value);
@@ -530,9 +531,9 @@ $("bulkDelete").addEventListener("click", async () => {
 $("bulkShare").addEventListener("click", async () => {
   if (!S.selected.size) return;
   const it = [...S.selected]; const ps = $("progressOverlay"); ps.hidden = false; qs("#progressTitle", ps).textContent = "Generation de liens...";
-  let results = []; let errors = 0;
+  let results = []; let errors = 0; let lastErr = "";
   for (const p of it) {
-    try { const r = await api(au("/share/file"), { method: "POST", body: new URLSearchParams({ path: p, expiry_days: "7", password: "" }) }); results.push(r); } catch (e) { errors++; }
+    try { const r = await api(au("/share/file"), { method: "POST", body: new URLSearchParams({ path: p, expiry_days: "7", password: "" }) }); results.push(r); } catch (e) { errors++; lastErr = e.message; console.error("Share failed for", p, e); }
     qs("#progressBarFill", ps).style.width = `${(results.length + errors) / it.length * 100}%`;
     qs("#progressStatus", ps).textContent = `${results.length} OK, ${errors} erreur(s)`;
   }
@@ -541,7 +542,8 @@ $("bulkShare").addEventListener("click", async () => {
     const msg = results.map(r => `${window.location.origin}${PP}/api/download/${r.token}`).join("\n");
     navigator.clipboard?.writeText(msg);
   }
-  toast(`${results.length} lien(s) genere(s)${errors ? `, ${errors} erreur(s)` : ""}${results.length ? " et copie(s)" : ""}.`);
+  const detail = errors && lastErr ? ` — Derniere erreur: ${lastErr}` : "";
+  toast(`${results.length} lien(s) genere(s)${errors ? `, ${errors} erreur(s)${detail}` : ""}${results.length ? " et copie(s)" : ""}.`);
 });
 $("bulkDownload").addEventListener("click", () => {
   const it = [...S.selected]; if (!it.length) return;
