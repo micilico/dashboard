@@ -85,6 +85,7 @@ services:
       CLOUD_PANEL_MOUNT_PATH: /mnt/ultra-media
     volumes:
       - /mnt/ultra-media:/mnt/ultra-media:rw
+      - cloud-panel-data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3130/healthz', timeout=4)"]
       interval: 30s
@@ -94,3 +95,4 @@ services:
 
 volumes:
   torrent-panel-data:
+  cloud-panel-data:
