@@ -69,5 +69,28 @@ services:
       retries: 5
       start_period: 20s
 
+  cloud-panel:
+    build:
+      context: .
+      dockerfile: ./cloud-panel/Dockerfile
+    container_name: cloud-panel
+    restart: unless-stopped
+    network_mode: "host"
+    env_file:
+      - path: ./cloud-panel/.env
+        required: false
+    environment:
+      CLOUD_PANEL_HOST: 127.0.0.1
+      CLOUD_PANEL_PORT: ${CLOUD_PANEL_PORT:-3130}
+      CLOUD_PANEL_MOUNT_PATH: /mnt/ultra-media
+    volumes:
+      - /mnt/ultra-media:/mnt/ultra-media:rw
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3130/healthz', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   torrent-panel-data:

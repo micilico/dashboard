@@ -18,6 +18,11 @@
           url: http://host.docker.internal:16124/prowlarr
           key: "{{HOMEPAGE_VAR_PROWLARR_API_KEY}}"
 
+    - Cloud Panel:
+        description: Gestionnaire de fichiers pour le montage rclone
+        href: /cloud-panel/
+        icon: cloud-upload-outline
+
     - Jellyfin:
         description: Instance locale du 2e VPS
         widget:

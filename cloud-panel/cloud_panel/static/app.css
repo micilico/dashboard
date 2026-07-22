@@ -1,0 +1,317 @@
+/* Cloud Panel – specific styles */
+
+.cloud-panel {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--space-24) var(--space-16);
+}
+
+.cloud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-16);
+  margin-bottom: var(--space-24);
+  flex-wrap: wrap;
+}
+
+.cloud-header-copy h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: var(--tracking-heading);
+  margin: 0;
+}
+
+.cloud-header-copy .breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.cloud-header-copy .breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.cloud-header-copy .breadcrumb a:hover {
+  color: var(--accent-strong);
+}
+
+.cloud-header-copy .breadcrumb .separator {
+  color: var(--text-subtle);
+  margin: 0 var(--space-4);
+}
+
+.cloud-header-copy .breadcrumb .current {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.cloud-header-actions {
+  display: flex;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.disk-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  margin-bottom: var(--space-16);
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.disk-strip .disk-bar {
+  flex: 1;
+  min-width: 120px;
+  height: 8px;
+  background: var(--surface-3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.disk-strip .disk-bar .disk-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width var(--motion-base) var(--ease-standard);
+}
+
+.disk-strip .disk-bar .disk-fill.ok { background: var(--success); }
+.disk-strip .disk-bar .disk-fill.warn { background: var(--warning); }
+.disk-strip .disk-bar .disk-fill.critical { background: var(--danger); }
+
+.disk-strip .disk-text {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.file-list {
+  display: grid;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-16);
+  background: var(--surface);
+  transition: background var(--motion-fast) var(--ease-standard);
+  cursor: default;
+  min-height: 48px;
+}
+
+.file-item:hover {
+  background: var(--surface-2);
+}
+
+.file-item .file-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-item .file-info .file-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--muted);
+}
+
+.file-item .file-info .file-icon.folder {
+  color: var(--accent);
+}
+
+.file-item .file-info .file-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-item .file-info .file-name.dir {
+  cursor: pointer;
+  color: var(--accent);
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.file-item .file-info .file-name.dir:hover {
+  color: var(--accent-strong);
+}
+
+.file-item .file-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.file-item .file-actions {
+  display: flex;
+  gap: var(--space-4);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.file-item:hover .file-actions {
+  opacity: 1;
+}
+
+.file-item .file-actions .icon-action {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+  padding: 0;
+}
+
+.file-item .file-actions .icon-action:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.file-item .file-actions .icon-action.danger:hover {
+  color: var(--danger);
+}
+
+@media (max-width: 768px) {
+  .cloud-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .file-item {
+    grid-template-columns: 1fr auto;
+  }
+
+  .file-item .file-meta {
+    display: none;
+  }
+
+  .file-item .file-actions {
+    opacity: 1;
+  }
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-48) var(--space-16);
+  text-align: center;
+  color: var(--muted);
+  gap: var(--space-12);
+}
+
+.empty-state .empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--text-subtle);
+  opacity: 0.5;
+}
+
+/* Override pour le dialog upload */
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-control);
+  padding: var(--space-24);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+
+.upload-zone:hover,
+.upload-zone.dragover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.upload-zone .upload-hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: var(--space-8);
+}
+
+/* Progression upload */
+.upload-progress {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-12) 0;
+}
+
+.upload-progress .progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: 0.85rem;
+}
+
+.upload-progress .progress-row .progress-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress .progress-track {
+  flex: 0 0 120px;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.upload-progress .progress-track .progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width var(--motion-base) var(--ease-standard);
+}
+
+/* File error row */
+.file-item .row-error {
+  font-size: 0.8rem;
+  color: var(--danger);
+  grid-column: 1 / -1;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  font-size: 0.85rem;
+  color: var(--muted);
+}

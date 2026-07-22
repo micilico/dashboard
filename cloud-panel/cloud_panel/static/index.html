@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cloud Panel · Gestionnaire de fichiers</title>
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260722">
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Aller au contenu</a>
+
+    <div class="cloud-panel" id="content" role="main">
+      <header class="cloud-header">
+        <div class="cloud-header-copy">
+          <p class="eyebrow">Gestionnaire de fichiers</p>
+          <h1>Cloud Panel</h1>
+          <nav class="breadcrumb" id="breadcrumb" aria-label="Chemin du dossier">
+            <a href="#" data-path="">Cloud Panel</a>
+          </nav>
+        </div>
+        <div class="cloud-header-actions">
+          <button id="uploadButton" type="button" class="button primary" title="Uploader des fichiers">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:middle;margin-right:6px"><path d="M12 20V10m0 0 3.5 3.5M12 10l-3.5 3.5M5 5.75h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Upload
+          </button>
+          <button id="mkdirButton" type="button" class="button secondary" title="Nouveau dossier">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:middle;margin-right:6px"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Nouveau dossier
+          </button>
+          <button id="refreshButton" type="button" class="button secondary" title="Rafraîchir">
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="vertical-align:middle;margin-right:6px"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Rafraîchir
+          </button>
+        </div>
+      </header>
+
+      <div id="diskStrip" class="disk-strip" aria-label="Espace disque" hidden>
+        <span class="disk-text" id="diskUsed">--</span>
+        <div class="disk-bar">
+          <div class="disk-fill" id="diskFill" style="width:0%"></div>
+        </div>
+        <span class="disk-text" id="diskTotal">--</span>
+      </div>
+
+      <div id="alert" class="alert" role="alert" hidden>
+        <span id="alertText"></span>
+        <button id="retryButton" type="button" class="button secondary">Réessayer</button>
+      </div>
+
+      <div id="fileList" class="file-list" aria-label="Liste des fichiers">
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg>
+          </div>
+          <p>Chargement du contenu...</p>
+        </div>
+      </div>
+
+      <div id="pagination" class="pagination" hidden>
+        <span id="pageInfo">Page 1 / 1</span>
+      </div>
+    </div>
+
+    <dialog id="uploadDialog" class="dialog">
+      <form method="dialog" id="uploadForm">
+        <h2>Upload de fichiers</h2>
+        <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="Cliquer ou glisser-déposer des fichiers">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 20V10m0 0 3.5 3.5M12 10l-3.5 3.5M5 5.75h14"/></svg>
+          <p>Déposer des fichiers ici ou cliquer pour sélectionner</p>
+          <p class="upload-hint">Aucune limite de taille — streaming direct</p>
+          <input id="fileInput" type="file" multiple hidden>
+        </div>
+        <div id="uploadProgress" class="upload-progress" hidden></div>
+        <p id="uploadMessage" class="field-message" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelUploadButton" value="cancel" class="button secondary" type="button">Fermer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="mkdirDialog" class="dialog">
+      <form method="dialog" id="mkdirForm">
+        <h2>Nouveau dossier</h2>
+        <label>
+          Nom du dossier
+          <input id="mkdirNameInput" type="text" autocomplete="off" required placeholder="Mon dossier">
+        </label>
+        <p id="mkdirMessage" class="field-message" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelMkdirButton" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="confirmMkdirButton" value="confirm" class="button primary" type="button">Créer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="renameDialog" class="dialog">
+      <form method="dialog" id="renameForm">
+        <h2>Renommer</h2>
+        <label>
+          Nouveau nom
+          <input id="renameInput" type="text" autocomplete="off" required>
+        </label>
+        <p id="renameMessage" class="field-message" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelRenameButton" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="confirmRenameButton" value="confirm" class="button primary" type="button">Renommer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="deleteDialog" class="dialog">
+      <form method="dialog" id="deleteForm">
+        <h2>Confirmer la suppression</h2>
+        <p id="deleteName" class="dialog-name"></p>
+        <p class="field-message" style="color:var(--danger)">Cette action est irreversible.</p>
+        <div class="dialog-actions">
+          <button id="cancelDeleteButton" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="confirmDeleteButton" value="confirm" class="button danger" type="button">Supprimer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="./config.js?v=20260722"></script>
+    <script src="./static/dist/app.min.js?v=20260722" defer></script>
+  </body>
+</html>
