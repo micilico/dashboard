@@ -21,43 +21,31 @@ from .csrf_guard import require_action_guard
 router = APIRouter()
 
 _BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud Panel</title><style>
-:root{{--bg:#060708;--surface:rgba(255,255,255,0.045);--border:rgba(255,255,255,0.08);--text:#f5f5f7;--text2:rgba(245,245,247,0.55);--text3:rgba(245,245,247,0.42);--accent:#2997ff;--accent-bright:#4ab0ff;--accent-dim:rgba(41,151,255,0.14);--accent-glow:rgba(41,151,255,0.35);--green:#32d74b;--error:#ff453a;--amber:#ffd60a;--purple:#af52de;--radius-xl:20px;--radius-sm:10px;}}
+:root{{--bg:#07080b;--surface:#101217;--surface-2:#151821;--border:rgba(255,255,255,0.09);--text:#f5f5f7;--muted:#a7abb5;--text-subtle:#7E8491;--accent:#0071e3;--accent-hover:#0077ed;--accent-soft:rgba(0,113,227,0.12);--success:#5ee6a8;--danger:#ff6b72;--radius-card:18px;--radius-control:12px;--ease-standard:cubic-bezier(0.28,0,0.22,1);--font-body:'Inter Variable','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--font-display:'Inter Tight','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}
 *{{margin:0;padding:0;box-sizing:border-box;}}
-body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;overflow-x:hidden;-webkit-font-smoothing:antialiased;}}
-.orbs{{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}}
-.orb{{position:absolute;border-radius:50%;filter:blur(110px);opacity:.5;animation:drift 18s ease-in-out infinite alternate;}}
-.orb.a{{width:520px;height:520px;background:#2997ff;top:-10%;left:-8%;animation-duration:22s;}}
-.orb.b{{width:440px;height:440px;background:#af52de;bottom:-12%;right:-6%;animation-duration:26s;animation-delay:-6s;}}
-@keyframes drift{{0%{{transform:translate(0,0) scale(1);}}100%{{transform:translate(60px,40px) scale(1.12);}}}}
-.wrap{{position:relative;z-index:1;width:100%;max-width:580px;}}
-.card{{background:var(--surface);backdrop-filter:blur(40px)saturate(180%);-webkit-backdrop-filter:blur(40px)saturate(180%);border:1px solid var(--border);border-radius:var(--radius-xl);padding:48px 40px 36px;text-align:center;animation:cardIn .5s cubic-bezier(.28,0,.22,1) both;box-shadow:0 20px 60px rgba(0,0,0,.55);}}
-@keyframes cardIn{{0%{{opacity:0;transform:translateY(20px)scale(.97);}}100%{{opacity:1;transform:translateY(0)scale(1);}}}}
-.logo{{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,#1a5aba,#0d3f8a);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;flex-shrink:0;}}
-.logo svg{{width:24px;height:24px;color:#fff;}}
-.fi{{width:72px;height:72px;border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;animation:iconFloat 3s ease-in-out infinite;}}
-@keyframes iconFloat{{0%,100%{{transform:translateY(0);}}50%{{transform:translateY(-6px);}}}}
-.fi-video{{background:rgba(175,82,222,.16);color:var(--purple);}}
-.fi-audio{{background:rgba(50,215,75,.13);color:var(--green);}}
-.fi-image{{background:rgba(41,151,255,.14);color:var(--accent);}}
-.fi-pdf{{background:rgba(255,69,58,.13);color:var(--error);}}
-.fi-archive{{background:rgba(255,214,10,.14);color:var(--amber);}}
-.fi-file{{background:var(--accent-dim);color:var(--accent);}}
-.fn{{font-size:22px;font-weight:500;word-break:break-word;margin-bottom:24px;line-height:1.3;}}
-.meta-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:28px;}}
-.mi{{background:rgba(255,255,255,.035);border-radius:var(--radius-sm);padding:14px 12px;}}
-.mi-lbl{{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:4px;}}
-.mi-val{{font-size:15px;color:var(--text);font-weight:500;}}
-.btn{{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:16px 24px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;font-weight:600;font-size:16px;text-decoration:none;border:none;cursor:pointer;transition:background .16s,transform .16s,box-shadow .16s;box-shadow:0 0 20px var(--accent-glow);}}
-.btn:hover{{background:var(--accent-bright);transform:translateY(-1px);box-shadow:0 0 28px var(--accent-glow);}}
-.btn:active{{transform:translateY(0);}}
-.btn:focus-visible{{outline:2px solid #fff;outline-offset:3px;}}
-.ft{{margin-top:20px;font-size:12px;color:var(--text3);letter-spacing:.02em;}}
-input{{width:100%;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:var(--text);font-size:15px;outline:none;transition:border .2s,box-shadow .2s;}}
-input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim);}}
-.notice{{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:14px;}}
-.notice-error{{background:rgba(255,69,58,.12);border:1px solid rgba(255,69,58,.25);color:#fecaca;}}
-.notice-warn{{background:rgba(255,214,10,.10);border:1px solid rgba(255,214,10,.2);color:#ffd792;}}
-</style></head><body><div class="orbs"><div class="orb a"></div><div class="orb b"></div></div><div class="wrap"><div class="card">{body}</div></div></body></html>"""
+body{{background:var(--bg);color:var(--text);font-family:var(--font-body);display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;-webkit-font-smoothing:antialiased;line-height:1.47;}}
+.wrap{{width:100%;max-width:480px;}}
+.card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);padding:40px 32px 32px;text-align:center;box-shadow:0 12px 32px rgba(0,0,0,0.08);}}
+.logo{{width:48px;height:48px;margin:0 auto 20px;}}
+.logo svg{{width:100%;height:100%;}}
+.fi{{width:64px;height:64px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;background:var(--surface-2);color:var(--muted);}}
+.fi svg{{width:28px;height:28px;}}
+.fn{{font-family:var(--font-display);font-size:22px;font-weight:600;letter-spacing:-0.015em;word-break:break-word;margin-bottom:24px;line-height:1.25;}}
+.meta-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px;}}
+.mi{{background:var(--surface-2);border-radius:var(--radius-control);padding:12px;}}
+.mi-lbl{{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-subtle);margin-bottom:4px;}}
+.mi-val{{font-size:15px;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}}
+.btn{{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;padding:12px 24px;border-radius:var(--radius-control);background:var(--accent);color:#fff;font-weight:600;font-size:15px;font-family:var(--font-body);text-decoration:none;border:none;cursor:pointer;transition:background .15s var(--ease-standard),transform .15s var(--ease-standard);}}
+.btn:hover{{background:var(--accent-hover);}}
+.btn:active{{transform:translateY(1px);}}
+.btn:focus-visible{{outline:3px solid var(--accent);outline-offset:3px;}}
+.ft{{margin-top:20px;font-size:12px;color:var(--text-subtle);letter-spacing:0.04em;}}
+input{{width:100%;min-height:44px;padding:10px 12px;border-radius:var(--radius-control);border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:var(--font-body);font-size:14px;outline:none;transition:border .15s var(--ease-standard);}}
+input:focus{{border-color:var(--accent);}}
+.notice{{padding:12px 14px;border-radius:var(--radius-control);margin-bottom:16px;font-size:14px;background:var(--surface-2);border:1px solid var(--border);color:var(--muted);}}
+.notice-error{{background:rgba(255,107,114,0.12);border-color:rgba(239,68,68,0.25);color:#fecaca;}}
+.notice-warn{{background:rgba(244,189,98,0.11);border-color:rgba(245,158,11,0.25);color:#ffd792;}}
+</style></head><body><div class="wrap"><div class="card">{body}</div></div></body></html>"""
 
 
 def _get_file_category(filename: str) -> str:
@@ -97,17 +85,17 @@ def _notice_card(title: str, message: str, variant: str = "error") -> str:
     extra = '<div class="notice notice-' + variant + '"><strong>' + title + '</strong><br>' + message + "</div>"
     return _BASE.format(
         title=title,
-        body='<div class="logo">' + _ICONS["file"] + '</div>' + extra + '<div class="ft">Cloud Panel &middot; Lien securise</div>',
+        body='<div class="logo">' + _SLICE_LOGO + '</div>' + extra + '<div class="ft">Cloud Panel &middot; Lien securise</div>',
     )
 
 
 PASSWORD_FORM = _BASE.format(
     title="Mot de passe requis",
-    body="""<div class="logo">""" + _ICONS["file"] + """</div>
-<h2 style="font-size:18px;font-weight:600;margin-bottom:8px;">Mot de passe requis</h2>
-<p style="color:var(--text2);font-size:14px;margin-bottom:20px;">Ce fichier est protege par un mot de passe.</p>
+    body="""<div class="logo">""" + _SLICE_LOGO + """</div>
+<h2 style="font-size:18px;font-weight:600;letter-spacing:-0.015em;margin-bottom:8px;font-family:var(--font-display)">Mot de passe requis</h2>
+<p style="color:var(--muted);font-size:14px;margin-bottom:20px;">Ce fichier est protege par un mot de passe.</p>
 <form method="get" style="text-align:left">
-<label style="display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:6px;">Mot de passe</label>
+<label style="display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
 <button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au fichier</button>
 </form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
@@ -115,17 +103,19 @@ PASSWORD_FORM = _BASE.format(
 
 PASSWORD_WRONG = _BASE.format(
     title="Mot de passe incorrect",
-    body="""<div class="logo">""" + _ICONS["file"] + """</div>
+    body="""<div class="logo">""" + _SLICE_LOGO + """</div>
 <div class="notice notice-error"><strong>Mot de passe incorrect</strong><br>Le mot de passe fourni est incorrect.</div>
 <form method="get" style="text-align:left;margin-top:16px;">
-<label style="display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:6px;">Mot de passe</label>
+<label style="display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
 <button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Reessayer</button>
 </form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
 )
 
 
-_DOWNLOAD_BODY = """<div class="logo"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></div>
+_SLICE_LOGO = """<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="18,14 41,14 50,30 27,30" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/><polygon points="14,34 37,34 46,50 23,50" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><polygon points="27,30 41,30 37,34 23,34" fill="currentColor" opacity="0.15"/></svg>"""
+
+_DOWNLOAD_BODY = """<div class="logo">""" + _SLICE_LOGO + """</div>
 <div class="fi fi-{category}">{icon}</div>
 <div class="fn">{filename}</div>
 <div class="meta-grid">
