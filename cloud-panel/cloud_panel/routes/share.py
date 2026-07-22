@@ -80,6 +80,8 @@ _ICONS = {
     "file": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7.75 3.75h4.5l6 6v10.5a1 1 0 0 1-1 1H7.75a1 1 0 0 1-1-1V4.75a1 1 0 0 1 1-1z"/><path d="M12.25 3.75v6h6"/></svg>""",
 }
 
+_SLICE_LOGO = """<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="18,14 41,14 50,30 27,30" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/><polygon points="14,34 37,34 46,50 23,50" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><polygon points="27,30 41,30 37,34 23,34" fill="currentColor" opacity="0.15"/></svg>"""
+
 
 def _notice_card(title: str, message: str, variant: str = "error") -> str:
     extra = '<div class="notice notice-' + variant + '"><strong>' + title + '</strong><br>' + message + "</div>"
@@ -112,8 +114,6 @@ PASSWORD_WRONG = _BASE.format(
 </form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
 )
 
-
-_SLICE_LOGO = """<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygon points="18,14 41,14 50,30 27,30" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/><polygon points="14,34 37,34 46,50 23,50" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><polygon points="27,30 41,30 37,34 23,34" fill="currentColor" opacity="0.15"/></svg>"""
 
 _DOWNLOAD_BODY = """<div class="logo">""" + _SLICE_LOGO + """</div>
 <div class="fi fi-{category}">{icon}</div>
