@@ -125,22 +125,33 @@ PASSWORD_WRONG = _BASE.format(
 )
 
 
-def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, download_url: str) -> str:
+_DOWNLOAD_BODY = """<div class="logo"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></div>
+<div class="fi fi-{category}">{icon}</div>
+<div class="fn">{filename}</div>
+<div class="meta-grid">
+<div class="mi"><div class="mi-lbl">Taille</div><div class="mi-val">{size}</div></div>
+<div class="mi"><div class="mi-lbl">Telechargements</div><div class="mi-val">{dl_count}</div></div>
+{expires_row}
+<div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">{file_type}</div></div>
+</div>
+<a href="{dl_url}" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
+<div class="ft">Cloud Panel &middot; Lien securise</div>"""
+
+
+def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, dl_url: str) -> str:
     icon_svg = _ICONS.get(category, _ICONS["file"])
-    expires_row = '<div class="mi"><div class="mi-lbl">Expire le</div><div class="mi-val">' + expires + "</div></div>" if expires else '<div class="mi"><div class="mi-lbl">Expiration</div><div class="mi-val">Aucune</div></div>'
+    if expires:
+        expires_row = '<div class="mi"><div class="mi-lbl">Expire le</div><div class="mi-val">' + expires + "</div></div>"
+    else:
+        expires_row = '<div class="mi"><div class="mi-lbl">Expiration</div><div class="mi-val">Aucune</div></div>'
     return _BASE.format(
         title=filename,
-        body="""<div class="logo"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></div>
-<div class="fi fi-""" + category + '">' + icon_svg + """</div>
-<div class="fn">""" + filename + """</div>
-<div class="meta-grid">
-<div class="mi"><div class="mi-lbl">Taille</div><div class="mi-val">""" + size + """</div></div>
-<div class="mi"><div class="mi-lbl">Telechargements</div><div class="mi-val">""" + str(download_count) + """</div></div>
-""" + expires_row + """
-<div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">""" + file_type + """</div></div>
-</div>
-<a href=\"""" + download_url + '" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
-<div class="ft">Cloud Panel &middot; Lien securise</div>""",
+        body=_DOWNLOAD_BODY.format(
+            category=category, icon=icon_svg, filename=filename,
+            size=size, dl_count=str(download_count),
+            expires_row=expires_row, file_type=file_type,
+            dl_url=dl_url,
+        ),
     )
 
 
