@@ -20,48 +20,59 @@ from .csrf_guard import require_action_guard
 
 router = APIRouter()
 
-SHARE_HTML = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Telechargement · Cloud Panel</title><style>body{{background:#07080b;color:#f5f5f7;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;}}.card{{background:#101217;border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:32px;max-width:480px;width:100%;text-align:center;}}.btn{{display:inline-block;padding:12px 24px;border-radius:12px;background:#0071e3;color:#fff;font-weight:600;text-decoration:none;margin-top:16px;transition:background .16s;}}.btn:hover{{background:#0077ed;}}.btn:focus-visible{{outline:2px solid #fff;outline-offset:2px;}}.meta{{color:#a7abb5;font-size:.85rem;margin-top:8px;}}.error{{color:#ff6b72;}}input{{width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:#151821;color:#f5f5f7;font-size:.95rem;margin-top:4px;box-sizing:border-box;}}</style></head><body><div class="card"><h1>{title}</h1><p>{message}</p>{extra}</div></body></html>"""
+_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud Panel</title><style>
+:root{{--bg:#060708;--surface:rgba(255,255,255,0.045);--border:rgba(255,255,255,0.08);--text:#f5f5f7;--text2:rgba(245,245,247,0.55);--text3:rgba(245,245,247,0.42);--accent:#2997ff;--accent-bright:#4ab0ff;--accent-dim:rgba(41,151,255,0.14);--accent-glow:rgba(41,151,255,0.35);--green:#32d74b;--error:#ff453a;--amber:#ffd60a;--purple:#af52de;--radius-xl:20px;--radius-sm:10px;}}
+*{{margin:0;padding:0;box-sizing:border-box;}}
+body{{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;overflow-x:hidden;-webkit-font-smoothing:antialiased;}}
+.orbs{{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}}
+.orb{{position:absolute;border-radius:50%;filter:blur(110px);opacity:.5;animation:drift 18s ease-in-out infinite alternate;}}
+.orb.a{{width:520px;height:520px;background:#2997ff;top:-10%;left:-8%;animation-duration:22s;}}
+.orb.b{{width:440px;height:440px;background:#af52de;bottom:-12%;right:-6%;animation-duration:26s;animation-delay:-6s;}}
+@keyframes drift{{0%{{transform:translate(0,0) scale(1);}}100%{{transform:translate(60px,40px) scale(1.12);}}}}
+.wrap{{position:relative;z-index:1;width:100%;max-width:580px;}}
+.card{{background:var(--surface);backdrop-filter:blur(40px)saturate(180%);-webkit-backdrop-filter:blur(40px)saturate(180%);border:1px solid var(--border);border-radius:var(--radius-xl);padding:48px 40px 36px;text-align:center;animation:cardIn .5s cubic-bezier(.28,0,.22,1) both;box-shadow:0 20px 60px rgba(0,0,0,.55);}}
+@keyframes cardIn{{0%{{opacity:0;transform:translateY(20px)scale(.97);}}100%{{opacity:1;transform:translateY(0)scale(1);}}}}
+.logo{{width:46px;height:46px;border-radius:13px;background:linear-gradient(135deg,#1a5aba,#0d3f8a);display:flex;align-items:center;justify-content:center;margin:0 auto 20px;flex-shrink:0;}}
+.logo svg{{width:24px;height:24px;color:#fff;}}
+.fi{{width:72px;height:72px;border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;animation:iconFloat 3s ease-in-out infinite;}}
+@keyframes iconFloat{{0%,100%{{transform:translateY(0);}}50%{{transform:translateY(-6px);}}}}
+.fi-video{{background:rgba(175,82,222,.16);color:var(--purple);}}
+.fi-audio{{background:rgba(50,215,75,.13);color:var(--green);}}
+.fi-image{{background:rgba(41,151,255,.14);color:var(--accent);}}
+.fi-pdf{{background:rgba(255,69,58,.13);color:var(--error);}}
+.fi-archive{{background:rgba(255,214,10,.14);color:var(--amber);}}
+.fi-file{{background:var(--accent-dim);color:var(--accent);}}
+.fn{{font-size:22px;font-weight:500;word-break:break-word;margin-bottom:24px;line-height:1.3;}}
+.meta-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:28px;}}
+.mi{{background:rgba(255,255,255,.035);border-radius:var(--radius-sm);padding:14px 12px;}}
+.mi-lbl{{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:4px;}}
+.mi-val{{font-size:15px;color:var(--text);font-weight:500;}}
+.btn{{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:16px 24px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;font-weight:600;font-size:16px;text-decoration:none;border:none;cursor:pointer;transition:background .16s,transform .16s,box-shadow .16s;box-shadow:0 0 20px var(--accent-glow);}}
+.btn:hover{{background:var(--accent-bright);transform:translateY(-1px);box-shadow:0 0 28px var(--accent-glow);}}
+.btn:active{{transform:translateY(0);}}
+.btn:focus-visible{{outline:2px solid #fff;outline-offset:3px;}}
+.ft{{margin-top:20px;font-size:12px;color:var(--text3);letter-spacing:.02em;}}
+input{{width:100%;padding:12px 14px;border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:var(--text);font-size:15px;outline:none;transition:border .2s,box-shadow .2s;}}
+input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim);}}
+.notice{{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:14px;}}
+.notice-error{{background:rgba(255,69,58,.12);border:1px solid rgba(255,69,58,.25);color:#fecaca;}}
+.notice-warn{{background:rgba(255,214,10,.10);border:1px solid rgba(255,214,10,.2);color:#ffd792;}}
+</style></head><body><div class="orbs"><div class="orb a"></div><div class="orb b"></div></div><div class="wrap"><div class="card">{body}</div></div></body></html>"""
 
-PASSWORD_FORM = """<form method="get" style="margin-top:16px;text-align:left">
-<label style="display:block;margin-bottom:8px;font-size:.85rem;color:#a7abb5">Mot de passe requis
-<input type="password" name="password" required style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.15);background:#151821;color:#f5f5f7;font-size:.95rem;margin-top:4px;box-sizing:border-box"></label>
-<button type="submit" class="btn" style="width:100%">Acceder au fichier</button>
-</form>"""
 
-DOWNLOAD_PAGE_HTML = """<!doctype html>
-<html lang="fr">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Telechargement · Cloud Panel</title>
-    <style>
-        body{{background:#07080b;color:#f5f5f7;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;}}
-        .card{{background:#101217;border:1px solid rgba(255,255,255,.09);border-radius:24px;padding:40px;max-width:520px;width:100%;text-align:center;}}
-        h1{{font-size:1.5rem;margin:0 0 24px 0;color:#f5f5f7;}}
-        .file-info{{background:#151821;border-radius:16px;padding:24px;margin-bottom:24px;}}
-        .filename{{font-size:1.1rem;font-weight:600;color:#f5f5f7;word-break:break-all;margin-bottom:12px;}}
-        .meta{{color:#a7abb5;font-size:0.9rem;margin:6px 0;}}
-        .btn{{display:inline-block;padding:14px 32px;border-radius:12px;background:#0071e3;color:#fff;font-weight:600;text-decoration:none;font-size:1rem;transition:background .16s;border:none;cursor:pointer;}}
-        .btn:hover{{background:#0077ed;}}
-        .btn:focus-visible{{outline:2px solid #fff;outline-offset:2px;}}
-        .icon{{width:64px;height:64px;margin:0 auto 20px;color:#0071e3;}}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/>
-        </svg>
-        <h1>Preparer le telechargement</h1>
-        <div class="file-info">
-            <div class="filename">{filename}</div>
-            <div class="meta">Taille : {size}</div>
-            {expires}
-        </div>
-        <a href="{download_url}" class="btn">Telecharger le fichier</a>
-    </div>
-</body>
-</html>"""
+def _get_file_category(filename: str) -> str:
+    ext = (filename or "").rsplit(".", 1)[-1].lower()
+    if ext in ("mp4", "mkv", "avi", "mov", "webm", "m4v"):
+        return "video"
+    if ext in ("mp3", "flac", "wav", "ogg", "m4a", "aac", "opus"):
+        return "audio"
+    if ext in ("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "ico"):
+        return "image"
+    if ext in ("pdf",):
+        return "pdf"
+    if ext in ("zip", "rar", "7z", "tar", "gz", "bz2", "xz"):
+        return "archive"
+    return "file"
 
 
 def _format_size(size_bytes: int) -> str:
@@ -70,6 +81,67 @@ def _format_size(size_bytes: int) -> str:
             return f"{size_bytes:.1f} {unit}"
         size_bytes /= 1024.0
     return f"{size_bytes:.1f} PB"
+
+
+_ICONS = {
+    "video": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8.25"/><path d="M10 9.5v5l5-2.5z"/></svg>""",
+    "audio": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8.25"/><path d="M12 8v8M8 10.5v3M16 10.5v3"/></svg>""",
+    "image": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M4 16l4-4 3 3 3-4 6 5"/></svg>""",
+    "pdf": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 9h8M8 13h5M8 17h8"/><path d="M15 3v4h4"/></svg>""",
+    "archive": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 8.5h14M5 8.5A2 2 0 0 1 3 6.5v-2A2 2 0 0 1 5 2.5h14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2M5 8.5v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-9"/></svg>""",
+    "file": """<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7.75 3.75h4.5l6 6v10.5a1 1 0 0 1-1 1H7.75a1 1 0 0 1-1-1V4.75a1 1 0 0 1 1-1z"/><path d="M12.25 3.75v6h6"/></svg>""",
+}
+
+
+def _notice_card(title: str, message: str, variant: str = "error") -> str:
+    extra = '<div class="notice notice-' + variant + '"><strong>' + title + '</strong><br>' + message + "</div>"
+    return _BASE.format(
+        title=title,
+        body='<div class="logo">' + _ICONS["file"] + '</div>' + extra + '<div class="ft">Cloud Panel &middot; Lien securise</div>',
+    )
+
+
+PASSWORD_FORM = _BASE.format(
+    title="Mot de passe requis",
+    body="""<div class="logo">""" + _ICONS["file"] + """</div>
+<h2 style="font-size:18px;font-weight:600;margin-bottom:8px;">Mot de passe requis</h2>
+<p style="color:var(--text2);font-size:14px;margin-bottom:20px;">Ce fichier est protege par un mot de passe.</p>
+<form method="get" style="text-align:left">
+<label style="display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:6px;">Mot de passe</label>
+<input type="password" name="password" required placeholder="Saisir le mot de passe">
+<button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au fichier</button>
+</form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
+)
+
+PASSWORD_WRONG = _BASE.format(
+    title="Mot de passe incorrect",
+    body="""<div class="logo">""" + _ICONS["file"] + """</div>
+<div class="notice notice-error"><strong>Mot de passe incorrect</strong><br>Le mot de passe fourni est incorrect.</div>
+<form method="get" style="text-align:left;margin-top:16px;">
+<label style="display:block;font-size:13px;font-weight:600;color:var(--text2);margin-bottom:6px;">Mot de passe</label>
+<input type="password" name="password" required placeholder="Saisir le mot de passe">
+<button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Reessayer</button>
+</form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
+)
+
+
+def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, download_url: str) -> str:
+    icon_svg = _ICONS.get(category, _ICONS["file"])
+    expires_row = '<div class="mi"><div class="mi-lbl">Expire le</div><div class="mi-val">' + expires + "</div></div>" if expires else '<div class="mi"><div class="mi-lbl">Expiration</div><div class="mi-val">Aucune</div></div>'
+    return _BASE.format(
+        title=filename,
+        body="""<div class="logo"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></div>
+<div class="fi fi-""" + category + '">' + icon_svg + """</div>
+<div class="fn">""" + filename + """</div>
+<div class="meta-grid">
+<div class="mi"><div class="mi-lbl">Taille</div><div class="mi-val">""" + size + """</div></div>
+<div class="mi"><div class="mi-lbl">Telechargements</div><div class="mi-val">""" + str(download_count) + """</div></div>
+""" + expires_row + """
+<div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">""" + file_type + """</div></div>
+</div>
+<a href=\"""" + download_url + '" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
+<div class="ft">Cloud Panel &middot; Lien securise</div>""",
+    )
 
 
 @router.post("/share/file")
@@ -177,26 +249,18 @@ async def download_share(request: Request, token: str = FPath(...), dl: bool = Q
     try:
         link = _get_share_link(token)
         if not link:
-            return HTMLResponse(content=SHARE_HTML.format(title="Lien invalide", message="Ce lien n'existe pas.", extra=""), status_code=404)
+            return HTMLResponse(content=_notice_card("Lien invalide", "Ce lien n'existe pas.", "error"), status_code=404)
         if link["is_revoked"]:
-            return HTMLResponse(content=SHARE_HTML.format(title="Lien revoque", message="Ce lien a ete revoque.", extra=""), status_code=403)
+            return HTMLResponse(content=_notice_card("Lien revoque", "Ce lien a ete revoque.", "warn"), status_code=403)
         if link["expires_at"] and link["expires_at"] < time.time():
-            return HTMLResponse(content=SHARE_HTML.format(title="Lien expire", message="Ce lien a expire.", extra=""), status_code=403)
+            return HTMLResponse(content=_notice_card("Lien expire", "Ce lien a expire.", "error"), status_code=403)
 
         pw_hash = link.get("password_hash")
         if pw_hash:
             if not password:
-                return HTMLResponse(content=SHARE_HTML.format(
-                    title="Mot de passe requis",
-                    message="Ce fichier est protege par un mot de passe.",
-                    extra=PASSWORD_FORM,
-                ), status_code=401)
+                return HTMLResponse(content=PASSWORD_FORM, status_code=401)
             if not verify_password(password, pw_hash):
-                return HTMLResponse(content=SHARE_HTML.format(
-                    title="Mot de passe incorrect",
-                    message="Le mot de passe fourni est incorrect.",
-                    extra=PASSWORD_FORM,
-                ), status_code=403)
+                return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
 
         if dl:
             file_path, filename = get_share_download_path(token)
@@ -204,10 +268,23 @@ async def download_share(request: Request, token: str = FPath(...), dl: bool = Q
 
         file_path, filename = get_share_download_path(token, increment=False)
         size_formatted = _format_size(os.path.getsize(file_path))
+        category = _get_file_category(filename)
+
+        is_dir = link.get("is_dir", False)
+        is_zip = link.get("is_zip", False)
+        if is_dir:
+            file_type = "Dossier"
+        elif is_zip:
+            file_type = "Archive ZIP"
+        else:
+            mapping = {"video": "Video", "audio": "Audio", "image": "Image", "pdf": "Document PDF", "archive": "Archive"}
+            file_type = mapping.get(category, "Fichier")
+
+        download_count = link.get("download_count", 0)
         expires_at = link.get("expires_at")
         expires_str = ""
         if expires_at:
-            expires_str = '<div class="meta">Expire le : ' + datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y a %H:%M") + "</div>"
+            expires_str = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y a %H:%M")
 
         dl_url = str(request.url)
         sep = "&" if "?" in dl_url else "?"
@@ -215,14 +292,12 @@ async def download_share(request: Request, token: str = FPath(...), dl: bool = Q
         if password:
             dl_url += f"&password={password}"
 
-        page = DOWNLOAD_PAGE_HTML.format(filename=filename, size=size_formatted, expires=expires_str, download_url=dl_url)
+        page = _download_page(filename, size_formatted, category, file_type, download_count, expires_str, dl_url)
         return HTMLResponse(content=page)
     except ValueError as e:
-        html = SHARE_HTML.format(title="Lien invalide", message=str(e), extra="")
-        return HTMLResponse(content=html, status_code=404)
+        return HTMLResponse(content=_notice_card("Lien invalide", str(e), "error"), status_code=404)
     except Exception as e:
-        html = SHARE_HTML.format(title="Erreur", message=str(e), extra="")
-        return HTMLResponse(content=html, status_code=500)
+        return HTMLResponse(content=_notice_card("Erreur", str(e), "error"), status_code=500)
 
 
 @router.get("/stats")
