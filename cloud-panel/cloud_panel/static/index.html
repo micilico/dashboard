@@ -140,7 +140,9 @@
 
         <div class="view-page" id="linksView" hidden>
           <div class="page-head"><h2>Liens de partage</h2></div>
-          <table class="file-table"><thead><tr><th>Fichier</th><th>Token</th><th>Telechargements</th><th>Expire</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="linksBody"></tbody></table>
+          <div class="table-wrap links-table-wrap">
+            <table class="file-table links-table" aria-label="Liens de partage"><thead><tr><th>Fichier</th><th>Token</th><th>Telechargements</th><th>Expire</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="linksBody"></tbody></table>
+          </div>
         </div>
 
         <div class="view-page" id="statsView" hidden>
@@ -161,7 +163,7 @@
           <input id="sharePassword" type="text" autocomplete="off" placeholder="Laisser vide pour aucun">
         </label>
         <label>Mode
-          <select id="shareMode"><option value="file">Fichier direct</option><option value="zip">ZIP du dossier</option></select>
+          <select id="shareMode"><option value="file">Fichier direct</option><option value="folder">Dossier navigable</option><option value="zip">ZIP du dossier</option></select>
         </label>
         <p id="shareMessage" class="field-message"></p>
         <div id="shareResult" hidden>

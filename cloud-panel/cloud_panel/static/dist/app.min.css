@@ -748,6 +748,13 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
 .page-head { margin-bottom: var(--space-16); }
 .page-head h2 { margin: 0; }
 
+/* ── Share links ── */
+.links-table-wrap { width: 100%; }
+.links-table { min-width: 720px; }
+.links-table .link-file-cell { min-width: 180px; max-width: 320px; overflow-wrap: anywhere; }
+.links-table .link-token-cell { white-space: nowrap; color: var(--muted); }
+.links-table .link-actions-cell { min-width: 108px; }
+
 
 
 /* ── Responsive ── */
@@ -767,6 +774,54 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
   .col-date { display: none; }
   .col-size { width: 80px; }
   .action-cell { opacity: 1; }
+  .links-table-wrap { overflow-x: visible; }
+  .links-table { min-width: 0; border-collapse: separate; border-spacing: 0 var(--space-8); }
+  .links-table thead { display: none; }
+  .links-table,
+  .links-table tbody,
+  .links-table tr,
+  .links-table td { display: block; width: 100%; }
+  .links-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .links-table tr:hover { background: var(--surface-2); }
+  .links-table td {
+    display: grid;
+    grid-template-columns: minmax(112px, 38%) minmax(0, 1fr);
+    gap: var(--space-8);
+    align-items: center;
+    min-height: 44px;
+    padding: var(--space-8) var(--space-12);
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: normal;
+  }
+  .links-table td:last-child { border-bottom: 0; }
+  .links-table td::before {
+    content: attr(data-label);
+    color: var(--text-subtle);
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .links-table .link-file-cell { max-width: none; }
+  .links-table .link-token-cell { white-space: normal; overflow-wrap: anywhere; }
+  .links-table .link-actions-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-8);
+  }
+  .links-table .link-actions-cell::before { flex: 1; }
+  .links-table .links-empty-row td {
+    display: block;
+    text-align: center;
+  }
+  .links-table .links-empty-row td::before { content: none; }
 }
 
 @media (max-width: 375px) {

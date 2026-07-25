@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import html
+import hashlib
+import hmac
 import os
 import time
 from datetime import datetime
+from typing import Optional
+from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Path as FPath, Query
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
-from ..config import PUBLIC_PREFIX
+from ..config import MOUNT_PATH, PUBLIC_PREFIX
 from ..services.share import (
     create_file_share_link,
     create_folder_share_link,
@@ -15,7 +20,16 @@ from ..services.share import (
     generate_qr_data_url,
     cleanup_expired_zips,
 )
-from ..models import get_share_link as _get_share_link, get_share_links, revoke_share_link, extend_share_link, get_stats, get_history
+from ..models import (
+    get_share_link as _get_share_link,
+    get_share_links,
+    revoke_share_link,
+    extend_share_link,
+    get_stats,
+    get_history,
+    increment_download_count,
+)
+from ..security import resolve_path_within
 from .csrf_guard import require_action_guard
 
 router = APIRouter()
@@ -91,15 +105,29 @@ def _notice_card(title: str, message: str, variant: str = "error") -> str:
     )
 
 
+def _password_cookie_name(token: str) -> str:
+    return "cloud_share_pwd_" + hashlib.sha256(token.encode()).hexdigest()[:16]
+
+
+def _password_cookie_value(token: str, password_hash: str) -> str:
+    return hmac.new(password_hash.encode(), token.encode(), hashlib.sha256).hexdigest()
+
+
+def _password_cookie_matches(request: Request, token: str, password_hash: str) -> bool:
+    expected = _password_cookie_value(token, password_hash)
+    actual = request.cookies.get(_password_cookie_name(token), "")
+    return hmac.compare_digest(actual, expected)
+
+
 PASSWORD_FORM = _BASE.format(
     title="Mot de passe requis",
     body="""<div class="logo">""" + _SLICE_LOGO + """</div>
 <h2 style="font-size:18px;font-weight:600;letter-spacing:-0.015em;margin-bottom:8px;font-family:var(--font-display)">Mot de passe requis</h2>
-<p style="color:var(--muted);font-size:14px;margin-bottom:20px;">Ce fichier est protege par un mot de passe.</p>
+<p style="color:var(--muted);font-size:14px;margin-bottom:20px;">Ce contenu est protege par un mot de passe.</p>
 <form method="get" style="text-align:left">
 <label style="display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
-<button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au fichier</button>
+<button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au contenu</button>
 </form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
 )
 
@@ -127,6 +155,33 @@ _DOWNLOAD_BODY = """<div class="logo">""" + _SLICE_LOGO + """</div>
 <a href="{dl_url}" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
 <div class="ft">Cloud Panel &middot; Lien securise</div>"""
 
+_FOLDER_STYLE = """
+.folder-wrap{width:100%;max-width:920px;}
+.folder-card{text-align:left;padding:32px;}
+.folder-head{display:flex;align-items:center;gap:16px;margin-bottom:20px;}
+.folder-title{min-width:0;}
+.folder-title h1{font-family:var(--font-display);font-size:24px;font-weight:650;line-height:1.2;margin:0 0 4px;word-break:break-word;}
+.folder-title p{color:var(--muted);font-size:14px;margin:0;}
+.folder-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--surface-2);color:var(--accent);flex:0 0 auto;}
+.folder-icon svg{width:26px;height:26px;}
+.folder-crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:20px 0;color:var(--muted);font-size:14px;}
+.folder-crumbs a{color:var(--accent);text-decoration:none;}
+.folder-crumbs a:hover{color:var(--accent-hover);}
+.folder-table{width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--radius-control);overflow:hidden;}
+.folder-table th,.folder-table td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:14px;}
+.folder-table th{color:var(--text-subtle);font-size:12px;text-transform:uppercase;letter-spacing:.06em;background:var(--surface-2);font-weight:700;text-align:left;}
+.folder-table tr:last-child td{border-bottom:none;}
+.folder-name{display:flex;align-items:center;gap:10px;min-width:0;}
+.folder-name a{color:var(--text);text-decoration:none;font-weight:600;overflow-wrap:anywhere;}
+.folder-name a:hover{color:var(--accent);}
+.folder-type,.folder-size,.folder-date{color:var(--muted);white-space:nowrap;}
+.folder-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+.mini-btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:var(--radius-control);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:13px;font-weight:600;text-decoration:none;}
+.mini-btn:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
+.folder-empty{text-align:center;color:var(--muted);padding:32px;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--surface-2);}
+@media(max-width:720px){body{align-items:flex-start}.folder-card{padding:24px 16px}.folder-table thead{display:none}.folder-table,.folder-table tbody,.folder-table tr,.folder-table td{display:block;width:100%}.folder-table tr{padding:12px;border-bottom:1px solid var(--border)}.folder-table td{border:0;padding:5px 0}.folder-actions{justify-content:flex-start}.folder-date{white-space:normal}}
+"""
+
 
 def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, dl_url: str) -> str:
     icon_svg = _ICONS.get(category, _ICONS["file"])
@@ -141,6 +196,133 @@ def _download_page(filename: str, size: str, category: str, file_type: str, down
             size=size, dl_count=str(download_count),
             expires_row=expires_row, file_type=file_type,
             dl_url=dl_url,
+        ),
+    )
+
+
+def _folder_url(token: str, child_path: str = "", **params) -> str:
+    query = {k: v for k, v in params.items() if v not in (None, "", False)}
+    if child_path:
+        query["path"] = child_path
+    qs = urlencode(query)
+    return f"{PUBLIC_PREFIX}/api/download/{quote(token)}" + (f"?{qs}" if qs else "")
+
+
+def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
+    current_relative = (current_relative or "").strip("/")
+    current_dir = resolve_path_within(shared_root, current_relative or ".", must_exist=True)
+    if not os.path.isdir(current_dir):
+        raise ValueError("Dossier introuvable")
+
+    items = []
+    for entry in sorted(os.scandir(current_dir), key=lambda item: (not item.is_dir(), item.name.lower())):
+        stat = entry.stat()
+        rel_path = os.path.relpath(entry.path, shared_root)
+        item_path = "" if rel_path == "." else rel_path.replace(os.sep, "/")
+        category = "folder" if entry.is_dir() else _get_file_category(entry.name)
+        items.append({
+            "name": entry.name,
+            "path": item_path,
+            "is_dir": entry.is_dir(),
+            "size": "" if entry.is_dir() else _format_size(stat.st_size),
+            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M"),
+            "category": category,
+            "previewable": (not entry.is_dir()) and category in ("video", "audio", "image", "pdf"),
+        })
+
+    parts = [part for part in current_relative.split("/") if part]
+    breadcrumbs = [{"label": "Racine", "path": ""}]
+    running = []
+    for part in parts:
+        running.append(part)
+        breadcrumbs.append({"label": part, "path": "/".join(running)})
+
+    return {
+        "items": items,
+        "current_path": current_relative,
+        "parent_path": "/".join(parts[:-1]) if parts else "",
+        "breadcrumbs": breadcrumbs,
+    }
+
+
+def _folder_page(token: str, link: dict, listing: dict, password: Optional[str]) -> str:
+    expires_at = link.get("expires_at")
+    expires = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y a %H:%M") if expires_at else "Aucune"
+    password_param = None
+    crumbs = []
+    for idx, crumb in enumerate(listing["breadcrumbs"]):
+        if idx:
+            crumbs.append("<span>/</span>")
+        crumbs.append(
+            '<a href="'
+            + html.escape(_folder_url(token, crumb["path"], password=password_param), quote=True)
+            + '">'
+            + html.escape(crumb["label"])
+            + "</a>"
+        )
+
+    if listing["items"]:
+        rows = []
+        for item in listing["items"]:
+            icon = _ICONS["file"] if not item["is_dir"] else '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>'
+            open_url = _folder_url(token, item["path"], password=password_param)
+            download_url = _folder_url(token, item["path"], dl=1, password=password_param)
+            preview_url = _folder_url(token, item["path"], preview=1, password=password_param)
+            actions = (
+                '<a class="mini-btn" href="' + html.escape(open_url, quote=True) + '">Ouvrir</a>'
+                if item["is_dir"]
+                else (
+                    ('<a class="mini-btn" target="_blank" rel="noopener noreferrer" href="' + html.escape(preview_url, quote=True) + '">Apercu</a>' if item["previewable"] else "")
+                    + '<a class="mini-btn" href="' + html.escape(download_url, quote=True) + '">Telecharger</a>'
+                )
+            )
+            name_html = (
+                '<a href="' + html.escape(open_url, quote=True) + '">' + html.escape(item["name"]) + "/</a>"
+                if item["is_dir"]
+                else '<a href="' + html.escape(preview_url if item["previewable"] else download_url, quote=True) + '">' + html.escape(item["name"]) + "</a>"
+            )
+            rows.append(
+                "<tr><td><div class=\"folder-name\"><span class=\"folder-icon\" style=\"width:32px;height:32px;border-radius:10px\">"
+                + icon
+                + "</span>"
+                + name_html
+                + "</div></td><td class=\"folder-type\">"
+                + ("Dossier" if item["is_dir"] else "Fichier")
+                + "</td><td class=\"folder-size\">"
+                + html.escape(item["size"] or "-")
+                + "</td><td class=\"folder-date\">"
+                + html.escape(item["modified"])
+                + "</td><td><div class=\"folder-actions\">"
+                + actions
+                + "</div></td></tr>"
+            )
+        content = '<table class="folder-table"><thead><tr><th>Nom</th><th>Type</th><th>Taille</th><th>Modifie</th><th></th></tr></thead><tbody>' + "".join(rows) + "</tbody></table>"
+    else:
+        content = '<div class="folder-empty">Ce dossier partage est vide.</div>'
+
+    parent = ""
+    if listing["current_path"]:
+        parent = '<p style="margin:0 0 14px"><a class="mini-btn" href="' + html.escape(_folder_url(token, listing["parent_path"], password=password_param), quote=True) + '">Retour au dossier parent</a></p>'
+
+    base = _BASE.replace("<style>", "<style>" + _FOLDER_STYLE.replace("{", "{{").replace("}", "}}"))
+    return base.format(
+        title=link.get("filename") or "Dossier partage",
+        body=(
+            '<div class="folder-wrap"><div class="card folder-card">'
+            '<div class="folder-head"><div class="folder-icon">'
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>'
+            '</div><div class="folder-title"><h1>'
+            + html.escape(link.get("filename") or "Dossier partage")
+            + '</h1><p>Dossier partage sans archive, consultable en ligne.</p></div></div>'
+            '<div class="meta-grid">'
+            '<div class="mi"><div class="mi-lbl">Contenu</div><div class="mi-val">' + _format_size(int(link.get("size_bytes") or 0)) + '</div></div>'
+            '<div class="mi"><div class="mi-lbl">Telechargements</div><div class="mi-val">' + str(int(link.get("download_count") or 0)) + '</div></div>'
+            '<div class="mi"><div class="mi-lbl">Expire le</div><div class="mi-val">' + html.escape(expires) + '</div></div>'
+            '<div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">Dossier</div></div>'
+            '</div><nav class="folder-crumbs" aria-label="Chemin">' + "".join(crumbs) + "</nav>"
+            + parent
+            + content
+            + '<div class="ft" style="text-align:center">Cloud Panel &middot; Dossier securise</div></div></div>'
         ),
     )
 
@@ -246,7 +428,14 @@ async def extend_link(
 
 
 @router.get("/download/{token}")
-async def download_share(request: Request, token: str = FPath(...), dl: bool = Query(default=False), password: str | None = Query(default=None)):
+async def download_share(
+    request: Request,
+    token: str = FPath(...),
+    dl: bool = Query(default=False),
+    preview: bool = Query(default=False),
+    path: str = Query(default=""),
+    password: Optional[str] = Query(default=None),
+):
     try:
         link = _get_share_link(token)
         if not link:
@@ -258,10 +447,45 @@ async def download_share(request: Request, token: str = FPath(...), dl: bool = Q
 
         pw_hash = link.get("password_hash")
         if pw_hash:
-            if not password:
+            if not _password_cookie_matches(request, token, pw_hash):
+                if password and verify_password(password, pw_hash):
+                    params = list(request.query_params.multi_items())
+                    query = urlencode([(key, value) for key, value in params if key != "password"])
+                    redirect_url = request.url.path + (f"?{query}" if query else "")
+                    response = RedirectResponse(url=redirect_url, status_code=303)
+                    response.set_cookie(
+                        _password_cookie_name(token),
+                        _password_cookie_value(token, pw_hash),
+                        max_age=600,
+                        httponly=True,
+                        secure=request.url.scheme == "https",
+                        samesite="Lax",
+                    )
+                    return response
+                if password:
+                    return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
                 return HTMLResponse(content=PASSWORD_FORM, status_code=401)
-            if not verify_password(password, pw_hash):
-                return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
+
+        is_dir = link.get("is_dir", False)
+        is_zip = link.get("is_zip", False)
+
+        if is_dir:
+            shared_root = resolve_path_within(MOUNT_PATH, link["path"], must_exist=True)
+            if not os.path.isdir(shared_root):
+                return HTMLResponse(content=_notice_card("Dossier introuvable", "Ce dossier n'est plus disponible.", "error"), status_code=404)
+
+            requested_path = (path or "").strip("/")
+            current_target = resolve_path_within(shared_root, requested_path or ".", must_exist=True)
+            if os.path.isfile(current_target):
+                if preview:
+                    return FileResponse(current_target, filename=os.path.basename(current_target))
+                if dl:
+                    increment_download_count(token)
+                    return FileResponse(current_target, filename=os.path.basename(current_target), media_type="application/octet-stream")
+                return RedirectResponse(url=_folder_url(token, os.path.dirname(requested_path), password=password))
+
+            listing = _shared_folder_listing(shared_root, requested_path)
+            return HTMLResponse(content=_folder_page(token, link, listing, password))
 
         if dl:
             file_path, filename = get_share_download_path(token)
@@ -271,11 +495,7 @@ async def download_share(request: Request, token: str = FPath(...), dl: bool = Q
         size_formatted = _format_size(os.path.getsize(file_path))
         category = _get_file_category(filename)
 
-        is_dir = link.get("is_dir", False)
-        is_zip = link.get("is_zip", False)
-        if is_dir:
-            file_type = "Dossier"
-        elif is_zip:
+        if is_zip:
             file_type = "Archive ZIP"
         else:
             mapping = {"video": "Video", "audio": "Audio", "image": "Image", "pdf": "Document PDF", "archive": "Archive"}
@@ -290,8 +510,6 @@ async def download_share(request: Request, token: str = FPath(...), dl: bool = Q
         dl_url = str(request.url)
         sep = "&" if "?" in dl_url else "?"
         dl_url += f"{sep}dl=1"
-        if password:
-            dl_url += f"&password={password}"
 
         page = _download_page(filename, size_formatted, category, file_type, download_count, expires_str, dl_url)
         return HTMLResponse(content=page)

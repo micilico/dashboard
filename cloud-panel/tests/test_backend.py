@@ -515,6 +515,36 @@ class TestShareAndFavorites:
         assert "total_favorites" in stats
         assert "total_history" in stats
 
+    def test_folder_share_link_lists_only_shared_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        monkeypatch.setattr("cloud_panel.models.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.models
+        import cloud_panel.services.share
+        import cloud_panel.routes.share
+        importlib.reload(cloud_panel.models)
+        importlib.reload(cloud_panel.services.share)
+        importlib.reload(cloud_panel.routes.share)
+        from cloud_panel.services.share import create_folder_share_link
+        from cloud_panel.routes.share import _shared_folder_listing
+        from cloud_panel.models import _get_conn, get_share_link
+
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / "nested.txt").write_text("data")
+        (tmp_path / "outside.txt").write_text("secret")
+        _get_conn()
+
+        result = create_folder_share_link("shared")
+        link = get_share_link(result["token"])
+        assert link is not None
+        assert link["is_dir"] == 1
+
+        listing = _shared_folder_listing(str(shared), "")
+        assert [item["name"] for item in listing["items"]] == ["nested.txt"]
+        with pytest.raises(ValueError, match="Chemin hors"):
+            _shared_folder_listing(str(shared), "../")
+
 
 class TestEdgeCases:
     def test_unicode_filename(self, tmp_path, monkeypatch):

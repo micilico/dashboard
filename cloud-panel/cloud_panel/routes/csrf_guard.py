@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import Header, HTTPException, Request
 
 from common.csrf import client_key as _common_client_key
@@ -38,7 +40,7 @@ def client_key(request):
     return _common_client_key(request, TRUSTED_PROXY_IPS)
 
 
-async def require_action_guard(request: Request, x_cloud_panel_csrf: str | None = Header(default=None)) -> None:
+async def require_action_guard(request: Request, x_cloud_panel_csrf: Optional[str] = Header(default=None)) -> None:
     if (
         not x_cloud_panel_csrf
         or not csrf_cookie_matches(request, x_cloud_panel_csrf)
