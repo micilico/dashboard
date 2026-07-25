@@ -3,13 +3,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-import shutil
 import time
-import zipfile
-from io import BytesIO
-from pathlib import Path
 
-from ..config import MOUNT_PATH, SHARE_TOKEN_BYTES, TEMP_ZIP_DIR
+from ..config import MOUNT_PATH, PUBLIC_PREFIX, SHARE_TOKEN_BYTES, TEMP_ZIP_DIR
 from ..models import create_share_link, increment_download_count, get_share_link
 from ..security import resolve_path_within
 
@@ -74,50 +70,6 @@ def create_folder_share_link(
     )
 
 
-def create_zip_share_link(
-    relative_path: str,
-    password_hash: str | None = None,
-    expiry_days: int = 7,
-) -> dict:
-    dir_path = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
-    if not os.path.isdir(dir_path):
-        raise ValueError("Dossier introuvable")
-
-    TEMP_ZIP_DIR.mkdir(parents=True, exist_ok=True)
-    token = generate_token(relative_path + "_zip")
-    zip_filename = f"{token}.zip"
-    zip_path = TEMP_ZIP_DIR / zip_filename
-
-    total_size = 0
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(dir_path):
-            for f in files:
-                file_path = os.path.join(root, f)
-                arcname = os.path.relpath(file_path, dir_path)
-                zf.write(file_path, arcname)
-                try:
-                    total_size += os.path.getsize(file_path)
-                except OSError:
-                    pass
-
-    dir_basename = os.path.basename(dir_path) or "archive"
-    zip_size = os.path.getsize(zip_path)
-
-    result = create_share_link(
-        path=relative_path,
-        filename=f"{dir_basename}.zip",
-        is_dir=False,
-        size_bytes=total_size,
-        token=token,
-        password_hash=password_hash,
-        expiry_days=expiry_days,
-        is_zip=True,
-    )
-    result["zip_path"] = str(zip_path)
-    result["zip_size"] = zip_size
-    return result
-
-
 def get_share_download_path(token: str, increment: bool = True) -> tuple[str, str]:
     link = get_share_link(token)
     if not link:
@@ -148,7 +100,8 @@ def generate_qr_data_url(token: str, base_url: str) -> str:
         import qrcode
         from io import BytesIO
         import base64
-        qr = qrcode.make(f"{base_url}/api/download/{token}", border=1)
+        public_prefix = PUBLIC_PREFIX or ""
+        qr = qrcode.make(f"{base_url}{public_prefix}/download/{token}", border=1)
         buf = BytesIO()
         qr.save(buf, format="PNG")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()

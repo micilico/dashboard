@@ -15,10 +15,8 @@ from ..config import MOUNT_PATH, PUBLIC_PREFIX
 from ..services.share import (
     create_file_share_link,
     create_folder_share_link,
-    create_zip_share_link,
     get_share_download_path,
     generate_qr_data_url,
-    cleanup_expired_zips,
 )
 from ..models import (
     get_share_link as _get_share_link,
@@ -34,32 +32,24 @@ from .csrf_guard import require_action_guard
 
 router = APIRouter()
 
-_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud Panel</title><style>
-:root{{--bg:#07080b;--surface:#101217;--surface-2:#151821;--border:rgba(255,255,255,0.09);--text:#f5f5f7;--muted:#a7abb5;--text-subtle:#7E8491;--accent:#0071e3;--accent-hover:#0077ed;--accent-soft:rgba(0,113,227,0.12);--success:#5ee6a8;--danger:#ff6b72;--radius-card:18px;--radius-control:12px;--ease-standard:cubic-bezier(0.28,0,0.22,1);--font-body:'Inter Variable','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--font-display:'Inter Tight','Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}}
-*{{margin:0;padding:0;box-sizing:border-box;}}
-body{{background:var(--bg);color:var(--text);font-family:var(--font-body);display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;-webkit-font-smoothing:antialiased;line-height:1.47;}}
-.wrap{{width:100%;max-width:480px;}}
-.card{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-card);padding:40px 32px 32px;text-align:center;box-shadow:0 12px 32px rgba(0,0,0,0.08);}}
-.logo{{width:48px;height:48px;margin:0 auto 20px;}}
-.logo svg{{width:100%;height:100%;}}
-.fi{{width:64px;height:64px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;background:var(--surface-2);color:var(--muted);}}
-.fi svg{{width:28px;height:28px;}}
-.fn{{font-family:var(--font-display);font-size:22px;font-weight:600;letter-spacing:-0.015em;word-break:break-word;margin-bottom:24px;line-height:1.25;}}
-.meta-grid{{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px;}}
-.mi{{background:var(--surface-2);border-radius:var(--radius-control);padding:12px;}}
-.mi-lbl{{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-subtle);margin-bottom:4px;}}
-.mi-val{{font-size:15px;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}}
-.btn{{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;padding:12px 24px;border-radius:var(--radius-control);background:var(--accent);color:#fff;font-weight:600;font-size:15px;font-family:var(--font-body);text-decoration:none;border:none;cursor:pointer;transition:background .15s var(--ease-standard),transform .15s var(--ease-standard);}}
-.btn:hover{{background:var(--accent-hover);}}
-.btn:active{{transform:translateY(1px);}}
-.btn:focus-visible{{outline:3px solid var(--accent);outline-offset:3px;}}
-.ft{{margin-top:20px;font-size:12px;color:var(--text-subtle);letter-spacing:0.04em;}}
-input{{width:100%;min-height:44px;padding:10px 12px;border-radius:var(--radius-control);border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:var(--font-body);font-size:14px;outline:none;transition:border .15s var(--ease-standard);}}
-input:focus{{border-color:var(--accent);}}
-.notice{{padding:12px 14px;border-radius:var(--radius-control);margin-bottom:16px;font-size:14px;background:var(--surface-2);border:1px solid var(--border);color:var(--muted);}}
-.notice-error{{background:rgba(255,107,114,0.12);border-color:rgba(239,68,68,0.25);color:#fecaca;}}
-.notice-warn{{background:rgba(244,189,98,0.11);border-color:rgba(245,158,11,0.25);color:#ffd792;}}
-</style></head><body><div class="wrap"><div class="card">{body}</div></div></body></html>"""
+_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud Panel</title><link rel="stylesheet" href="{assets}/static/share.css?v=20260725-a"></head><body class="{body_class}"><main class="share-shell">{body}</main></body></html>"""
+
+
+def _asset_prefix() -> str:
+    return PUBLIC_PREFIX or ""
+
+
+def _public_download_path(token: str) -> str:
+    return f"{PUBLIC_PREFIX}/download/{quote(token)}" if PUBLIC_PREFIX else f"/download/{quote(token)}"
+
+
+def _render_page(title: str, body: str, body_class: str = "") -> str:
+    return _BASE.format(
+        title=html.escape(title, quote=True),
+        assets=_asset_prefix(),
+        body_class=body_class,
+        body=body,
+    )
 
 
 def _get_file_category(filename: str) -> str:
@@ -99,9 +89,9 @@ _SLICE_LOGO = """<svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><polygo
 
 def _notice_card(title: str, message: str, variant: str = "error") -> str:
     extra = '<div class="notice notice-' + variant + '"><strong>' + title + '</strong><br>' + message + "</div>"
-    return _BASE.format(
-        title=title,
-        body='<div class="logo">' + _SLICE_LOGO + '</div>' + extra + '<div class="ft">Cloud Panel &middot; Lien securise</div>',
+    return _render_page(
+        title,
+        '<section class="share-card"><div class="logo">' + _SLICE_LOGO + '</div>' + extra + '<div class="ft">Cloud Panel &middot; Lien securise</div></section>',
     )
 
 
@@ -119,27 +109,27 @@ def _password_cookie_matches(request: Request, token: str, password_hash: str) -
     return hmac.compare_digest(actual, expected)
 
 
-PASSWORD_FORM = _BASE.format(
-    title="Mot de passe requis",
-    body="""<div class="logo">""" + _SLICE_LOGO + """</div>
-<h2 style="font-size:18px;font-weight:600;letter-spacing:-0.015em;margin-bottom:8px;font-family:var(--font-display)">Mot de passe requis</h2>
-<p style="color:var(--muted);font-size:14px;margin-bottom:20px;">Ce contenu est protege par un mot de passe.</p>
-<form method="get" style="text-align:left">
-<label style="display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mot de passe</label>
+PASSWORD_FORM = _render_page(
+    "Mot de passe requis",
+    """<section class="share-card"><div class="logo">""" + _SLICE_LOGO + """</div>
+<h2 class="share-heading">Mot de passe requis</h2>
+<p class="share-copy">Ce contenu est protege par un mot de passe.</p>
+<form class="password-form" method="get">
+<label class="field-label">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
-<button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au contenu</button>
-</form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
+<button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au contenu</button>
+</form><div class="ft">Cloud Panel &middot; Lien securise</div></section>""",
 )
 
-PASSWORD_WRONG = _BASE.format(
-    title="Mot de passe incorrect",
-    body="""<div class="logo">""" + _SLICE_LOGO + """</div>
+PASSWORD_WRONG = _render_page(
+    "Mot de passe incorrect",
+    """<section class="share-card"><div class="logo">""" + _SLICE_LOGO + """</div>
 <div class="notice notice-error"><strong>Mot de passe incorrect</strong><br>Le mot de passe fourni est incorrect.</div>
-<form method="get" style="text-align:left;margin-top:16px;">
-<label style="display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;">Mot de passe</label>
+<form class="password-form password-form-retry" method="get">
+<label class="field-label">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
-<button type="submit" class="btn" style="margin-top:16px;"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Reessayer</button>
-</form><div class="ft">Cloud Panel &middot; Lien securise</div>""",
+<button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Reessayer</button>
+</form><div class="ft">Cloud Panel &middot; Lien securise</div></section>""",
 )
 
 
@@ -155,48 +145,22 @@ _DOWNLOAD_BODY = """<div class="logo">""" + _SLICE_LOGO + """</div>
 <a href="{dl_url}" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
 <div class="ft">Cloud Panel &middot; Lien securise</div>"""
 
-_FOLDER_STYLE = """
-.folder-wrap{width:100%;max-width:920px;}
-.folder-card{text-align:left;padding:32px;}
-.folder-head{display:flex;align-items:center;gap:16px;margin-bottom:20px;}
-.folder-title{min-width:0;}
-.folder-title h1{font-family:var(--font-display);font-size:24px;font-weight:650;line-height:1.2;margin:0 0 4px;word-break:break-word;}
-.folder-title p{color:var(--muted);font-size:14px;margin:0;}
-.folder-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:var(--surface-2);color:var(--accent);flex:0 0 auto;}
-.folder-icon svg{width:26px;height:26px;}
-.folder-crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:20px 0;color:var(--muted);font-size:14px;}
-.folder-crumbs a{color:var(--accent);text-decoration:none;}
-.folder-crumbs a:hover{color:var(--accent-hover);}
-.folder-table{width:100%;border-collapse:collapse;border:1px solid var(--border);border-radius:var(--radius-control);overflow:hidden;}
-.folder-table th,.folder-table td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:14px;}
-.folder-table th{color:var(--text-subtle);font-size:12px;text-transform:uppercase;letter-spacing:.06em;background:var(--surface-2);font-weight:700;text-align:left;}
-.folder-table tr:last-child td{border-bottom:none;}
-.folder-name{display:flex;align-items:center;gap:10px;min-width:0;}
-.folder-name a{color:var(--text);text-decoration:none;font-weight:600;overflow-wrap:anywhere;}
-.folder-name a:hover{color:var(--accent);}
-.folder-type,.folder-size,.folder-date{color:var(--muted);white-space:nowrap;}
-.folder-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
-.mini-btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:var(--radius-control);border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-size:13px;font-weight:600;text-decoration:none;}
-.mini-btn:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--text);}
-.folder-empty{text-align:center;color:var(--muted);padding:32px;border:1px solid var(--border);border-radius:var(--radius-control);background:var(--surface-2);}
-@media(max-width:720px){body{align-items:flex-start}.folder-card{padding:24px 16px}.folder-table thead{display:none}.folder-table,.folder-table tbody,.folder-table tr,.folder-table td{display:block;width:100%}.folder-table tr{padding:12px;border-bottom:1px solid var(--border)}.folder-table td{border:0;padding:5px 0}.folder-actions{justify-content:flex-start}.folder-date{white-space:normal}}
-"""
-
-
 def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, dl_url: str) -> str:
     icon_svg = _ICONS.get(category, _ICONS["file"])
     if expires:
         expires_row = '<div class="mi"><div class="mi-lbl">Expire le</div><div class="mi-val">' + expires + "</div></div>"
     else:
         expires_row = '<div class="mi"><div class="mi-lbl">Expiration</div><div class="mi-val">Aucune</div></div>'
-    return _BASE.format(
-        title=filename,
-        body=_DOWNLOAD_BODY.format(
+    return _render_page(
+        filename,
+        '<section class="share-card">'
+        + _DOWNLOAD_BODY.format(
             category=category, icon=icon_svg, filename=filename,
             size=size, dl_count=str(download_count),
             expires_row=expires_row, file_type=file_type,
             dl_url=dl_url,
-        ),
+        )
+        + "</section>",
     )
 
 
@@ -205,7 +169,7 @@ def _folder_url(token: str, child_path: str = "", **params) -> str:
     if child_path:
         query["path"] = child_path
     qs = urlencode(query)
-    return f"{PUBLIC_PREFIX}/api/download/{quote(token)}" + (f"?{qs}" if qs else "")
+    return _public_download_path(token) + (f"?{qs}" if qs else "")
 
 
 def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
@@ -282,7 +246,7 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
                 else '<a href="' + html.escape(preview_url if item["previewable"] else download_url, quote=True) + '">' + html.escape(item["name"]) + "</a>"
             )
             rows.append(
-                "<tr><td><div class=\"folder-name\"><span class=\"folder-icon\" style=\"width:32px;height:32px;border-radius:10px\">"
+                "<tr><td><div class=\"folder-name\"><span class=\"folder-icon folder-row-icon\">"
                 + icon
                 + "</span>"
                 + name_html
@@ -302,13 +266,12 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
 
     parent = ""
     if listing["current_path"]:
-        parent = '<p style="margin:0 0 14px"><a class="mini-btn" href="' + html.escape(_folder_url(token, listing["parent_path"], password=password_param), quote=True) + '">Retour au dossier parent</a></p>'
+        parent = '<p class="folder-parent"><a class="mini-btn" href="' + html.escape(_folder_url(token, listing["parent_path"], password=password_param), quote=True) + '">Retour au dossier parent</a></p>'
 
-    base = _BASE.replace("<style>", "<style>" + _FOLDER_STYLE.replace("{", "{{").replace("}", "}}"))
-    return base.format(
-        title=link.get("filename") or "Dossier partage",
-        body=(
-            '<div class="folder-wrap"><div class="card folder-card">'
+    return _render_page(
+        link.get("filename") or "Dossier partage",
+        (
+            '<section class="share-card folder-card">'
             '<div class="folder-head"><div class="folder-icon">'
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>'
             '</div><div class="folder-title"><h1>'
@@ -322,8 +285,9 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
             '</div><nav class="folder-crumbs" aria-label="Chemin">' + "".join(crumbs) + "</nav>"
             + parent
             + content
-            + '<div class="ft" style="text-align:center">Cloud Panel &middot; Dossier securise</div></div></div>'
+            + '<div class="ft ft-center">Cloud Panel &middot; Dossier securise</div></section>'
         ),
+        body_class="folder-page",
     )
 
 
@@ -358,26 +322,6 @@ async def share_folder(
     try:
         password_hash = _hash_password(password) if password else None
         result = create_folder_share_link(path, password_hash, expiry_days)
-        base_url = str(request.base_url).rstrip("/")
-        result["qrDataUrl"] = generate_qr_data_url(result["token"], base_url)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "share_error", "message": str(e), "recovery": "Verifier le chemin"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "share_error", "message": str(e), "recovery": "Reessayer"})
-
-
-@router.post("/share/zip")
-async def share_zip(
-    request: Request,
-    _=Depends(require_action_guard),
-    path: str = Form(...),
-    password: str = Form(""),
-    expiry_days: int = Form(7),
-):
-    try:
-        password_hash = _hash_password(password) if password else None
-        result = create_zip_share_link(path, password_hash, expiry_days)
         base_url = str(request.base_url).rstrip("/")
         result["qrDataUrl"] = generate_qr_data_url(result["token"], base_url)
         return result

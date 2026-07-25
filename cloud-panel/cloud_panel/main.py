@@ -27,7 +27,7 @@ from .config import (
 )
 from .routes.files import router as files_router
 from .routes.favorites import router as favorites_router
-from .routes.share import router as share_router
+from .routes.share import download_share, router as share_router
 
 from logging import basicConfig, getLogger
 
@@ -127,6 +127,11 @@ if PUBLIC_PREFIX:
     @app.get(f"{PUBLIC_PREFIX}/readyz")
     async def prefixed_readyz() -> dict[str, str]:
         return await readyz()
+
+
+app.add_api_route("/download/{token}", download_share, methods=["GET"])
+if PUBLIC_PREFIX:
+    app.add_api_route(f"{PUBLIC_PREFIX}/download/{{token}}", download_share, methods=["GET"])
 
 
 app.include_router(files_router, prefix="/api")
