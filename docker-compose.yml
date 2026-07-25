@@ -84,7 +84,11 @@ services:
       CLOUD_PANEL_PORT: ${CLOUD_PANEL_PORT:-3130}
       CLOUD_PANEL_MOUNT_PATH: /mnt/ultra-media
     volumes:
-      - /mnt/ultra-media:/mnt/ultra-media:rw
+      - type: bind
+        source: /mnt/ultra-media
+        target: /mnt/ultra-media
+        bind:
+          propagation: rshared
       - cloud-panel-data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3130/healthz', timeout=4)"]
