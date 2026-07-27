@@ -14,3 +14,11 @@ logs/
 **/logs/
 torrent-panel/data/media-automation-state.json
 torrent-panel/data/notification-state.json
+
+# Runtime databases and SQLite journals may contain private paths or share tokens
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+backups/

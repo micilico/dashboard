@@ -105,6 +105,8 @@ assert.match(overviewHtml, /class="selection-toolbar"[\s\S]+id="selectVisible"[\
 assert.equal(source.includes("renderStorageCard"), false);
 assert.equal(source.includes("storageVisualization"), false);
 assert.equal(source.includes("Operationnel"), false);
+assert.equal(source.includes("form.innerHTML"), false);
+assert.equal(source.includes("row.innerHTML"), false);
 
 vm.runInNewContext(
   `${source}

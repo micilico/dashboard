@@ -11,6 +11,8 @@ from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Path as FPath, Query
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
+from common import error_detail
+
 from ..config import MOUNT_PATH, PUBLIC_PREFIX
 from ..services.share import (
     create_file_share_link,
@@ -305,10 +307,16 @@ async def share_file(
         base_url = str(request.base_url).rstrip("/")
         result["qrDataUrl"] = generate_qr_data_url(result["token"], base_url)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "share_error", "message": str(e), "recovery": "Verifier le chemin"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "share_error", "message": str(e), "recovery": "Reessayer"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("share_error", "Ce fichier ne peut pas être partagé.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("share_error", "Création du lien impossible.", "Réessayer"),
+        )
 
 
 @router.post("/share/folder")
@@ -325,10 +333,16 @@ async def share_folder(
         base_url = str(request.base_url).rstrip("/")
         result["qrDataUrl"] = generate_qr_data_url(result["token"], base_url)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "share_error", "message": str(e), "recovery": "Verifier le chemin"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "share_error", "message": str(e), "recovery": "Reessayer"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("share_error", "Ce dossier ne peut pas être partagé.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("share_error", "Création du lien impossible.", "Réessayer"),
+        )
 
 
 @router.get("/links")
@@ -336,8 +350,11 @@ async def list_links(request: Request, limit: int = 50, offset: int = 0):
     try:
         items = get_share_links(limit, offset)
         return {"items": items}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "db_error", "message": str(e), "recovery": "Reessayer"})
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("db_error", "Liens de partage indisponibles.", "Réessayer"),
+        )
 
 
 @router.post("/links/revoke")
@@ -349,8 +366,11 @@ async def revoke_link(
     try:
         result = revoke_share_link(token)
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "db_error", "message": str(e), "recovery": "Reessayer"})
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("db_error", "Révocation du lien impossible.", "Réessayer"),
+        )
 
 
 @router.post("/links/extend")
@@ -363,12 +383,18 @@ async def extend_link(
     try:
         result = extend_share_link(token, days)
         if not result.get("success"):
-            raise HTTPException(status_code=404, detail={"code": "not_found", "message": result.get("error", "Lien introuvable"), "recovery": "Verifier le token"})
+            raise HTTPException(
+                status_code=404,
+                detail=error_detail("not_found", "Lien introuvable.", "Actualiser la liste"),
+            )
         return result
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "db_error", "message": str(e), "recovery": "Reessayer"})
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("db_error", "Prolongation du lien impossible.", "Réessayer"),
+        )
 
 
 @router.get("/download/{token}")
@@ -457,18 +483,27 @@ async def download_share(
 
         page = _download_page(filename, size_formatted, category, file_type, download_count, expires_str, dl_url)
         return HTMLResponse(content=page)
-    except ValueError as e:
-        return HTMLResponse(content=_notice_card("Lien invalide", str(e), "error"), status_code=404)
-    except Exception as e:
-        return HTMLResponse(content=_notice_card("Erreur", str(e), "error"), status_code=500)
+    except ValueError:
+        return HTMLResponse(
+            content=_notice_card("Lien invalide", "Le contenu demandé est indisponible.", "error"),
+            status_code=404,
+        )
+    except Exception:
+        return HTMLResponse(
+            content=_notice_card("Erreur", "Le téléchargement est temporairement indisponible.", "error"),
+            status_code=500,
+        )
 
 
 @router.get("/stats")
 async def stats(request: Request):
     try:
         return get_stats()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "db_error", "message": str(e), "recovery": "Reessayer"})
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("db_error", "Statistiques indisponibles.", "Réessayer"),
+        )
 
 
 @router.get("/history/data")
@@ -476,8 +511,11 @@ async def history_data(request: Request, limit: int = 50, offset: int = 0):
     try:
         items = get_history(limit, offset)
         return {"items": items}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "db_error", "message": str(e), "recovery": "Reessayer"})
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("db_error", "Historique indisponible.", "Réessayer"),
+        )
 
 
 def _hash_password(password: str) -> str:

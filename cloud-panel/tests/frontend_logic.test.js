@@ -6,6 +6,8 @@ const assert = {
   ok: (v, msg) => { if (!v) throw new Error(msg || `Expected truthy but got ${v}`); },
   deepEqual: (a, b) => { const sa = JSON.stringify(a), sb = JSON.stringify(b); if (sa !== sb) throw new Error(`Expected ${sb} but got ${sa}`); },
 };
+const fs = require("node:fs");
+const path = require("node:path");
 
 // Import app.js functions by redefining them in test scope (mimics the actual app.js logic)
 // Format utilities
@@ -363,6 +365,34 @@ suite('CSRF retry logic', () => {
       assert.strictEqual(callCount, 1, 'should not have retried');
       assert.ok(!refreshed, 'should not have refreshed');
     }
+  });
+});
+
+suite('DOM security', () => {
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+
+  test('does not interpolate remote data into innerHTML', () => {
+    const forbidden = [
+      /innerHTML\s*=\s*`[^`]*\$\{f\.name\}/,
+      /innerHTML\s*=\s*`[^`]*\$\{h\./,
+      /innerHTML\s*=\s*`[^`]*\$\{l\./,
+      /innerHTML\s*=\s*`[^`]*\$\{d\[k\]/,
+    ];
+    forbidden.forEach(pattern => {
+      assert.ok(!pattern.test(appSource), `Unsafe DOM interpolation found: ${pattern}`);
+    });
+  });
+
+  test('preview text uses textContent', () => {
+    assert.ok(appSource.includes("pre.textContent = text"));
+    assert.ok(!appSource.includes("body.innerHTML = `<pre>"));
+  });
+
+  test('new-tab preview links isolate the opener', () => {
+    assert.ok(appSource.includes('download.rel = "noopener noreferrer"'));
   });
 });
 

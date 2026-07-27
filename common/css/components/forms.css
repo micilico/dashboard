@@ -3,7 +3,7 @@ input, select, textarea {
   width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: var(--radius-control);
   background: var(--surface); color: var(--text); padding: 10px 12px;
 }
-input:hover, select:hover, textarea:hover { border-color: rgba(255,255,255,.17); }
+input:hover, select:hover, textarea:hover { border-color: var(--border-hover); }
 select[multiple] { min-height: 120px; }
 .filters, .search-form {
   display: grid; grid-template-columns: repeat(5, minmax(140px, 1fr)) auto;

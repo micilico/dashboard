@@ -122,32 +122,7 @@ function clearNode(node) {
   node.replaceChildren();
 }
 
-function element(tag, options = {}) {
-  const node = document.createElement(tag);
-  if (options.className) node.className = options.className;
-  if (options.text !== undefined) node.textContent = String(options.text);
-  if (options.attrs) {
-    for (const [name, value] of Object.entries(options.attrs)) {
-      if (value !== undefined && value !== null) node.setAttribute(name, String(value));
-    }
-  }
-  if (options.dataset) {
-    for (const [name, value] of Object.entries(options.dataset)) {
-      node.dataset[name] = String(value);
-    }
-  }
-  if (options.children) node.append(...options.children);
-  return node;
-}
-
-function button(label, className, dataset = {}) {
-  return element("button", {
-    className,
-    text: label,
-    attrs: { type: "button" },
-    dataset,
-  });
-}
+const { element, button } = window.DashboardDOM;
 
 function formatBytes(value) {
   const bytes = Number(value) || 0;
@@ -693,9 +668,11 @@ function confirmAction(title, message) {
     };
     els.cancelConfirm.onclick = () => cleanup(false);
     els.acceptConfirm.onclick = () => cleanup(true);
-    els.confirmDialog.addEventListener("cancel", () => cleanup(false), { once: true });
-    if (typeof trapFocus === "function") trapFocus(els.confirmDialog);
-    els.confirmDialog.showModal();
+    els.confirmDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      cleanup(false);
+    }, { once: true });
+    openDialog(els.confirmDialog, document.activeElement);
     els.cancelConfirm.focus();
   });
 }

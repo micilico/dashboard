@@ -264,7 +264,13 @@
   .service-row-status { white-space: normal; }
   .activity-list { padding: 0; border: 0; }
   .filters { margin: 12px; padding: 14px; }
-  .page-header-panel { padding: 22px 18px 8px; }
+  .page-header-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    padding: 22px 18px 8px;
+  }
+  .page-header-copy { width: 100%; }
   .page-header-panel h2 { font-size: clamp(2rem, 10vw, 2.5rem); }
   .page-header-actions { width: 100%; flex-wrap: wrap; }
   .page-header-actions .button { flex: 1 1 180px; }

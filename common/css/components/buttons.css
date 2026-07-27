@@ -4,18 +4,18 @@
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
 }
 .button:active, .tab:active { transform: translateY(1px); }
-.primary { background: var(--accent-action); color: #fff; }
+.primary { background: var(--accent-action); color: var(--text-on-accent); }
 .primary:hover { background: var(--accent-action-hover); }
 .secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
-.secondary:hover { border-color: rgba(255,255,255,.18); background: var(--surface-3); }
-.danger { background: var(--danger); color: #fff; }
+.secondary:hover { border-color: var(--border-hover); background: var(--surface-3); }
+.danger { background: var(--danger); color: var(--text-on-accent); }
 .danger:hover { background: var(--danger-strong); }
 .tertiary { background: transparent; color: var(--text); border: none; padding: 8px 12px; }
-.tertiary:hover { background: rgba(255,255,255,.05); }
+.tertiary:hover { background: var(--hover-soft); }
 .button.is-loading { position: relative; color: transparent; }
 .button.is-loading::after {
   content: ""; position: absolute; inset: 0; margin: auto;
-  width: 20px; height: 20px; border: 2px solid currentColor;
+  width: 20px; height: 20px; border: 2px solid var(--text-on-accent);
   border-right-color: transparent; border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }

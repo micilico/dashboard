@@ -10,7 +10,7 @@
   align-items: stretch;
   gap: 24px;
   padding: 28px 18px 18px;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid var(--border-faint);
   background: var(--bg-secondary);
   border-radius: 0;
   box-shadow: none;
@@ -85,7 +85,7 @@
   stroke-linejoin: round;
 }
 
-.nav a:hover { color: var(--text); background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.04); }
+.nav a:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
 
 .nav a[aria-current="page"] {
   color: var(--text);
@@ -97,7 +97,7 @@
 .nav a.is-upcoming { border-style: dashed; color: var(--muted); }
 .nav a.is-upcoming::after {
   content: "Bientôt"; margin-left: 8px; padding: 2px 6px;
-  border-radius: 999px; background: rgba(148, 163, 184, 0.14);
+  border-radius: 999px; background: var(--neutral-soft);
   color: var(--muted); font-size: 0.72rem;
 }
 
@@ -135,18 +135,18 @@
   height: 9px;
   border-radius: 999px;
   background: var(--success);
-  box-shadow: 0 0 0 5px rgba(94, 230, 168, 0.12);
+  box-shadow: 0 0 0 5px var(--success-ring);
 }
 
 .status-dot.degraded,
 .status-dot.checking {
   background: var(--warning);
-  box-shadow: 0 0 0 5px rgba(244, 189, 98, 0.12);
+  box-shadow: 0 0 0 5px var(--warning-ring);
 }
 
 .status-dot.unavailable {
   background: var(--danger);
-  box-shadow: 0 0 0 5px rgba(255, 107, 114, 0.12);
+  box-shadow: 0 0 0 5px var(--danger-ring);
 }
 
 .page-header {
@@ -213,7 +213,7 @@
   height: 56px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--surface-soft);
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -222,8 +222,8 @@
 }
 
 .icon-button:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--surface-hover);
+  border-color: var(--border-hover);
 }
 
 .icon-button svg {
@@ -255,7 +255,7 @@
   transition: background 160ms var(--ease-standard), border-color 160ms var(--ease-standard), transform 160ms var(--ease-standard);
 }
 
-.tab:hover { color: var(--text); background: rgba(255,255,255,.035); }
+.tab:hover { color: var(--text); background: var(--surface-soft); }
 .tab[aria-selected="true"] {
   color: var(--text);
   background: transparent;

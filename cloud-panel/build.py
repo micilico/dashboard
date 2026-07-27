@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build script: concatenate CSS and JS into dist/."""
+import shutil
 import sys
 from pathlib import Path
 
@@ -12,6 +13,13 @@ COMMON = ROOT / "common" if (ROOT / "common").exists() else ROOT.parent / "commo
 DIST = STATIC / "dist"
 
 DIST.mkdir(parents=True, exist_ok=True)
+
+# Self-hosted fonts must live next to the generated bundle so relative URLs
+# keep working behind any configured public prefix.
+font_source = COMMON / "fonts" / "Inter-Variable.woff2"
+font_destination = STATIC / "fonts" / font_source.name
+font_destination.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy2(font_source, font_destination)
 
 # CSS
 css_content = resolve_css_imports(COMMON / "css" / "index.css")
@@ -31,6 +39,8 @@ if css_module_dir.exists():
 # JS
 js_files = [
     COMMON / "js" / "api.js",
+    COMMON / "js" / "dom.js",
+    COMMON / "js" / "focus-trap.js",
     STATIC / "app.js",
 ]
 js_content = "\n".join(

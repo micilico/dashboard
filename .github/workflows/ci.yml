@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            */requirements.txt
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: make setup PYTHON=python
+      - name: Build frontend bundles
+        run: make build
+      - name: Verify committed bundles
+        run: make verify-bundles
+      - name: Compile Python
+        run: make compile
+      - name: Run backend and frontend tests
+        run: make test
+      - name: Check installed dependency consistency
+        run: .venv/bin/python -m pip check
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: quality
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build service images
+        run: docker compose build torrent-panel prowlarr-panel cloud-panel

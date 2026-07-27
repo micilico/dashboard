@@ -6,6 +6,8 @@ import zipfile
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form, Response
 from fastapi.responses import FileResponse
 
+from common import error_detail
+
 from ..config import MOUNT_PATH
 from ..security import resolve_path_within
 from ..storage import (
@@ -34,8 +36,11 @@ async def get_files(request: Request, path: str = ""):
     try:
         result = list_directory(path)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Chemin non autorisé ou introuvable.", "Vérifier le chemin"),
+        )
 
 
 @router.post("/files/upload")
@@ -49,10 +54,16 @@ async def upload_file(
     try:
         result = await upload_file_streaming(path, file)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "upload_error", "message": str(e), "recovery": "Reessayer"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Destination non autorisée.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("upload_error", "Téléversement impossible.", "Réessayer"),
+        )
 
 
 @router.get("/files/download")
@@ -61,8 +72,11 @@ async def download_file_endpoint(path: str):
     try:
         file_path = download_file(path)
         return FileResponse(file_path, filename=os.path.basename(file_path))
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Fichier non autorisé ou introuvable.", "Vérifier le chemin"),
+        )
 
 
 @router.post("/files/mkdir")
@@ -76,8 +90,11 @@ async def mkdir(
     try:
         result = create_directory(path, name)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Création impossible à cet emplacement.", "Vérifier le chemin"),
+        )
 
 
 @router.post("/files/rename")
@@ -92,8 +109,11 @@ async def rename(
     try:
         result = rename_item(path, old_name, new_name)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Renommage impossible à cet emplacement.", "Vérifier le chemin"),
+        )
 
 
 @router.post("/files/delete")
@@ -107,8 +127,11 @@ async def delete(
     try:
         result = delete_item(path, name)
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Suppression impossible à cet emplacement.", "Vérifier le chemin"),
+        )
 
 
 @router.post("/files/download-zip")
@@ -122,7 +145,10 @@ async def download_zip(
     try:
         file_list = [p.strip() for p in paths.split("\n") if p.strip()]
         if not file_list:
-            raise HTTPException(status_code=400, detail={"code": "no_files", "message": "Aucun fichier selectionne.", "recovery": "Selectionner des fichiers"})
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail("no_files", "Aucun fichier sélectionné.", "Sélectionner des fichiers"),
+            )
 
         tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -136,10 +162,16 @@ async def download_zip(
 
         return FileResponse(tmp_path, filename="cloud-panel-bulk.zip", media_type="application/zip",
                             headers={"Content-Disposition": "attachment; filename=cloud-panel-bulk.zip"})
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail={"code": "path_error", "message": str(e), "recovery": "Verifier le chemin"})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"code": "zip_error", "message": str(e), "recovery": "Reessayer"})
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Un fichier sélectionné n’est pas autorisé.", "Vérifier la sélection"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("zip_error", "Création de l’archive impossible.", "Réessayer"),
+        )
 
 
 @router.post("/files/refresh")

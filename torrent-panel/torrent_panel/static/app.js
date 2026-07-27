@@ -440,8 +440,14 @@ function setView(view, { push = true } = {}) {
   els.homeView.hidden = state.activeView !== "home";
   els.torrentsView.hidden = state.activeView !== "torrents";
   els.summaryGrid.hidden = true;
-  if (els.homeNavLink) els.homeNavLink.setAttribute("aria-current", state.activeView === "home" ? "page" : "false");
-  if (els.torrentsNavLink) els.torrentsNavLink.setAttribute("aria-current", state.activeView === "torrents" ? "page" : "false");
+  if (els.homeNavLink) {
+    if (state.activeView === "home") els.homeNavLink.setAttribute("aria-current", "page");
+    else els.homeNavLink.removeAttribute("aria-current");
+  }
+  if (els.torrentsNavLink) {
+    if (state.activeView === "torrents") els.torrentsNavLink.setAttribute("aria-current", "page");
+    else els.torrentsNavLink.removeAttribute("aria-current");
+  }
   updateUrl(!push);
 }
 
@@ -1515,21 +1521,28 @@ function updateDetails() {
 
   const form = document.createElement("form");
   form.className = "advanced-form";
-  form.innerHTML = `
-    <label>Catégorie
-      <input name="category" value="${String(torrent.category || "").replace(/"/g, "&quot;")}">
-    </label>
-    <label>Tags
-      <input name="tags" value="${String(torrent.tags || "").replace(/"/g, "&quot;")}">
-    </label>
-    <label>Limite DL (KiB/s)
-      <input name="downloadLimit" type="number" min="0" value="${Math.max(0, Math.floor((Number(torrent.downloadLimit) || 0) / 1024))}">
-    </label>
-    <label>Limite UL (KiB/s)
-      <input name="uploadLimit" type="number" min="0" value="${Math.max(0, Math.floor((Number(torrent.uploadLimit) || 0) / 1024))}">
-    </label>
-    <button type="submit" class="button primary">Appliquer</button>
-  `;
+  const formField = (labelText, name, value, type = "text") => {
+    const label = document.createElement("label");
+    label.append(document.createTextNode(labelText));
+    const input = document.createElement("input");
+    input.name = name;
+    input.type = type;
+    input.value = String(value);
+    if (type === "number") input.min = "0";
+    label.append(input);
+    return label;
+  };
+  form.append(
+    formField("Catégorie", "category", torrent.category || ""),
+    formField("Tags", "tags", torrent.tags || ""),
+    formField("Limite DL (KiB/s)", "downloadLimit", Math.max(0, Math.floor((Number(torrent.downloadLimit) || 0) / 1024)), "number"),
+    formField("Limite UL (KiB/s)", "uploadLimit", Math.max(0, Math.floor((Number(torrent.uploadLimit) || 0) / 1024)), "number"),
+  );
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.className = "button primary";
+  submit.textContent = "Appliquer";
+  form.append(submit);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(form);
@@ -1582,14 +1595,32 @@ function updateDetails() {
       row.className = "tracker-row";
       const statusClass = ["disabled", "not_contacted", "working", "updating", "not_working"][Number(tr.status)] || "unknown";
       const statusLabels = { disabled: "Désactivé", not_contacted: "En attente", working: "Opérationnel", updating: "Mise à jour", not_working: "Erreur", unknown: "Inconnu" };
-      row.innerHTML = `
-        <div class="tracker-url">${String(tr.url || "—").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
-        <div class="tracker-meta">
-          <span class="tracker-status tracker-status-${statusClass}">${statusLabels[statusClass] || "Inconnu"}</span>
-          ${Number(tr.num_seeds) > 0 ? `<span>${Number(tr.num_seeds)} S</span>` : ""}
-          ${Number(tr.num_leeches) > 0 ? `<span>${Number(tr.num_leeches)} L</span>` : ""}
-          ${tr.msg ? `<span class="tracker-msg">${String(tr.msg).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>` : ""}
-        </div>`;
+      const url = document.createElement("div");
+      url.className = "tracker-url";
+      url.textContent = String(tr.url || "—");
+      const meta = document.createElement("div");
+      meta.className = "tracker-meta";
+      const trackerStatus = document.createElement("span");
+      trackerStatus.className = `tracker-status tracker-status-${statusClass}`;
+      trackerStatus.textContent = statusLabels[statusClass] || "Inconnu";
+      meta.append(trackerStatus);
+      if (Number(tr.num_seeds) > 0) {
+        const seeds = document.createElement("span");
+        seeds.textContent = `${Number(tr.num_seeds)} S`;
+        meta.append(seeds);
+      }
+      if (Number(tr.num_leeches) > 0) {
+        const leeches = document.createElement("span");
+        leeches.textContent = `${Number(tr.num_leeches)} L`;
+        meta.append(leeches);
+      }
+      if (tr.msg) {
+        const message = document.createElement("span");
+        message.className = "tracker-msg";
+        message.textContent = String(tr.msg);
+        meta.append(message);
+      }
+      row.append(url, meta);
       list.append(row);
     }
     tBody.replaceChildren(list);

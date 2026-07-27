@@ -24,6 +24,12 @@ from cloud_panel.storage import sanitize_filename, list_directory
 
 
 class TestSecurity:
+    def test_route_errors_do_not_serialize_raw_exceptions(self):
+        routes_dir = _cloud_panel_parent / "cloud_panel" / "routes"
+        route_source = "\n".join(path.read_text() for path in routes_dir.glob("*.py"))
+        assert "str(e)" not in route_source
+        assert "str(exc)" not in route_source
+
     def test_resolve_path_within_valid(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = resolve_path_within(tmpdir, "")

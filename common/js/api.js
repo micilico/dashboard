@@ -36,10 +36,10 @@ function showReconnectNotice() {
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'reconnect-banner';
+    banner.className = 'reconnect-banner';
     banner.setAttribute('role', 'status');
     banner.setAttribute('aria-live', 'polite');
-    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100;padding:10px 16px;background:rgba(245,158,11,0.9);color:#000;text-align:center;font-weight:700;';
-    banner.textContent = 'Tentative de reconnexion...';
+    banner.textContent = 'Tentative de reconnexion…';
     document.body.prepend(banner);
   }
 }

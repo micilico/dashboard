@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cloud Panel · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260722-b">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260727-polish-3">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -66,15 +66,15 @@
         <div class="view-files" id="filesView">
           <header class="toolbar">
             <div class="toolbar-left">
-              <button id="btnUpload" class="button primary" title="Upload">
+              <button id="btnUpload" class="button primary" title="Téléverser des fichiers" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20V10m0 0 3.5 3.5M12 10l-3.5 3.5M5 5.75h14"/></svg>
-                Upload
+                Téléverser
               </button>
-              <button id="btnMkdir" class="button secondary" title="Nouveau dossier">
+              <button id="btnMkdir" class="button secondary" title="Nouveau dossier" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 Nouveau dossier
               </button>
-              <button id="btnSync" class="button secondary" title="Synchroniser">
+              <button id="btnSync" class="button secondary" title="Synchroniser" aria-label="Synchroniser" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
               </button>
             </div>
@@ -83,33 +83,34 @@
             </div>
             <div class="toolbar-right">
               <label class="search-wrap">
+                <span class="sr-only">Rechercher un fichier</span>
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg>
-                <input id="searchInput" type="search" placeholder="Rechercher..." autocomplete="off">
+                <input id="searchInput" type="search" placeholder="Rechercher…" autocomplete="off">
               </label>
             </div>
           </header>
 
           <div id="bulkBar" class="bulk-bar" hidden>
-            <span id="bulkCount">0 selectionne</span>
-            <button id="bulkDownload" class="button secondary" type="button">Telecharger (ZIP)</button>
-            <button id="bulkShare" class="button secondary" type="button">Generer liens</button>
+            <span id="bulkCount">0 sélectionné</span>
+            <button id="bulkDownload" class="button secondary" type="button">Télécharger (ZIP)</button>
+            <button id="bulkShare" class="button secondary" type="button">Générer les liens</button>
             <button id="bulkDelete" class="button danger" type="button">Supprimer</button>
-            <button id="bulkClear" class="button tertiary" type="button">Deselectionner</button>
+            <button id="bulkClear" class="button tertiary" type="button">Désélectionner</button>
           </div>
 
           <div id="alert" class="alert" role="alert" hidden>
             <span id="alertText"></span>
-            <button id="retryButton" class="button secondary" type="button">Reessayer</button>
+            <button id="retryButton" class="button secondary" type="button">Réessayer</button>
           </div>
 
           <div class="table-wrap">
             <table class="file-table" aria-label="Fichiers">
               <thead>
                 <tr>
-                  <th class="col-check"><input id="selectAll" type="checkbox" aria-label="Tout selectionner"></th>
-                  <th class="col-name sortable" data-sort="name">Nom <span class="sort-arrow"></span></th>
-                  <th class="col-size sortable" data-sort="size">Taille <span class="sort-arrow"></span></th>
-                  <th class="col-date sortable" data-sort="date">Modifie <span class="sort-arrow"></span></th>
+                  <th class="col-check"><input id="selectAll" type="checkbox" aria-label="Tout sélectionner"></th>
+                  <th class="col-name sortable" data-sort="name" tabindex="0" aria-sort="ascending">Nom <span class="sort-arrow"></span></th>
+                  <th class="col-size sortable" data-sort="size" tabindex="0" aria-sort="none">Taille <span class="sort-arrow"></span></th>
+                  <th class="col-date sortable" data-sort="date" tabindex="0" aria-sort="none">Modifié <span class="sort-arrow"></span></th>
                   <th class="col-fav"></th>
                   <th class="col-actions">Actions</th>
                 </tr>
@@ -127,7 +128,7 @@
             <div class="scroll-loader"><span></span></div>
           </div>
           <div id="paginationBar" class="pagination-bar" hidden>
-            <button id="prevPageBtn" class="button secondary" type="button">← Precedent</button>
+            <button id="prevPageBtn" class="button secondary" type="button">← Précédent</button>
             <span id="pageInfo">Page 1 / 1</span>
             <button id="nextPageBtn" class="button secondary" type="button">Suivant →</button>
           </div>
@@ -141,7 +142,7 @@
         <div class="view-page" id="linksView" hidden>
           <div class="page-head"><h2>Liens de partage</h2></div>
           <div class="table-wrap links-table-wrap">
-            <table class="file-table links-table" aria-label="Liens de partage"><thead><tr><th>Fichier</th><th>Token</th><th>Telechargements</th><th>Expire</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="linksBody"></tbody></table>
+            <table class="file-table links-table" aria-label="Liens de partage"><thead><tr><th>Fichier</th><th>Jeton</th><th>Téléchargements</th><th>Expiration</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="linksBody"></tbody></table>
           </div>
         </div>
 
@@ -156,39 +157,40 @@
       <form method="dialog" id="shareForm">
         <h2>Partager</h2>
         <p id="shareItem" class="dialog-name"></p>
-        <label>Duree de validite
+        <p class="muted">Lien privé, accessible aux utilisateurs authentifiés du dashboard.</p>
+        <label>Durée de validité
           <select id="shareExpiry"><option value="1">1 jour</option><option value="4">4 jours</option><option value="7" selected>7 jours</option><option value="30">30 jours</option></select>
         </label>
         <label>Mot de passe (optionnel)
-          <input id="sharePassword" type="text" autocomplete="off" placeholder="Laisser vide pour aucun">
+          <input id="sharePassword" type="password" autocomplete="new-password" placeholder="Laisser vide pour aucun">
         </label>
         <label>Mode
           <select id="shareMode"><option value="file">Fichier direct</option><option value="folder">Dossier navigable</option></select>
         </label>
-        <p id="shareMessage" class="field-message"></p>
+        <p id="shareMessage" class="field-message" aria-live="polite"></p>
         <div id="shareResult" hidden>
-          <label>Lien genere
+          <label>Lien généré
             <div class="copy-row"><input id="shareUrl" type="text" readonly><button id="copyLinkBtn" class="button secondary" type="button">Copier</button></div>
           </label>
           <div id="shareQR" class="qr-wrap" hidden><canvas id="qrCanvas"></canvas></div>
         </div>
         <div class="dialog-actions">
           <button id="cancelShareBtn" class="button secondary" type="button">Fermer</button>
-          <button id="confirmShareBtn" class="button primary" type="button">Generer le lien</button>
+          <button id="confirmShareBtn" class="button primary" type="button">Générer le lien</button>
         </div>
       </form>
     </dialog>
 
     <dialog id="uploadDialog" class="dialog">
-      <form method="dialog" id="uploadForm"><h2>Upload</h2>
-        <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="Upload">
+      <form method="dialog" id="uploadForm"><h2>Téléverser des fichiers</h2>
+        <div class="upload-zone" id="uploadZone" tabindex="0" role="button" aria-label="Choisir des fichiers à téléverser">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 20V10m0 0 3.5 3.5M12 10l-3.5 3.5M5 5.75h14"/></svg>
-          <p>Deposer des fichiers ou cliquer</p>
+          <p>Déposer des fichiers ou cliquer</p>
           <p class="upload-hint">Aucune limite de taille</p>
           <input id="fileInput" type="file" multiple hidden>
         </div>
         <div id="uploadProgress" class="upload-progress" hidden></div>
-        <p id="uploadMessage" class="field-message"></p>
+        <p id="uploadMessage" class="field-message" aria-live="polite"></p>
         <div class="dialog-actions"><button id="cancelUploadBtn" class="button secondary" type="button">Fermer</button></div>
       </form>
     </dialog>
@@ -196,24 +198,36 @@
     <dialog id="mkdirDialog" class="dialog">
       <form method="dialog" id="mkdirForm"><h2>Nouveau dossier</h2>
         <label>Nom <input id="mkdirNameInput" type="text" autocomplete="off" required placeholder="Mon dossier"></label>
-        <p id="mkdirMessage" class="field-message"></p>
-          <div class="dialog-actions"><button id="cancelMkdirBtn" class="button secondary" type="button">Annuler</button><button id="confirmMkdirBtn" class="button primary" type="submit">Creer</button></div>
+        <p id="mkdirMessage" class="field-message" aria-live="polite"></p>
+          <div class="dialog-actions"><button id="cancelMkdirBtn" class="button secondary" type="button">Annuler</button><button id="confirmMkdirBtn" class="button primary" type="button">Créer</button></div>
       </form>
     </dialog>
 
     <dialog id="renameDialog" class="dialog">
       <form method="dialog" id="renameForm"><h2>Renommer</h2>
         <label>Nouveau nom <input id="renameInput" type="text" autocomplete="off" required></label>
-        <p id="renameMessage" class="field-message"></p>
-        <div class="dialog-actions"><button id="cancelRenameBtn" class="button secondary" type="button">Annuler</button><button id="confirmRenameBtn" class="button primary" type="submit">Renommer</button></div>
+        <p id="renameMessage" class="field-message" aria-live="polite"></p>
+        <div class="dialog-actions"><button id="cancelRenameBtn" class="button secondary" type="button">Annuler</button><button id="confirmRenameBtn" class="button primary" type="button">Renommer</button></div>
       </form>
     </dialog>
 
     <dialog id="deleteDialog" class="dialog">
       <form method="dialog" id="deleteForm"><h2>Supprimer</h2>
         <p id="deleteName" class="dialog-name"></p>
-        <p style="color:var(--danger)">Action irreversible.</p>
-        <div class="dialog-actions"><button id="cancelDeleteBtn" class="button secondary" type="button">Annuler</button><button id="confirmDeleteBtn" class="button danger" type="submit">Supprimer</button></div>
+        <p class="destructive-copy">Action irréversible.</p>
+        <div class="dialog-actions"><button id="cancelDeleteBtn" class="button secondary" type="button">Annuler</button><button id="confirmDeleteBtn" class="button danger" type="button">Supprimer</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="bulkDeleteDialog" class="dialog">
+      <form method="dialog" id="bulkDeleteForm">
+        <h2>Supprimer la sélection</h2>
+        <p id="bulkDeleteDescription" class="dialog-name"></p>
+        <p class="destructive-copy">Cette action est irréversible.</p>
+        <div class="dialog-actions">
+          <button id="cancelBulkDeleteBtn" class="button secondary" type="button">Annuler</button>
+          <button id="confirmBulkDeleteBtn" class="button danger" type="submit">Supprimer</button>
+        </div>
       </form>
     </dialog>
 
@@ -221,13 +235,13 @@
       <form method="dialog" class="preview-shell"><div class="preview-head"><h2 id="previewTitle"></h2><button value="close" class="button secondary" type="submit">Fermer</button></div><div id="previewBody" class="preview-body"></div></form>
     </dialog>
 
-    <div id="progressOverlay" class="progress-overlay" hidden>
-      <div class="progress-card"><h3 id="progressTitle">Operation en cours</h3><div class="progress-bar-lg"><div id="progressBarFill" class="progress-bar-fill"></div></div><p id="progressStatus">Preparation...</p></div>
+    <div id="progressOverlay" class="progress-overlay" role="status" aria-live="polite" aria-busy="true" hidden>
+      <div class="progress-card"><h3 id="progressTitle">Opération en cours</h3><progress id="progressBarFill" class="progress-bar-lg" value="0" max="1" aria-label="Progression"></progress><p id="progressStatus">Préparation…</p></div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-    <script src="./config.js?v=20260722-b"></script>
-    <script src="./static/dist/app.min.js?v=20260722-b" defer></script>
+    <script src="./config.js?v=20260727-polish-3"></script>
+    <script src="./static/dist/app.min.js?v=20260727-polish-3" defer></script>
   </body>
 </html>

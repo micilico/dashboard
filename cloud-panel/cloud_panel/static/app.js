@@ -9,6 +9,7 @@ const S = {
   selected: new Set(), focusedIdx: -1, favs: [],
   view: "files", loading: false, hasMore: true, obs: null,
   diskUsed: "", diskTotal: "", diskPct: 0,
+  uploadRows: new Map(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +26,7 @@ function fmtSize(b) {
   return `${(n / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
 }
 function fmtDate(ts) { const n = Number(ts); return n > 0 ? new Date(n * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""; }
-function fmtRel(t) { if (!t) return "Jamais"; const d = Date.now() - new Date(t).getTime(); if (d < 6e4) return "A l'instant"; if (d < 36e5) return `Il y a ${Math.round(d / 6e4)} min`; return `Il y a ${Math.round(d / 36e5)} h`; }
+function fmtRel(t) { if (!t) return "Jamais"; const d = Date.now() - new Date(t).getTime(); if (d < 6e4) return "À l’instant"; if (d < 36e5) return `Il y a ${Math.round(d / 6e4)} min`; return `Il y a ${Math.round(d / 36e5)} h`; }
 
 function fileIcon(name, isDir) {
   if (isDir) return "folder";
@@ -66,7 +67,7 @@ async function api(path, opts = {}, retry = true) {
   if (r.ok) return p;
   const d = typeof p.detail === "object" && p.detail ? p.detail : {};
   const e = new Error(d.message || p.detail || "Action impossible.");
-  e.code = d.code || `http_${r.status}`; e.recovery = d.recovery || "Reessayer"; e.status = r.status;
+  e.code = d.code || `http_${r.status}`; e.recovery = d.recovery || "Réessayer"; e.status = r.status;
   if (r.status === 403 && e.code === "csrf_expired" && retry) { await refreshSession(); return api(path, opts, false); }
   throw e;
 }
@@ -83,6 +84,12 @@ function toast(msg) {
   const el = $("toast"); el.textContent = msg; el.hidden = false;
   clearTimeout(toast._t); toast._t = setTimeout(() => el.hidden = true, 4200);
 }
+function setButtonBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  button.classList.toggle("is-loading", busy);
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+}
 function showError(e) { const el = $("alert"); qs("#alertText", el).textContent = e?.message || "Action impossible."; el.hidden = false; }
 function clearError() { $("alert").hidden = true; }
 
@@ -97,6 +104,10 @@ function updateUrl() {
   const u = new URL(window.location.href);
   if (S.path) u.searchParams.set("path", S.path); else u.searchParams.delete("path");
   u.searchParams.set("view", S.view);
+  if (S.search) u.searchParams.set("search", S.search); else u.searchParams.delete("search");
+  if (S.sortKey !== "name") u.searchParams.set("sort", S.sortKey); else u.searchParams.delete("sort");
+  if (S.sortDir !== "asc") u.searchParams.set("direction", S.sortDir); else u.searchParams.delete("direction");
+  if (S.page > 1) u.searchParams.set("page", String(S.page)); else u.searchParams.delete("page");
   window.history.replaceState({}, "", u.toString());
 }
 
@@ -104,7 +115,7 @@ function updateUrl() {
 async function loadFiles(append) {
   if (S.loading) return; S.loading = true;
   const el = $("scrollSentinel");
-  if (!append) { el.classList.remove("loading"); S.files = []; renderFiles(); }
+  if (!append) { el.classList.remove("loading"); S.files = []; renderFileSkeleton(); }
   try {
     const d = await api(au(`/files?path=${encodeURIComponent(S.path)}`));
     S.diskUsed = d.disk_used || ""; S.diskTotal = d.disk_total || ""; S.diskPct = d.disk_percent || 0;
@@ -117,8 +128,24 @@ async function loadFiles(append) {
     renderSidebarDisk();
     renderFiles();
     if (S.hasMore) { el.classList.add("loading"); startObserving(); } else { el.classList.remove("loading"); stopObserving(); }
-  } catch (e) { showError(e); }
+  } catch (e) { $("fileBody").replaceChildren(); showError(e); }
   S.loading = false;
+}
+
+function renderFileSkeleton() {
+  $("emptyState").hidden = true;
+  $("paginationBar").hidden = true;
+  $("fileBody").replaceChildren(...Array.from({ length: 5 }, () => {
+    const row = document.createElement("tr");
+    row.className = "skeleton-row";
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    const line = document.createElement("span");
+    line.className = "skeleton-line";
+    cell.append(line);
+    row.append(cell);
+    return row;
+  }));
 }
 
 // ── Infinite scroll ──
@@ -148,7 +175,7 @@ function changePage(delta) {
   const all = getSortedFiltered();
   const totalPages = Math.max(1, Math.ceil(all.length / S.pageSize));
   S.page = Math.max(1, Math.min(totalPages, S.page + delta));
-  renderFiles();
+  renderFiles(); updateUrl();
 }
 
 function renderFiles() {
@@ -207,21 +234,21 @@ function renderFiles() {
     const acts = document.createElement("div"); acts.style.display = "flex"; acts.style.gap = "2px"; acts.style.justifyContent = "flex-end";
     if (!f.is_dir) {
       const dl = document.createElement("a"); dl.className = "action-btn"; dl.href = au(`/files/download?path=${encodeURIComponent(f.path)}`);
-      dl.setAttribute("aria-label", "Telecharger"); dl.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>';
+      dl.setAttribute("aria-label", "Télécharger"); dl.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>';
       acts.append(dl);
-      const pv = document.createElement("button"); pv.className = "action-btn"; pv.setAttribute("aria-label", "Apercu");
+      const pv = document.createElement("button"); pv.className = "action-btn"; pv.setAttribute("aria-label", "Aperçu");
       pv.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.25"/><path d="M12 8v4l3 3"/></svg>';
-      pv.addEventListener("click", (e) => { e.stopPropagation(); openPreview(f); }); acts.append(pv);
+      pv.addEventListener("click", (e) => { e.stopPropagation(); openPreview(f, e.currentTarget); }); acts.append(pv);
     }
     const sh = document.createElement("button"); sh.className = "action-btn"; sh.setAttribute("aria-label", "Partager");
     sh.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>';
-    sh.addEventListener("click", (e) => { e.stopPropagation(); openShare(f); }); acts.append(sh);
+    sh.addEventListener("click", (e) => { e.stopPropagation(); openShare(f, e.currentTarget); }); acts.append(sh);
     const rn = document.createElement("button"); rn.className = "action-btn"; rn.setAttribute("aria-label", "Renommer");
     rn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.25 5.25 18.75 8.75M7.75 16.25l-1 2 2-1L16 10 14 8Z"/></svg>';
-    rn.addEventListener("click", (e) => { e.stopPropagation(); openRename(f); }); acts.append(rn);
+    rn.addEventListener("click", (e) => { e.stopPropagation(); openRename(f, e.currentTarget); }); acts.append(rn);
     const dt = document.createElement("button"); dt.className = "action-btn danger"; dt.setAttribute("aria-label", "Supprimer");
     dt.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7.75h14M9 7.75V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2.25M19 7.75v11a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 18.75V7.75"/></svg>';
-    dt.addEventListener("click", (e) => { e.stopPropagation(); openDelete(f); }); acts.append(dt);
+    dt.addEventListener("click", (e) => { e.stopPropagation(); openDelete(f, e.currentTarget); }); acts.append(dt);
     td5.append(acts);
 
     tr.append(td0, td1, td2, td3, td4, td5);
@@ -235,7 +262,7 @@ function renderFiles() {
   // Pagination
   if (all.length > S.pageSize) {
     pagBar.hidden = false;
-    $("pageInfo").textContent = `Page ${S.page} / ${totalPages} · ${all.length} element(s)`;
+    $("pageInfo").textContent = `Page ${S.page} / ${totalPages} · ${all.length} élément${all.length > 1 ? "s" : ""}`;
     $("prevPageBtn").disabled = S.page <= 1;
     $("nextPageBtn").disabled = S.page >= totalPages;
   } else {
@@ -273,7 +300,7 @@ function renderBulkBar() {
   const el = $("bulkBar"); const n = S.selected.size;
   if (n === 0) { el.hidden = true; return; }
   el.hidden = false;
-  qs("#bulkCount", el).textContent = `${n} selectionne${n > 1 ? "s" : ""}`;
+  qs("#bulkCount", el).textContent = `${n} sélectionné${n > 1 ? "s" : ""}`;
 }
 
 function toggleSelect(path) {
@@ -313,7 +340,7 @@ function renderFavs() {
 }
 
 // ── Share ──
-function openShare(f) {
+function openShare(f, trigger) {
   S.shareTarget = f;
   qs("#shareItem", $("shareDialog")).textContent = f.name;
   qs("#shareResult", $("shareDialog")).hidden = true;
@@ -325,7 +352,7 @@ function openShare(f) {
   modeSelect.value = f.is_dir ? "folder" : "file";
   modeSelect.disabled = !f.is_dir;
   qs("#sharePassword", $("shareDialog")).value = "";
-  $("shareDialog").showModal();
+  openDialog($("shareDialog"), trigger);
 }
 $("confirmShareBtn").addEventListener("click", async () => {
   const f = S.shareTarget; if (!f) return;
@@ -333,33 +360,39 @@ $("confirmShareBtn").addEventListener("click", async () => {
   const expiry = parseInt(qs("#shareExpiry", $("shareDialog")).value) || 7;
   const password = qs("#sharePassword", $("shareDialog")).value;
   const msg = qs("#shareMessage", $("shareDialog")); msg.textContent = "";
+  setButtonBusy($("confirmShareBtn"), true);
   try {
     const fd = new URLSearchParams({ path: f.path, expiry_days: String(expiry), password });
     let ep = "/share/file";
     if (f.is_dir && mode === "folder") ep = "/share/folder";
-    msg.textContent = "Generation en cours...";
+    msg.textContent = "Génération en cours…";
     const r = await api(au(ep), { method: "POST", body: fd });
     qs("#shareUrl", $("shareDialog")).value = shareUrl(r.token);
     qs("#shareResult", $("shareDialog")).hidden = false;
-    msg.textContent = "Lien genere avec succes.";
+    msg.textContent = "Lien généré avec succès.";
     if (r.qrDataUrl) {
       const c = $("qrCanvas"); const img = new Image();
       img.onload = () => { const ctx = c.getContext("2d"); c.width = img.width; c.height = img.height; ctx.drawImage(img, 0, 0); };
       img.src = r.qrDataUrl;
       qs("#shareQR", $("shareDialog")).hidden = false;
     }
-  } catch (e) { msg.textContent = "Erreur: " + e.message; console.error("Share failed", e); }
+  } catch (e) {
+    msg.textContent = "Erreur : " + e.message;
+    console.error("Share failed", e);
+  } finally {
+    setButtonBusy($("confirmShareBtn"), false);
+  }
 });
 $("copyLinkBtn").addEventListener("click", () => {
   const inp = qs("#shareUrl", $("shareDialog")); inp.select(); navigator.clipboard?.writeText(inp.value);
-  toast("Lien copie.");
+  toast("Lien copié.");
 });
 $("cancelShareBtn").addEventListener("click", () => { $("shareDialog").close(); S.shareTarget = null; });
 
 
 
 // ── Preview ──
-function openPreview(f) {
+function openPreview(f, trigger) {
   const ext = (f.name || "").split(".").pop().toLowerCase();
   const imgExts = ["jpg","jpeg","png","gif","webp","svg","bmp","ico"];
   const vidExts = ["mp4","webm","ogg","mov"];
@@ -368,22 +401,56 @@ function openPreview(f) {
   const body = $("previewBody"); const title = $("previewTitle");
   title.textContent = f.name;
   const dlUrl = au(`/files/download?path=${encodeURIComponent(f.path)}`);
-  if (imgExts.includes(ext)) body.innerHTML = `<img src="${dlUrl}" alt="${f.name}" loading="lazy">`;
-  else if (vidExts.includes(ext)) body.innerHTML = `<video controls autoplay><source src="${dlUrl}"></video>`;
-  else if (audExts.includes(ext)) body.innerHTML = `<audio controls autoplay><source src="${dlUrl}"></audio>`;
-  else if (txtExts.includes(ext)) fetch(dlUrl).then(r => r.text()).then(t => body.innerHTML = `<pre>${t.replace(/</g,"&lt;")}</pre>`).catch(() => body.innerHTML = "<p>Impossible de lire le fichier.</p>");
-  else body.innerHTML = `<p>Apercu non disponible pour ce type de fichier. <a href="${dlUrl}" target="_blank">Telecharger</a></p>`;
-  $("previewDialog").showModal();
+  body.replaceChildren();
+  if (imgExts.includes(ext)) {
+    const image = document.createElement("img");
+    image.src = dlUrl;
+    image.alt = f.name;
+    image.loading = "lazy";
+    body.append(image);
+  } else if (vidExts.includes(ext) || audExts.includes(ext)) {
+    const media = document.createElement(vidExts.includes(ext) ? "video" : "audio");
+    media.controls = true;
+    media.autoplay = true;
+    const source = document.createElement("source");
+    source.src = dlUrl;
+    media.append(source);
+    body.append(media);
+  } else if (txtExts.includes(ext)) {
+    const pre = document.createElement("pre");
+    pre.textContent = "Chargement…";
+    body.append(pre);
+    fetch(dlUrl)
+      .then(r => {
+        if (!r.ok) throw new Error("Lecture impossible");
+        return r.text();
+      })
+      .then(text => { pre.textContent = text; })
+      .catch(() => { pre.textContent = "Impossible de lire le fichier."; });
+  } else {
+    const message = document.createElement("p");
+    message.append("Aperçu non disponible pour ce type de fichier. ");
+    const download = document.createElement("a");
+    download.href = dlUrl;
+    download.target = "_blank";
+    download.rel = "noopener noreferrer";
+    download.textContent = "Télécharger";
+    message.append(download);
+    body.append(message);
+  }
+  openDialog($("previewDialog"), trigger);
 }
 // ── Dialogs ──
-function openRename(f) { S.renameTarget = f; $("renameInput").value = f.name; qs("#renameMessage", $("renameDialog")).textContent = ""; $("renameDialog").showModal(); }
-function openDelete(f) { S.deleteTarget = f; qs("#deleteName", $("deleteDialog")).textContent = f.name; $("deleteDialog").showModal(); }
+function openRename(f, trigger) { S.renameTarget = f; $("renameInput").value = f.name; qs("#renameMessage", $("renameDialog")).textContent = ""; openDialog($("renameDialog"), trigger); }
+function openDelete(f, trigger) { S.deleteTarget = f; qs("#deleteName", $("deleteDialog")).textContent = f.name; openDialog($("deleteDialog"), trigger); }
 
 // ── Events ──
-$("btnUpload").addEventListener("click", () => $("uploadDialog").showModal());
-$("btnMkdir").addEventListener("click", () => { $("mkdirNameInput").value = ""; qs("#mkdirMessage", $("mkdirDialog")).textContent = ""; $("mkdirDialog").showModal(); });
+$("btnUpload").addEventListener("click", (event) => openDialog($("uploadDialog"), event.currentTarget));
+$("btnMkdir").addEventListener("click", (event) => { $("mkdirNameInput").value = ""; qs("#mkdirMessage", $("mkdirDialog")).textContent = ""; openDialog($("mkdirDialog"), event.currentTarget); });
 $("btnSync").addEventListener("click", async () => {
-  try { await api(au("/files/refresh"), { method: "POST" }); toast("Cache vide."); loadFiles(); } catch (e) { showError(e); }
+  setButtonBusy($("btnSync"), true);
+  try { await api(au("/files/refresh"), { method: "POST" }); toast("Cache actualisé."); loadFiles(); } catch (e) { showError(e); }
+  finally { setButtonBusy($("btnSync"), false); }
 });
 
 // Sidebar nav
@@ -402,7 +469,7 @@ function switchView(v) {
     const el = $(x + "View"); if (el) el.hidden = x !== v;
   });
   qsa(".nav-btn").forEach(b => {
-    const isActive = b.dataset.nav === v;
+    const isActive = b.dataset.nav === v || (v === "files" && b.dataset.nav === "root");
     b.classList.toggle("active", isActive);
     if (isActive) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
   });
@@ -444,33 +511,44 @@ $("shareForm").addEventListener("submit", (e) => { e.preventDefault(); $("confir
 // ── Confirm buttons ──
 $("confirmMkdirBtn").addEventListener("click", async () => {
   const name = $("mkdirNameInput").value.trim(); if (!name) { qs("#mkdirMessage", $("mkdirDialog")).textContent = "Nom requis."; return; }
+  setButtonBusy($("confirmMkdirBtn"), true);
   try {
     const fd = new FormData(); fd.append("path", S.path); fd.append("name", name);
-    await api(au("/files/mkdir"), { method: "POST", body: fd }); toast(`Dossier "${name}" cree.`); $("mkdirDialog").close(); loadFiles();
+    await api(au("/files/mkdir"), { method: "POST", body: fd }); toast(`Dossier « ${name} » créé.`); $("mkdirDialog").close(); loadFiles();
   } catch (e) { qs("#mkdirMessage", $("mkdirDialog")).textContent = e.message; }
+  finally { setButtonBusy($("confirmMkdirBtn"), false); }
 });
 $("cancelMkdirBtn").addEventListener("click", () => $("mkdirDialog").close());
 
 $("confirmRenameBtn").addEventListener("click", async () => {
   const n = $("renameInput").value.trim(); if (!n || !S.renameTarget) return;
+  setButtonBusy($("confirmRenameBtn"), true);
   try {
     const fd = new FormData(); fd.append("path", S.path); fd.append("old_name", S.renameTarget.name); fd.append("new_name", n);
-    await api(au("/files/rename"), { method: "POST", body: fd }); toast("Renomme."); $("renameDialog").close(); S.renameTarget = null; loadFiles();
+    await api(au("/files/rename"), { method: "POST", body: fd }); toast("Élément renommé."); $("renameDialog").close(); S.renameTarget = null; loadFiles();
   } catch (e) { qs("#renameMessage", $("renameDialog")).textContent = e.message; }
+  finally { setButtonBusy($("confirmRenameBtn"), false); }
 });
 $("cancelRenameBtn").addEventListener("click", () => { $("renameDialog").close(); S.renameTarget = null; });
 
 $("confirmDeleteBtn").addEventListener("click", async () => {
   if (!S.deleteTarget) return;
+  setButtonBusy($("confirmDeleteBtn"), true);
   try {
     const fd = new FormData(); fd.append("path", S.path); fd.append("name", S.deleteTarget.name);
-    await api(au("/files/delete"), { method: "POST", body: fd }); toast("Supprime."); $("deleteDialog").close(); S.deleteTarget = null; loadFiles();
+    await api(au("/files/delete"), { method: "POST", body: fd }); toast("Élément supprimé."); $("deleteDialog").close(); S.deleteTarget = null; loadFiles();
   } catch (e) { showError(e); }
+  finally { setButtonBusy($("confirmDeleteBtn"), false); }
 });
 $("cancelDeleteBtn").addEventListener("click", () => { $("deleteDialog").close(); S.deleteTarget = null; });
 
 // ── Upload ──
 $("uploadZone").addEventListener("click", () => $("fileInput").click());
+$("uploadZone").addEventListener("keydown", event => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  $("fileInput").click();
+});
 $("uploadZone").addEventListener("dragover", e => { e.preventDefault(); $("uploadZone").classList.add("dragover"); });
 $("uploadZone").addEventListener("dragleave", () => $("uploadZone").classList.remove("dragover"));
 $("uploadZone").addEventListener("drop", e => { e.preventDefault(); $("uploadZone").classList.remove("dragover"); if (e.dataTransfer.files.length) startUpload(e.dataTransfer.files); });
@@ -479,18 +557,25 @@ $("cancelUploadBtn").addEventListener("click", () => { $("uploadDialog").close()
 
 async function startUpload(files) {
   $("uploadMessage").textContent = ""; $("uploadProgress").hidden = false;
+  S.uploadRows.clear();
   $("uploadProgress").replaceChildren(...Array.from(files).map(f => {
-    const r = document.createElement("div"); r.className = "progress-row"; r.dataset.fn = f.name;
-    r.innerHTML = `<span class="pname">${f.name}</span><div class="ptrack"><div class="pfill" style="width:0"></div></div><span class="pstatus">0%</span>`;
+    const r = document.createElement("div"); r.className = "progress-row";
+    const name = document.createElement("span"); name.className = "pname"; name.textContent = f.name;
+    const track = document.createElement("div"); track.className = "ptrack";
+    const fill = document.createElement("div"); fill.className = "pfill"; fill.style.width = "0";
+    const status = document.createElement("span"); status.className = "pstatus"; status.textContent = "0%";
+    track.append(fill);
+    r.append(name, track, status);
+    S.uploadRows.set(f, r);
     return r;
   }));
   for (const f of files) await uploadOne(f);
-  toast("Upload termine."); $("uploadProgress").hidden = true; loadFiles();
+  toast("Téléversement terminé."); $("uploadProgress").hidden = true; loadFiles();
 }
 
 async function uploadOne(file) {
   const fd = new FormData(); fd.append("path", S.path); fd.append("file", file);
-  const row = qs(`[data-fn="${file.name}"]`, $("uploadProgress"));
+  const row = S.uploadRows.get(file);
   const fill = qs(".pfill", row); const st = qs(".pstatus", row);
   try {
     const xhr = new XMLHttpRequest();
@@ -510,17 +595,27 @@ async function uploadOne(file) {
 $("selectAll").addEventListener("change", selectAll);
 
 // ── Sort ──
-qsa(".sortable").forEach(th => th.addEventListener("click", () => {
+function sortByHeader(th) {
   const key = th.dataset.sort;
   if (S.sortKey === key) S.sortDir = S.sortDir === "asc" ? "desc" : "asc";
   else { S.sortKey = key; S.sortDir = key === "name" ? "asc" : "desc"; }
   S.page = 1;
-  renderSortHeaders(); renderFiles();
-}));
+  renderSortHeaders(); renderFiles(); updateUrl();
+}
+qsa(".sortable").forEach(th => {
+  th.addEventListener("click", () => sortByHeader(th));
+  th.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    sortByHeader(th);
+  });
+});
 function renderSortHeaders() {
   qsa(".sortable").forEach(th => {
-    th.classList.toggle("asc", th.dataset.sort === S.sortKey && S.sortDir === "asc");
-    th.classList.toggle("desc", th.dataset.sort === S.sortKey && S.sortDir === "desc");
+    const active = th.dataset.sort === S.sortKey;
+    th.classList.toggle("asc", active && S.sortDir === "asc");
+    th.classList.toggle("desc", active && S.sortDir === "desc");
+    th.setAttribute("aria-sort", active ? (S.sortDir === "asc" ? "ascending" : "descending") : "none");
   });
 }
 
@@ -529,28 +624,41 @@ $("prevPageBtn").addEventListener("click", () => changePage(-1));
 $("nextPageBtn").addEventListener("click", () => changePage(1));
 
 // ── Search ──
-$("searchInput").addEventListener("input", () => { S.search = $("searchInput").value.trim(); S.page = 1; renderFiles(); });
+$("searchInput").addEventListener("input", () => {
+  S.search = $("searchInput").value.trim();
+  S.page = 1;
+  renderFiles();
+  updateUrl();
+});
 
 // ── Bulk actions ──
 $("bulkClear").addEventListener("click", () => { S.selected.clear(); renderFiles(); renderBulkBar(); });
-$("bulkDelete").addEventListener("click", async () => {
+$("bulkDelete").addEventListener("click", (event) => {
   if (!S.selected.size) return;
-  if (!confirm(`Supprimer ${S.selected.size} element(s) ?`)) return;
-  const it = [...S.selected]; const ps = $("progressOverlay"); ps.hidden = false; qs("#progressTitle", ps).textContent = "Suppression...";
+  $("bulkDeleteDescription").textContent = `Supprimer ${S.selected.size} élément${S.selected.size > 1 ? "s" : ""} sélectionné${S.selected.size > 1 ? "s" : ""} ?`;
+  openDialog($("bulkDeleteDialog"), event.currentTarget);
+});
+$("cancelBulkDeleteBtn").addEventListener("click", () => $("bulkDeleteDialog").close());
+$("bulkDeleteForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("bulkDeleteDialog").close();
+  const it = [...S.selected]; const ps = $("progressOverlay"); ps.hidden = false; qs("#progressTitle", ps).textContent = "Suppression…";
+  qs("#progressBarFill", ps).value = 0;
   let done = 0;
   for (const p of it) {
     try { const fd = new FormData(); const pp = p.split("/").slice(0, -1).join("/"); const nm = p.split("/").pop(); fd.append("path", pp); fd.append("name", nm); await api(au("/files/delete"), { method: "POST", body: fd }); } catch {}
-    done++; qs("#progressBarFill", ps).style.width = `${done / it.length * 100}%`; qs("#progressStatus", ps).textContent = `${done}/${it.length}`;
+    done++; qs("#progressBarFill", ps).value = done / it.length; qs("#progressStatus", ps).textContent = `${done}/${it.length}`;
   }
-  ps.hidden = true; S.selected.clear(); toast("Suppression terminee."); loadFiles();
+  ps.hidden = true; S.selected.clear(); toast("Suppression terminée."); loadFiles();
 });
 $("bulkShare").addEventListener("click", async () => {
   if (!S.selected.size) return;
-  const it = [...S.selected]; const ps = $("progressOverlay"); ps.hidden = false; qs("#progressTitle", ps).textContent = "Generation de liens...";
+  const it = [...S.selected]; const ps = $("progressOverlay"); ps.hidden = false; qs("#progressTitle", ps).textContent = "Génération de liens…";
+  qs("#progressBarFill", ps).value = 0;
   let results = []; let errors = 0; let lastErr = "";
   for (const p of it) {
     try { const r = await api(au("/share/file"), { method: "POST", body: new URLSearchParams({ path: p, expiry_days: "7", password: "" }) }); results.push(r); } catch (e) { errors++; lastErr = e.message; console.error("Share failed for", p, e); }
-    qs("#progressBarFill", ps).style.width = `${(results.length + errors) / it.length * 100}%`;
+    qs("#progressBarFill", ps).value = (results.length + errors) / it.length;
     qs("#progressStatus", ps).textContent = `${results.length} OK, ${errors} erreur(s)`;
   }
   ps.hidden = true;
@@ -559,7 +667,7 @@ $("bulkShare").addEventListener("click", async () => {
     navigator.clipboard?.writeText(msg);
   }
   const detail = errors && lastErr ? ` — Derniere erreur: ${lastErr}` : "";
-  toast(`${results.length} lien(s) genere(s)${errors ? `, ${errors} erreur(s)${detail}` : ""}${results.length ? " et copie(s)" : ""}.`);
+  toast(`${results.length} lien${results.length > 1 ? "s" : ""} généré${results.length > 1 ? "s" : ""}${errors ? `, ${errors} erreur${errors > 1 ? "s" : ""}${detail}` : ""}${results.length ? " et copié(s)" : ""}.`);
 });
 $("bulkDownload").addEventListener("click", async () => {
   const it = [...S.selected]; if (!it.length) return;
@@ -571,17 +679,41 @@ $("bulkDownload").addEventListener("click", async () => {
     const fd = new FormData(); fd.append("paths", it.join("\n"));
     const blob = await fetch(au("/files/download-zip"), { method: "POST", headers: { "X-Cloud-Panel-CSRF": S.csrf }, body: fd }).then(r => { if (!r.ok) throw new Error("Erreur ZIP"); return r.blob(); });
     const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "cloud-panel-bulk.zip"; a.click(); URL.revokeObjectURL(url);
-    toast("Archive ZIP telechargee.");
+    toast("Archive ZIP téléchargée.");
   } catch (e) { showError(e); }
 });
 
 // ── History ──
 async function loadHistory() {
   try { const d = await api(au("/history/data")); const items = d.items || [];
-    const b = $("historyBody"); if (!items.length) { b.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted)">Aucun historique.</td></tr>'; return; }
+    const b = $("historyBody"); if (!items.length) {
+      const row = document.createElement("tr");
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      cell.className = "table-empty-cell";
+      cell.textContent = "Aucun historique.";
+      row.append(cell);
+      b.replaceChildren(row);
+      return;
+    }
     b.replaceChildren(...items.map(h => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="date-cell">${fmtDate(h.date)}</td><td>${h.filename}</td><td class="size-cell">${fmtSize(h.size_bytes)}</td><td>${h.action}</td><td>${h.token ? `<a href="${rt(`/download/${h.token}`)}" target="_blank">Lien</a>` : "—"}</td>`;
+      const date = document.createElement("td"); date.className = "date-cell"; date.textContent = fmtDate(h.date);
+      const filename = document.createElement("td"); filename.textContent = h.filename || "";
+      const size = document.createElement("td"); size.className = "size-cell"; size.textContent = fmtSize(h.size_bytes);
+      const action = document.createElement("td"); action.textContent = h.action || "";
+      const linkCell = document.createElement("td");
+      if (h.token) {
+        const link = document.createElement("a");
+        link.href = rt(`/download/${encodeURIComponent(h.token)}`);
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Lien";
+        linkCell.append(link);
+      } else {
+        linkCell.textContent = "—";
+      }
+      tr.append(date, filename, size, action, linkCell);
       return tr;
     }));
   } catch (e) { showError(e); }
@@ -590,18 +722,40 @@ async function loadHistory() {
 // ── Links ──
 async function loadLinks() {
   try { const d = await api(au("/links")); const items = d.items || [];
-    const b = $("linksBody"); if (!items.length) { b.innerHTML = '<tr class="links-empty-row"><td colspan="6" style="text-align:center;color:var(--muted)">Aucun lien.</td></tr>'; return; }
+    const b = $("linksBody"); if (!items.length) {
+      const row = document.createElement("tr");
+      row.className = "links-empty-row";
+      const cell = document.createElement("td");
+      cell.colSpan = 6;
+      cell.className = "table-empty-cell";
+      cell.textContent = "Aucun lien.";
+      row.append(cell);
+      b.replaceChildren(row);
+      return;
+    }
     b.replaceChildren(...items.map(l => {
       const tr = document.createElement("tr");
       const expired = l.expires_at && l.expires_at < Date.now() / 1000;
-      const status = l.is_revoked ? "Revogue" : expired ? "Expire" : "Actif";
-      const sc = l.is_revoked ? "var(--danger)" : expired ? "var(--warning)" : "var(--success)";
-      tr.innerHTML = `<td class="link-file-cell" data-label="Fichier">${l.filename}</td><td class="link-token-cell" data-label="Token" style="font-size:.8rem;font-family:monospace">${l.token.slice(0, 16)}...</td><td data-label="Telechargements">${l.download_count}</td><td class="date-cell" data-label="Expire">${l.expires_at ? fmtDate(l.expires_at) : "Jamais"}</td><td data-label="Statut" style="color:${sc};font-weight:600">${status}</td><td class="action-cell force link-actions-cell" data-label="Actions">`;
-      const acts = qs("td:last-child", tr);
+      const status = l.is_revoked ? "Révoqué" : expired ? "Expiré" : "Actif";
+      const filename = document.createElement("td");
+      filename.className = "link-file-cell"; filename.dataset.label = "Fichier"; filename.textContent = l.filename || "";
+      const token = document.createElement("td");
+      token.className = "link-token-cell"; token.dataset.label = "Jeton"; token.textContent = `${String(l.token || "").slice(0, 16)}…`;
+      const downloads = document.createElement("td");
+      downloads.dataset.label = "Téléchargements"; downloads.textContent = String(l.download_count ?? 0);
+      const expiry = document.createElement("td");
+      expiry.className = "date-cell"; expiry.dataset.label = "Expire"; expiry.textContent = l.expires_at ? fmtDate(l.expires_at) : "Jamais";
+      const statusCell = document.createElement("td");
+      statusCell.dataset.label = "Statut";
+      statusCell.className = `status-text ${l.is_revoked ? "is-error" : expired ? "is-warning" : "is-success"}`;
+      statusCell.textContent = status;
+      const acts = document.createElement("td");
+      acts.className = "action-cell force link-actions-cell"; acts.dataset.label = "Actions";
+      tr.append(filename, token, downloads, expiry, statusCell, acts);
       if (!l.is_revoked && !expired) {
         const rv = document.createElement("button"); rv.className = "action-btn danger"; rv.setAttribute("aria-label", "Revoguer");
         rv.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7.75h14M9 7.75V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2.25"/></svg>';
-        rv.addEventListener("click", async () => { await api(au("/links/revoke"), { method: "POST", body: new URLSearchParams({ token: l.token }) }); toast("Lien revoque."); loadLinks(); });
+        rv.addEventListener("click", async () => { await api(au("/links/revoke"), { method: "POST", body: new URLSearchParams({ token: l.token }) }); toast("Lien révoqué."); loadLinks(); });
         acts.append(rv);
         const ex = document.createElement("button"); ex.className = "action-btn"; ex.setAttribute("aria-label", "Prolonger");
         ex.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>';
@@ -610,7 +764,7 @@ async function loadLinks() {
       }
       const cp = document.createElement("button"); cp.className = "action-btn"; cp.setAttribute("aria-label", "Copier lien");
       cp.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-      cp.addEventListener("click", () => { navigator.clipboard?.writeText(shareUrl(l.token)); toast("Lien copie."); });
+      cp.addEventListener("click", () => { navigator.clipboard?.writeText(shareUrl(l.token)); toast("Lien copié."); });
       acts.append(cp);
       return tr;
     }));
@@ -621,12 +775,14 @@ async function loadLinks() {
 async function loadStats() {
   try { const d = await api(au("/stats")); const g = $("statsGrid");
     const cards = [
-      ["total_links", "Liens crees"], ["active_links", "Liens actifs"], ["expired_links", "Liens expires"],
-      ["revoked_links", "Liens revoques"], ["total_downloads", "Telechargements"], ["total_history", "Uploads"], ["total_favorites", "Favoris"],
+      ["total_links", "Liens créés"], ["active_links", "Liens actifs"], ["expired_links", "Liens expirés"],
+      ["revoked_links", "Liens révoqués"], ["total_downloads", "Téléchargements"], ["total_history", "Téléversements"], ["total_favorites", "Favoris"],
     ];
     g.replaceChildren(...cards.map(([k, l]) => {
       const c = document.createElement("div"); c.className = "stat-card";
-      c.innerHTML = `<div class="stat-value">${d[k] ?? "—"}</div><div class="stat-label">${l}</div>`;
+      const value = document.createElement("div"); value.className = "stat-value"; value.textContent = String(d[k] ?? "—");
+      const label = document.createElement("div"); label.className = "stat-label"; label.textContent = l;
+      c.append(value, label);
       return c;
     }));
   } catch (e) { showError(e); }
@@ -640,6 +796,12 @@ async function init() {
   const u = new URL(window.location.href);
   const v = u.searchParams.get("view") || "files";
   S.path = u.searchParams.get("path") || "";
+  S.search = u.searchParams.get("search") || "";
+  S.sortKey = ["name", "size", "date"].includes(u.searchParams.get("sort")) ? u.searchParams.get("sort") : "name";
+  S.sortDir = u.searchParams.get("direction") === "desc" ? "desc" : "asc";
+  S.page = Math.max(1, Number.parseInt(u.searchParams.get("page") || "1", 10) || 1);
+  $("searchInput").value = S.search;
+  renderSortHeaders();
   await refreshSession();
   await loadFavs();
   switchView(v);
