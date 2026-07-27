@@ -8,6 +8,7 @@
   border-radius: var(--radius-card);
   background: var(--surface-elevated);
   box-shadow: var(--shadow-panel);
+  overflow: hidden;
 }
 
 .summary-grid {
@@ -38,6 +39,19 @@
 .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 20px; }
 .list { display: grid; gap: 10px; }
 .list-item { display: grid; gap: 4px; }
+
+.panel,
+.table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-panel);
+  overflow: hidden;
+}
+
+.panel-body {
+  padding: 20px 24px 24px;
+}
 
 .card-hero {
   border-radius: var(--radius-hero);

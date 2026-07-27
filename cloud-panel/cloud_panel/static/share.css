@@ -22,6 +22,9 @@
   --accent-action-hover: #5f4ddb;
   --text-on-accent: #ffffff;
   --accent-soft: rgba(124, 108, 255, 0.14);
+  --surface-elevated: rgba(16, 18, 23, 0.94);
+  --surface-soft: rgba(255, 255, 255, 0.035);
+  --border-hover: rgba(255, 255, 255, 0.18);
   --danger-soft: rgba(255, 107, 114, 0.12);
   --danger-border: rgba(239, 68, 68, 0.25);
   --danger-text: #fecaca;
@@ -65,7 +68,7 @@ body {
   padding: 40px 32px 32px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--surface);
+  background: var(--surface-elevated);
   box-shadow: var(--shadow-panel);
   text-align: center;
 }
@@ -91,6 +94,7 @@ body {
   align-items: center;
   justify-content: center;
   margin: 0 auto 16px;
+  border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface-2);
   color: var(--muted);
@@ -121,6 +125,7 @@ body {
 .mi {
   min-width: 0;
   padding: 12px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--surface-2);
 }
@@ -191,7 +196,7 @@ input:focus-visible {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--surface-2);
+  background: var(--surface-soft);
   color: var(--muted);
   font-size: 14px;
 }
@@ -295,6 +300,7 @@ input:focus { border-color: var(--accent); }
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
+  border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--surface-2);
   color: var(--accent);
@@ -333,7 +339,7 @@ input:focus { border-color: var(--accent); }
 .folder-table {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
   border-collapse: collapse;
   overflow: hidden;
 }
@@ -398,7 +404,7 @@ input:focus { border-color: var(--accent); }
 }
 
 .mini-btn:hover {
-  border-color: var(--accent);
+  border-color: var(--border-hover);
   background: var(--accent-soft);
   color: var(--text);
 }

@@ -19,8 +19,8 @@
             </svg>
           </a>
           <div class="brand-copy">
-            <p class="eyebrow">Stockage cloud</p>
-            <h1>Cloud Panel</h1>
+            <p class="eyebrow">Centre de contrôle</p>
+            <h1>Dashboard</h1>
           </div>
         </div>
         <nav class="nav nav-cloud" aria-label="Navigation cloud">
@@ -60,6 +60,20 @@
           <div class="sidebar-path" id="sidebarPath">/mnt/ultra-media/</div>
         </div>
       </header>
+
+      <section class="page-header" aria-labelledby="cloudTitle">
+        <div class="page-header-copy">
+          <p class="eyebrow">Stockage cloud</p>
+          <h2 id="cloudTitle">Cloud Panel</h2>
+          <p class="page-subtitle">Fichiers, favoris, liens de partage et statistiques dans le même shell opérationnel.</p>
+          <div id="pageStatus" class="page-status" hidden></div>
+        </div>
+        <div class="page-header-actions">
+          <button id="headerSyncButton" class="icon-button" title="Synchroniser" aria-label="Synchroniser" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+          </button>
+        </div>
+      </section>
 
       <div class="content-panel cloud-content" id="cloudContent" data-od-id="cloud-content">
 

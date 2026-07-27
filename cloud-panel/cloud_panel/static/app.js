@@ -453,6 +453,10 @@ $("btnSync").addEventListener("click", async () => {
   finally { setButtonBusy($("btnSync"), false); }
 });
 
+$("headerSyncButton")?.addEventListener("click", () => {
+  $("btnSync").click();
+});
+
 // Sidebar nav
 qsa("[data-nav]").forEach(b => b.addEventListener("click", () => {
   const v = b.dataset.nav;
