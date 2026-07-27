@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -64,6 +64,17 @@ def validate_magnet(magnet: str) -> tuple[str | None, str | None]:
     if "xt=urn:btih:" not in candidate and "xt=urn:btmh:" not in candidate:
         return None, "Lien magnet sans identifiant torrent."
     return candidate, None
+
+
+def _magnet_with_tracker(magnet: str, tracker_url: str) -> str:
+    parsed = urlparse(magnet)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    existing_trackers = {value.strip() for key, value in query if key == "tr"}
+    if tracker_url in existing_trackers:
+        return magnet
+    query.append(("tr", tracker_url))
+    encoded = urlencode(query, doseq=True, quote_via=quote)
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, encoded, parsed.fragment))
 
 
 def qbit_error_response(exc: QbitError) -> HTTPException:
@@ -188,6 +199,17 @@ async def set_torrent_sequential(request: Request, payload: TorrentSequentialUpd
     return {"status": "sequential_updated", "count": len(hashes), "enabled": payload.enabled}
 
 
+@router.get("/torrents/stats/trackers")
+async def torrent_tracker_stats(request: Request) -> dict[str, Any]:
+    try:
+        torrents = await request.app.state.qbit.torrents()
+        tracker_payload = await _tracker_index_payload(request, torrents=torrents)
+        stats = request.app.state.tracker_stats.observe(torrents, tracker_payload["index"])
+        return {"stats": stats}
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+
 @router.get("/torrents/{torrent_hash}/trackers")
 async def torrent_trackers(request: Request, torrent_hash: str) -> dict[str, Any]:
     try:
@@ -269,15 +291,18 @@ def _sanitize_tracker_for_logs(url: str) -> str:
 
 @router.get("/trackers/index")
 async def tracker_index(request: Request) -> dict[str, Any]:
+    return await _tracker_index_payload(request)
+
+
+async def _tracker_index_payload(request: Request, torrents: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     now = time.monotonic()
     cache = _TRACKER_INDEX_CACHE
-    if cache["data"] is not None and now - cache["ts"] < _TRACKER_CACHE_TTL:
+    should_use_cache = torrents is None
+    if should_use_cache and cache["data"] is not None and now - cache["ts"] < _TRACKER_CACHE_TTL:
         return cache["data"]
 
-    try:
+    if torrents is None:
         torrents = await request.app.state.qbit.torrents()
-    except QbitError as exc:
-        raise qbit_error_response(exc) from exc
 
     sem = asyncio.Semaphore(_TRACKER_CONCURRENCY)
 
@@ -307,8 +332,9 @@ async def tracker_index(request: Request) -> dict[str, Any]:
                 domain_counter[d] = domain_counter.get(d, 0) + 1
 
     payload = {"index": index, "domains": domain_counter}
-    cache["data"] = payload
-    cache["ts"] = now
+    if should_use_cache:
+        cache["data"] = payload
+        cache["ts"] = now
     return payload
 
 
@@ -416,6 +442,24 @@ async def add_torrent(request: Request, payload: AddMagnet) -> dict[str, object]
     if not accepted:
         return {"status": "rejected", "accepted": 0, "rejected": rejected}
 
+    tr4ker_tracker_applied = False
+    if payload.addTr4kerTracker:
+        tracker_url = TR4KER_ANNOUNCE_URL.strip()
+        if not tracker_url:
+            raise HTTPException(
+                status_code=422,
+                detail=error_detail(
+                    "tr4ker_tracker_not_configured",
+                    "Adresse d'annonce tr4ker non configurée.",
+                    "Renseigner TORRENT_PANEL_TR4KER_ANNOUNCE_URL dans le .env",
+                ),
+            )
+        validation_error = _validate_tracker_url(tracker_url)
+        if validation_error:
+            raise HTTPException(status_code=422, detail=error_detail("tracker_url_invalid", validation_error, "Vérifier l'adresse"))
+        accepted = [_magnet_with_tracker(magnet, tracker_url) for magnet in accepted]
+        tr4ker_tracker_applied = True
+
     try:
         await request.app.state.qbit.add_magnet(
             "\n".join(accepted),
@@ -426,4 +470,4 @@ async def add_torrent(request: Request, payload: AddMagnet) -> dict[str, object]
         )
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-    return {"status": "added", "accepted": len(accepted), "rejected": rejected}
+    return {"status": "added", "accepted": len(accepted), "rejected": rejected, "tr4kerTrackerApplied": tr4ker_tracker_applied}

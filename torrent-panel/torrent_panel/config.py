@@ -82,6 +82,12 @@ AUTOMATION_RULES_STATE_PATH = Path(
         str(Path(__file__).resolve().parents[1] / "data" / "automation-rules.json"),
     )
 )
+TRACKER_STATS_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_TRACKER_STATS_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "tracker-stats-state.json"),
+    )
+)
 MEDIA_MOUNT_PATH = os.getenv("TORRENT_PANEL_MEDIA_MOUNT_PATH", MONITOR_DISK_PATH)
 RCLONE_REFRESH_MODE = os.getenv("TORRENT_PANEL_RCLONE_REFRESH_MODE", "auto").strip().lower()
 RCLONE_RC_REFRESH_URL = os.getenv("TORRENT_PANEL_RCLONE_RC_REFRESH_URL", "http://host.docker.internal:5572/vfs/refresh")

@@ -21,6 +21,7 @@ from torrent_panel.main import (  # noqa: E402
 )
 from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
+from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
 
 
 VALID_HASH = "a" * 40
@@ -78,6 +79,7 @@ class BackendTests(unittest.TestCase):
     def setUp(self):
         self.original_qbit = app.state.qbit
         self.original_media = app.state.media_automation
+        self.original_tracker_stats = app.state.tracker_stats
         self.original_limiter = app.state.action_limiter
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
         self.original_tr4ker_announce_url = torrent_routes.TR4KER_ANNOUNCE_URL
@@ -107,6 +109,7 @@ class BackendTests(unittest.TestCase):
                 jellyfin_global_fallback=True,
             ),
         )
+        app.state.tracker_stats = TrackerStatsStore(temp_state.parent / "tracker-stats.json")
         app.state.action_limiter = RateLimiter(max_calls=100, period_seconds=60, max_keys=100)
         app.state.csrf_tokens = {}
         self.client = TestClient(app)
@@ -117,6 +120,7 @@ class BackendTests(unittest.TestCase):
         self.client.close()
         app.state.qbit = self.original_qbit
         app.state.media_automation = self.original_media
+        app.state.tracker_stats = self.original_tracker_stats
         app.state.action_limiter = self.original_limiter
         app.state.csrf_tokens = self.original_csrf_tokens
         torrent_routes.TR4KER_ANNOUNCE_URL = self.original_tr4ker_announce_url
@@ -273,6 +277,37 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(app.state.qbit.calls[-1][0], "add")
         self.assertEqual(app.state.qbit.calls[-1][2]["category"], "Films")
 
+    def test_add_tr4ker_magnet_injects_private_tracker_backend_side(self):
+        tracker_url = "https://tr4ker.test/announce?passkey=secret"
+        torrent_routes.TR4KER_ANNOUNCE_URL = tracker_url
+
+        response = self.post_action(
+            "/torrent-panel/api/torrents/add",
+            {
+                "magnets": ["magnet:?xt=urn:btih:" + VALID_HASH],
+                "addTr4kerTracker": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["tr4kerTrackerApplied"])
+        sent_magnet = app.state.qbit.calls[-1][1]
+        self.assertIn("tr=https%3A%2F%2Ftr4ker.test%2Fannounce%3Fpasskey%3Dsecret", sent_magnet)
+
+    def test_add_tr4ker_magnet_reports_missing_env(self):
+        torrent_routes.TR4KER_ANNOUNCE_URL = ""
+
+        response = self.post_action(
+            "/torrent-panel/api/torrents/add",
+            {
+                "magnets": ["magnet:?xt=urn:btih:" + VALID_HASH],
+                "addTr4kerTracker": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "tr4ker_tracker_not_configured")
+
     def test_rate_limiter_is_bounded(self):
         limiter = RateLimiter(max_calls=1, period_seconds=60, max_keys=2)
         self.assertTrue(limiter.allow("a"))
@@ -327,6 +362,28 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(body["overview"]["activeTorrents"], 1)
         self.assertGreaterEqual(body["overview"]["downloadSpeedBytes"], 4096)
 
+    def test_tracker_stats_records_daily_deltas_by_tracker(self):
+        app.state.qbit.trackers_payload = [{"url": "https://tracker.test/announce"}]
+        app.state.qbit.torrents_payload = [
+            {"hash": VALID_HASH, "name": "Ubuntu", "downloaded": 1000, "uploaded": 100, "tracker": "tracker.test"}
+        ]
+        first = self.client.get("/torrent-panel/api/torrents/stats/trackers")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json()["stats"]["totals"][0]["downloaded"], 0)
+
+        app.state.qbit.torrents_payload = [
+            {"hash": VALID_HASH, "name": "Ubuntu", "downloaded": 1500, "uploaded": 350, "tracker": "tracker.test"}
+        ]
+        second = self.client.get("/torrent-panel/api/torrents/stats/trackers")
+
+        self.assertEqual(second.status_code, 200)
+        stats = second.json()["stats"]
+        self.assertEqual(stats["totals"][0]["tracker"], "tracker.test")
+        self.assertEqual(stats["totals"][0]["downloaded"], 500)
+        self.assertEqual(stats["totals"][0]["uploaded"], 250)
+        self.assertEqual(stats["totals"][0]["ratio"], 0.5)
+
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
@@ -349,6 +406,7 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
                         "ratio": 1.25,
                         "size": 1000,
                         "downloaded": 500,
+                        "uploaded": 125,
                         "amount_left": 500,
                         "eta": 3600,
                         "added_on": 10,
@@ -368,6 +426,7 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.client._request = fake_request
         torrents = await self.client.torrents()
         self.assertEqual(torrents[0]["remaining"], 500)
+        self.assertEqual(torrents[0]["uploaded"], 125)
         self.assertEqual(torrents[0]["eta"], 3600)
         self.assertEqual(torrents[0]["category"], "Films")
         self.assertEqual(torrents[0]["tracker"], "tracker.test")

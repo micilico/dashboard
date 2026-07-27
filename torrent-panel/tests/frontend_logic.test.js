@@ -38,7 +38,7 @@ function createElement(selector = "") {
 }
 
 const elements = new Map();
-const sortHeads = ["name", "state", "progress", "downloadSpeed", "uploadSpeed", "ratio", "size", "eta"].map((key) => {
+const sortHeads = ["name", "state", "progress", "downloadSpeed", "uploadSpeed", "ratio", "size", "eta", "addedOn"].map((key) => {
   const el = createElement(".sort-head");
   el.dataset.sort = key;
   el.textContent = key;
@@ -102,6 +102,8 @@ assert.equal(overviewHtml.includes("overview-storage-card"), false);
 assert.equal(overviewHtml.includes("storageVisualization"), false);
 assert.match(overviewHtml, /id="overviewMetrics"[\s\S]+class="overview-lower-grid"/);
 assert.match(overviewHtml, /class="selection-toolbar"[\s\S]+id="selectVisible"[\s\S]+class="torrent-table"/);
+assert.match(overviewHtml, /data-sort="addedOn"/);
+assert.match(overviewHtml, /id="tr4kerTrackerInput"/);
 assert.equal(source.includes("renderStorageCard"), false);
 assert.equal(source.includes("storageVisualization"), false);
 assert.equal(source.includes("Operationnel"), false);
@@ -126,8 +128,8 @@ assert.equal(api.stateMeta({ state: "metaDL", progress: 0.1 }).text, "M√©tadonn√
 assert.equal(api.stateMeta({ state: "queuedUP", progress: 1 }).text, "En attente de partage");
 
 api.state.torrents = [
-  { hash: "a", name: "Ubuntu ISO", state: "downloading", downloadSpeed: 200, progress: 0.3, tags: "linux", category: "Images" },
-  { hash: "b", name: "Archive", state: "stalledDL", downloadSpeed: 0, progress: 0.1, tags: "backup", category: "Docs" },
+  { hash: "a", name: "Ubuntu ISO", state: "downloading", downloadSpeed: 200, progress: 0.3, tags: "linux", category: "Images", addedOn: 20 },
+  { hash: "b", name: "Archive", state: "stalledDL", downloadSpeed: 0, progress: 0.1, tags: "backup", category: "Docs", addedOn: 10 },
 ];
 api.state.prefs.search = "archive";
 api.state.prefs.status = "all";
@@ -139,6 +141,9 @@ assert.equal(api.filteredTorrents()[0].hash, "b");
 
 api.state.prefs.search = "";
 assert.equal(api.filteredTorrents()[0].hash, "b");
+api.state.prefs.sort = "addedOn";
+api.state.prefs.direction = "desc";
+assert.equal(api.filteredTorrents()[0].hash, "a");
 
 api.state.selected.add("a");
 api.renderSelection(api.state.torrents);

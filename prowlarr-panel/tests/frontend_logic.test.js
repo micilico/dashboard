@@ -227,6 +227,7 @@ api.state.lastGrab = { title: "Ubuntu ISO", followUrl: api.buildTorrentFollowUrl
 api.renderGrabNotice();
 assert.equal(elements.get("#grabNotice").hidden, false);
 assert.equal(flattenText(elements.get("#grabNotice")).includes("Suivre dans Torrent Panel"), true);
+assert.equal(source.includes('source", isTr4kerIndexer(indexer) ? "tr4ker" : "prowlarr"'), true);
 
 const tabs = context.document.querySelectorAll(".tab");
 api.setView("search", { replace: false });

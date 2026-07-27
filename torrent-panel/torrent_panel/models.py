@@ -34,6 +34,7 @@ class AddMagnet(BaseModel):
     category: str = Field(default="", max_length=80)
     tags: str = Field(default="", max_length=200)
     paused: bool = False
+    addTr4kerTracker: bool = False
     savePath: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")

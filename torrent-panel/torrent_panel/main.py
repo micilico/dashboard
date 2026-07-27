@@ -37,6 +37,7 @@ from .config import (  # noqa: E402
     RATE_LIMIT_SECONDS,
     STATIC_DIR,
     STORAGE_PUBLIC_PREFIX,
+    TRACKER_STATS_STATE_PATH,
     TRUSTED_PROXY_IPS,
 )
 from .qbittorrent import QbitConfig, QBittorrentClient, QbitError  # noqa: E402
@@ -58,6 +59,7 @@ from .services.media_automation import (  # noqa: E402
     MediaAutomationManager,
 )
 from .services.notifications import NotificationCenter  # noqa: E402
+from .services.tracker_stats import TrackerStatsStore  # noqa: E402
 
 from logging import basicConfig, getLogger  # noqa: E402
 
@@ -101,6 +103,7 @@ app.state.qbit = build_client()
 app.state.media_automation = MediaAutomationManager(app.state.qbit, build_media_automation_config())
 app.state.notifications = NotificationCenter(NOTIFICATION_STATE_PATH)
 app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
+app.state.tracker_stats = TrackerStatsStore(TRACKER_STATS_STATE_PATH)
 app.state.csrf_tokens = {}
 app.state.action_limiter = RateLimiter(
     max_calls=RATE_LIMIT_CALLS,

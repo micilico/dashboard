@@ -82,6 +82,10 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .tracker-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .overview-lower-grid,
   .home-grid {
     grid-template-columns: 1fr;
@@ -288,6 +292,10 @@
 @media (max-width: 640px) {
   .form-grid,
   .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .tracker-stats-grid {
     grid-template-columns: 1fr;
   }
 

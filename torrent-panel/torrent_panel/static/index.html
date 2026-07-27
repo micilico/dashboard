@@ -176,6 +176,10 @@
               <input id="pausedInput" name="paused" type="checkbox">
               Démarrer en pause
             </label>
+            <label class="check-line">
+              <input id="tr4kerTrackerInput" name="tr4kerTracker" type="checkbox">
+              Ajouter l'annonce TR4KER
+            </label>
           </div>
           <div class="dialog-actions">
             <button type="submit" class="button primary" id="addButton">Ajouter</button>
@@ -273,6 +277,30 @@
         </div>
         <div id="emptyState" class="empty" hidden>Aucun torrent pour le moment.</div>
 
+        <section class="tracker-stats-panel" aria-labelledby="trackerStatsTitle">
+          <div class="card-head card-head-spread">
+            <div>
+              <h3 id="trackerStatsTitle">Stats par tracker</h3>
+              <p id="trackerStatsSummary">Mesure des volumes observés par jour.</p>
+            </div>
+          </div>
+          <div id="trackerStatsCards" class="tracker-stats-grid"></div>
+          <div class="table-scroll tracker-stats-table-shell">
+            <table class="tracker-stats-table" aria-describedby="trackerStatsSummary">
+              <thead>
+                <tr>
+                  <th scope="col">Jour</th>
+                  <th scope="col">Tracker</th>
+                  <th scope="col">Download</th>
+                  <th scope="col">Upload</th>
+                  <th scope="col">Ratio</th>
+                </tr>
+              </thead>
+              <tbody id="trackerStatsRows"></tbody>
+            </table>
+          </div>
+        </section>
+
         <div class="table-scroll torrent-table-shell">
           <table class="torrent-table" aria-describedby="summary">
             <thead>
@@ -286,6 +314,7 @@
                 <th scope="col"><button type="button" class="sort-head" data-sort="ratio">Ratio</button></th>
                 <th scope="col"><button type="button" class="sort-head" data-sort="size">Taille</button></th>
                 <th scope="col"><button type="button" class="sort-head" data-sort="eta">ETA</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="addedOn">Ajout</button></th>
                 <th scope="col">Actions</th>
               </tr>
             </thead>

@@ -32,6 +32,7 @@ const state = {
   },
   storage: { disk: {}, rclone: {} },
   activity: { summary: {}, timeline: [] },
+  trackerStats: { updatedAt: "", observedDays: 0, totals: [], daily: [] },
   metricHistory: {
     downloadSpeedBytes: [],
     uploadSpeedBytes: [],
@@ -50,6 +51,7 @@ const state = {
   globalActionCount: 0,
   pendingReleaseTitle: "",
   sourceHint: "",
+  autoTr4kerAttempted: false,
   trackerIndex: { index: {}, domains: {} },
   prefs: loadPrefs(),
 };
@@ -85,6 +87,9 @@ const els = {
   alertText: document.querySelector("#alertText"),
   retryButton: document.querySelector("#retryButton"),
   empty: document.querySelector("#emptyState"),
+  trackerStatsSummary: document.querySelector("#trackerStatsSummary"),
+  trackerStatsCards: document.querySelector("#trackerStatsCards"),
+  trackerStatsRows: document.querySelector("#trackerStatsRows"),
   refreshStatus: document.querySelector("#refreshStatus"),
   sidebarStatusDetail: document.querySelector("#sidebarStatusDetail"),
   refreshButton: document.querySelector("#refreshButton"),
@@ -127,6 +132,7 @@ const els = {
   categoryInput: document.querySelector("#categoryInput"),
   tagsInput: document.querySelector("#tagsInput"),
   pausedInput: document.querySelector("#pausedInput"),
+  tr4kerTrackerInput: document.querySelector("#tr4kerTrackerInput"),
   magnetMessage: document.querySelector("#magnetMessage"),
   toast: document.querySelector("#toast"),
   deleteDialog: document.querySelector("#deleteDialog"),
@@ -261,6 +267,13 @@ function formatIsoDate(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return parsed.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function formatDay(value) {
+  if (!value) return "—";
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("fr-FR", { dateStyle: "medium" });
 }
 
 function formatRelativeTime(value) {
@@ -614,6 +627,7 @@ function renderControls() {
   els.refreshInterval.value = String(state.prefs.refreshIntervalMs);
   if (document.activeElement !== els.categoryInput) els.categoryInput.value = state.prefs.lastCategory || "";
   if (document.activeElement !== els.tagsInput) els.tagsInput.value = state.prefs.lastTags || "";
+  if (els.tr4kerTrackerInput && state.sourceHint === "tr4ker") els.tr4kerTrackerInput.checked = true;
   fillSelect(els.statusFilter, Object.entries(STATUS_GROUPS), state.prefs.status);
   fillSelect(els.categoryFilter, [["all", "Toutes"], ...uniqueValues((torrent) => [String(torrent.category || "").trim()]).map((value) => [value, value])], state.prefs.category);
   fillSelect(els.tagFilter, [["all", "Tous"], ...uniqueValues((torrent) => normalizeTags(torrent.tags)).map((value) => [value, value])], state.prefs.tag);
@@ -819,6 +833,7 @@ function renderRow(torrent) {
   const ratioTd = textCell("Ratio", formatRatio(torrent.ratio), "mono");
   const sizeTd = textCell("Taille", formatBytes(torrent.size), "mono");
   const etaTd = textCell("ETA", formatEta(torrent.eta), "mono");
+  const addedTd = textCell("Ajout", formatDate(torrent.addedOn), "mono");
 
   const actionTd = document.createElement("td");
   actionTd.dataset.label = "Actions";
@@ -841,7 +856,7 @@ function renderRow(torrent) {
   inline.textContent = busyText || state.rowErrors.get(hash) || "";
   actionTd.append(actions, inline);
 
-  tr.append(selectTd, nameTd, stateTd, progressTd, downTd, upTd, ratioTd, sizeTd, etaTd, actionTd);
+  tr.append(selectTd, nameTd, stateTd, progressTd, downTd, upTd, ratioTd, sizeTd, etaTd, addedTd, actionTd);
   return tr;
 }
 
@@ -1241,9 +1256,75 @@ function render() {
   els.empty.textContent = state.torrents.length === 0 ? "Aucun torrent pour le moment." : "Aucun torrent ne correspond aux filtres.";
   els.empty.hidden = visible.length !== 0;
   els.summary.textContent = `${visible.length} affiché${visible.length > 1 ? "s" : ""} sur ${state.torrents.length}`;
+  renderTrackerStats();
   renderSelection(visible);
   renderSortHeaders();
   updateDetails();
+}
+
+function renderTrackerStats() {
+  const stats = state.trackerStats || { totals: [], daily: [] };
+  const totals = Array.isArray(stats.totals) ? stats.totals : [];
+  const daily = Array.isArray(stats.daily) ? stats.daily : [];
+  const measured = totals.filter((item) => Number(item.downloaded) > 0 || Number(item.uploaded) > 0);
+  els.trackerStatsSummary.textContent = Number(stats.observedDays) > 0
+    ? `${measured.length} tracker(s) avec trafic mesuré sur ${stats.observedDays} jour(s) observé(s).`
+    : "Premier snapshot enregistré. Les deltas journaliers apparaîtront aux prochaines actualisations.";
+
+  const cards = (totals.length ? totals : [{ tracker: "En attente", downloaded: 0, uploaded: 0, ratio: 0, torrents: state.torrents.length }]).slice(0, 4);
+  els.trackerStatsCards.replaceChildren(
+    ...cards.map((item) => {
+      const article = document.createElement("article");
+      article.className = "tracker-stat-card";
+      const title = document.createElement("strong");
+      title.textContent = item.tracker || "Sans tracker";
+      const meta = document.createElement("span");
+      meta.textContent = `${Number(item.torrents) || 0} torrent(s) suivis`;
+      const metrics = document.createElement("dl");
+      for (const [label, value] of [
+        ["DL", formatBytes(item.downloaded)],
+        ["UL", formatBytes(item.uploaded)],
+        ["Ratio", formatRatio(item.ratio)],
+      ]) {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        metrics.append(dt, dd);
+      }
+      article.append(title, meta, metrics);
+      return article;
+    }),
+  );
+
+  const rows = daily.slice(-12).reverse();
+  els.trackerStatsRows.replaceChildren(
+    ...rows.map((item) => {
+      const tr = document.createElement("tr");
+      for (const [label, value] of [
+        ["Jour", formatDay(item.date)],
+        ["Tracker", item.tracker || "Sans tracker"],
+        ["Download", formatBytes(item.downloaded)],
+        ["Upload", formatBytes(item.uploaded)],
+        ["Ratio", formatRatio(item.ratio)],
+      ]) {
+        const td = document.createElement("td");
+        td.dataset.label = label;
+        td.textContent = value;
+        if (["Download", "Upload", "Ratio"].includes(label)) td.className = "mono";
+        tr.append(td);
+      }
+      return tr;
+    }),
+  );
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "Pas encore de delta mesuré. Gardez l'actualisation active pour alimenter les statistiques.";
+    tr.append(td);
+    els.trackerStatsRows.replaceChildren(tr);
+  }
 }
 
 async function loadDashboard() {
@@ -1269,11 +1350,12 @@ async function loadTorrents({ silent = false, force = false } = {}) {
 
   state.refreshPromise = (async () => {
     try {
-      const [dashboardPayload, torrentPayload, storagePayload, activityPayload] = await Promise.all([
+      const [dashboardPayload, torrentPayload, storagePayload, activityPayload, trackerStatsPayload] = await Promise.all([
         api(route("/api/dashboard"), { cache: "no-store" }),
         api(route("/api/torrents"), { cache: "no-store" }),
         api(route("/api/storage"), { cache: "no-store" }).catch(() => ({ disk: state.storage.disk || {}, rclone: state.storage.rclone || {} })),
         api(route("/api/activity"), { cache: "no-store" }).catch(() => ({ summary: state.activity.summary || {}, timeline: state.activity.timeline || [] })),
+        api(route("/api/torrents/stats/trackers"), { cache: "no-store" }).catch(() => ({ stats: state.trackerStats })),
       ]);
       state.dashboard = {
         alerts: Array.isArray(dashboardPayload.alerts) ? dashboardPayload.alerts : [],
@@ -1289,6 +1371,9 @@ async function loadTorrents({ silent = false, force = false } = {}) {
       };
       state.storage = storagePayload && typeof storagePayload === "object" ? storagePayload : { disk: {}, rclone: {} };
       state.activity = activityPayload && typeof activityPayload === "object" ? activityPayload : { summary: {}, timeline: [] };
+      state.trackerStats = trackerStatsPayload?.stats && typeof trackerStatsPayload.stats === "object"
+        ? trackerStatsPayload.stats
+        : state.trackerStats;
       const torrents = Array.isArray(torrentPayload.torrents) ? torrentPayload.torrents : [];
       const signature = JSON.stringify(torrents);
       state.lastUpdatedAt = new Date();
@@ -1298,6 +1383,9 @@ async function loadTorrents({ silent = false, force = false } = {}) {
       }
       clearError();
       render();
+      window.setTimeout(() => {
+        tryAutoTr4kerTracker();
+      }, 0);
       const lastCheck = els.lastCheck;
       if (lastCheck) {
         lastCheck.textContent = state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
@@ -1682,16 +1770,15 @@ async function confirmAddTracker() {
   }
 }
 
-async function addConfiguredTracker(endpoint, successLabel) {
-  const selectedHashes = [...state.selected];
-  if (!selectedHashes.length) {
+async function addConfiguredTrackerToHashes(hashes, endpoint, successLabel) {
+  if (!hashes.length) {
     showToast("Aucun torrent sélectionné.");
     return;
   }
   try {
     const payload = await api(route(endpoint), {
       method: "POST",
-      body: JSON.stringify({ hashes: selectedHashes }),
+      body: JSON.stringify({ hashes }),
     });
     const parts = [];
     if (payload.updated) parts.push(`${payload.updated} configuré${payload.updated > 1 ? "s" : ""}`);
@@ -1704,6 +1791,18 @@ async function addConfiguredTracker(endpoint, successLabel) {
   } catch (error) {
     showToast(describeError(error));
   }
+}
+
+async function addConfiguredTracker(endpoint, successLabel) {
+  await addConfiguredTrackerToHashes([...state.selected], endpoint, successLabel);
+}
+
+async function tryAutoTr4kerTracker() {
+  if (state.autoTr4kerAttempted || state.sourceHint !== "tr4ker" || !state.pendingReleaseTitle) return;
+  const visibleHashes = filteredTorrents().map((torrent) => torrent.hash);
+  if (!visibleHashes.length) return;
+  state.autoTr4kerAttempted = true;
+  await addConfiguredTrackerToHashes(visibleHashes, "/api/torrents/add-tr4ker-tracker", "Tracker tr4ker configuré automatiquement");
 }
 
 function cancelAddTracker() {
@@ -1741,6 +1840,7 @@ async function submitMagnets(event) {
         category: els.categoryInput.value.trim(),
         tags: els.tagsInput.value.trim(),
         paused: els.pausedInput.checked,
+        addTr4kerTracker: Boolean(els.tr4kerTrackerInput?.checked),
       }),
     });
     const rejected = Array.isArray(payload.rejected) ? payload.rejected : [];
@@ -1750,8 +1850,9 @@ async function submitMagnets(event) {
     els.magnetMessage.textContent = `${payload.accepted || 0} accepté${payload.accepted > 1 ? "s" : ""}, ${rejected.length} refusé${rejected.length > 1 ? "s" : ""}.`;
     if (payload.accepted) {
       els.magnetInput.value = "";
-      showToast("Magnet envoyé à qBittorrent.");
+      showToast(payload.tr4kerTrackerApplied ? "Magnet envoyé à qBittorrent avec l'annonce TR4KER." : "Magnet envoyé à qBittorrent.");
       await loadTorrents({ silent: true, force: true });
+      loadTrackerIndex();
     }
   } catch (error) {
     els.magnetMessage.textContent = describeError(error);

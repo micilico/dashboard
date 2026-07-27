@@ -185,6 +185,7 @@ class QBittorrentClient:
                 "ratio": item.get("ratio", 0),
                 "size": item.get("size", 0),
                 "downloaded": item.get("downloaded", 0),
+                "uploaded": item.get("uploaded", 0),
                 "remaining": item.get("amount_left", 0),
                 "eta": item.get("eta", 0),
                 "addedOn": item.get("added_on", 0),
