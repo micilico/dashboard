@@ -1584,18 +1584,28 @@ td input[type="checkbox"] {
   font-size: 0.94rem;
 }
 
+.torrents-panel {
+  overflow: hidden;
+}
+
+.page-header-panel {
+  padding: 24px 24px 8px;
+}
+
 .filters {
+  margin: 0 20px 16px;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
   background: var(--surface-2);
-  position: sticky;
-  top: 0;
-  z-index: 2;
 }
 
 .secondary-panel {
   margin: 0 20px 16px;
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
 }
 
 .secondary-panel summary {
@@ -1665,6 +1675,11 @@ td input[type="checkbox"] {
   padding: 12px;
 }
 
+.torrent-table-shell {
+  padding: 0 20px 20px;
+  overflow-x: auto;
+}
+
 .torrent-table {
   width: 100%;
   border-collapse: collapse;
@@ -1672,7 +1687,7 @@ td input[type="checkbox"] {
 
 .torrent-table thead th {
   position: sticky;
-  top: 84px;
+  top: 0;
   z-index: 1;
   background: var(--surface);
 }

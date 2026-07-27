@@ -273,23 +273,25 @@
         </div>
         <div id="emptyState" class="empty" hidden>Aucun torrent pour le moment.</div>
 
-        <table class="torrent-table" aria-describedby="summary">
-          <thead>
-            <tr>
-              <th scope="col" class="select-col" aria-label="Sélection"></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="name">Nom</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="state">État</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="progress">Progression</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="downloadSpeed">Téléchargement</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="uploadSpeed">Envoi</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="ratio">Ratio</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="size">Taille</button></th>
-              <th scope="col"><button type="button" class="sort-head" data-sort="eta">ETA</button></th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="torrentRows"></tbody>
-        </table>
+        <div class="table-scroll torrent-table-shell">
+          <table class="torrent-table" aria-describedby="summary">
+            <thead>
+              <tr>
+                <th scope="col" class="select-col" aria-label="Sélection"></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="name">Nom</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="state">État</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="progress">Progression</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="downloadSpeed">Téléchargement</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="uploadSpeed">Envoi</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="ratio">Ratio</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="size">Taille</button></th>
+                <th scope="col"><button type="button" class="sort-head" data-sort="eta">ETA</button></th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="torrentRows"></tbody>
+          </table>
+        </div>
       </section>
     </main>
 
