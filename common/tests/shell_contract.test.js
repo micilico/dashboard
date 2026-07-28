@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..", "..");
 const navOrder = ["home", "torrent", "prowlarr", "cloud", "media", "storage", "health", "activity"];
+const navIds = ["homeLink", "torrentLink", "prowlarrLink", "cloudLink", "mediaLink", "storageLink", "healthLink", "activityLink"];
 const navLabels = ["Vue d’ensemble", "Torrents", "Prowlarr", "Cloud", "Médias", "Système", "Santé", "Activité"];
 const htmlFiles = [
   "torrent-panel/torrent_panel/static/index.html",
@@ -29,9 +30,12 @@ for (const file of htmlFiles) {
   const html = read(file);
   const nav = navBlock(html, file);
   const keys = [...nav.matchAll(/data-shell-nav="([^"]+)"/g)].map((match) => match[1]);
+  const ids = [...nav.matchAll(/<a id="([^"]+)"/g)].map((match) => match[1]);
   const labels = [...nav.matchAll(/<span class="nav-label">([^<]+)<\/span>/g)].map((match) => match[1]);
   assert.deepEqual(keys, navOrder, `${file}: global nav order changed`);
+  assert.deepEqual(ids, navIds, `${file}: global nav ids must match the Prowlarr shell`);
   assert.deepEqual(labels, navLabels, `${file}: global nav labels changed`);
+  assert.ok(nav.includes('id="cloudLink"'), `${file}: Cloud nav item is required`);
   assert.equal((nav.match(/<svg viewBox="0 0 24 24"/g) || []).length, navOrder.length, `${file}: every nav item needs an icon`);
   assert.equal((html.match(/aria-current="page"/g) || []).length, 1, `${file}: expected exactly one current page`);
 }
