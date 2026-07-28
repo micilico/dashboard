@@ -48,13 +48,15 @@
 }
 .destructive-copy { color: var(--danger-text); }
 .reconnect-banner {
-  position: sticky;
-  top: 0;
+  position: fixed;
+  right: var(--space-16);
+  bottom: var(--space-16);
   z-index: var(--z-reconnect);
-  grid-column: 1 / -1;
+  max-width: min(420px, calc(100vw - var(--space-32)));
   padding: var(--space-10) var(--space-16);
   background: var(--reconnect-bg);
   color: var(--text-on-warning);
-  text-align: center;
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-panel);
   font-weight: 700;
 }
