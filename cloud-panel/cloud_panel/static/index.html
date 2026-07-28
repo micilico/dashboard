@@ -11,7 +11,7 @@
     <main id="content" class="shell">
       <header class="topbar">
         <div class="brand-block">
-          <a class="brand-mark" href="./" aria-label="Accueil Cloud Panel">
+          <a class="brand-mark" href="/torrent-panel/?view=home" aria-label="Retour a la vue d'ensemble">
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <polygon points="18,14 41,14 50,30 27,30" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/>
               <polygon points="14,34 37,34 46,50 23,50" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
@@ -24,52 +24,51 @@
           </div>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a href="/torrent-panel/?view=home" title="Vue d’ensemble">
+          <a href="/torrent-panel/?view=home" data-shell-nav="home" title="Vue d’ensemble">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.75 10.5 12 4l8.25 6.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-3.75V13.5h-6v6.75H5.25a1.5 1.5 0 0 1-1.5-1.5z"></path></svg></span>
             <span class="nav-label">Vue d’ensemble</span>
           </a>
-          <a href="/torrent-panel/" title="Torrents">
+          <a href="/torrent-panel/" data-shell-nav="torrent" title="Torrents">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"></path></svg></span>
             <span class="nav-label">Torrents</span>
           </a>
-          <a href="/prowlarr-panel/" title="Prowlarr">
+          <a href="/prowlarr-panel/" data-shell-nav="prowlarr" title="Prowlarr">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.25 4.25"></path></svg></span>
             <span class="nav-label">Prowlarr</span>
           </a>
-          <a href="/cloud-panel/" title="Cloud" aria-current="page">
+          <a href="/cloud-panel/" data-shell-nav="cloud" title="Cloud" aria-current="page">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"></path></svg></span>
             <span class="nav-label">Cloud</span>
           </a>
-          <a href="/storage-panel/" title="Système">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"></rect><rect x="4" y="14" width="16" height="5" rx="1.5"></rect><path d="M8 7.5h.01M8 16.5h.01"></path></svg></span>
-            <span class="nav-label">Système</span>
-          </a>
-          <a href="/media-panel/" title="Médias">
+          <a href="/media-panel/" data-shell-nav="media" title="Médias">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8M8 12h5M8 15h8"></path></svg></span>
             <span class="nav-label">Médias</span>
           </a>
-          <a href="/health/" title="Santé">
+          <a href="/storage-panel/" data-shell-nav="storage" title="Système">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"></rect><rect x="4" y="14" width="16" height="5" rx="1.5"></rect><path d="M8 7.5h.01M8 16.5h.01"></path></svg></span>
+            <span class="nav-label">Système</span>
+          </a>
+          <a href="/health/" data-shell-nav="health" title="Santé">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4.75 18.5 7v5.25c0 4.2-2.6 6.8-6.5 7.99-3.9-1.19-6.5-3.79-6.5-7.99V7z"></path><path d="M9 12h6M12 9v6"></path></svg></span>
             <span class="nav-label">Santé</span>
           </a>
-          <a href="/activity/" title="Activité">
+          <a href="/activity/" data-shell-nav="activity" title="Activité">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"></path></svg></span>
             <span class="nav-label">Activité</span>
           </a>
         </nav>
-        <div class="topbar-actions sidebar-footer" data-od-id="cloud-sidebar-footer">
-          <div class="sidebar-section" data-od-id="cloud-favorites">
-            <div class="sidebar-section-title">Favoris</div>
-            <div id="favoritesList" class="favorites-list">
-              <p class="sidebar-empty">Aucun favori</p>
+        <div class="topbar-actions sidebar-footer">
+          <div class="sidebar-health" aria-live="polite">
+            <div class="sidebar-health-row">
+              <span class="status-dot"></span>
+              <span>Stockage prêt</span>
             </div>
+            <p>Navigation fichiers active.</p>
           </div>
-          <div class="sidebar-disk-box" id="sidebarDisk" hidden>
-            <div class="sidebar-disk-label">Espace disque</div>
-            <div class="sidebar-disk-bar"><div class="sidebar-disk-fill" id="sidebarDiskFill"></div></div>
-            <div class="sidebar-disk-text" id="sidebarDiskText">-- / --</div>
+          <div class="status-pill" aria-live="polite">
+            <span>Chemin courant</span>
+            <time>/mnt/ultra-media</time>
           </div>
-          <div class="sidebar-path" id="sidebarPath">/mnt/ultra-media/</div>
         </div>
       </header>
 
@@ -88,6 +87,23 @@
       </section>
 
       <div class="content-panel cloud-content" id="cloudContent" data-od-id="cloud-content">
+        <section class="cloud-inspector" aria-label="Informations cloud">
+          <div class="cloud-inspector-card sidebar-section" data-od-id="cloud-favorites">
+            <div class="sidebar-section-title">Favoris</div>
+            <div id="favoritesList" class="favorites-list">
+              <p class="sidebar-empty">Aucun favori</p>
+            </div>
+          </div>
+          <div class="cloud-inspector-card sidebar-disk-box" id="sidebarDisk" hidden>
+            <div class="sidebar-disk-label">Espace disque</div>
+            <div class="sidebar-disk-bar"><div class="sidebar-disk-fill" id="sidebarDiskFill"></div></div>
+            <div class="sidebar-disk-text" id="sidebarDiskText">-- / --</div>
+          </div>
+          <div class="cloud-inspector-card">
+            <div class="sidebar-section-title">Chemin</div>
+            <div class="sidebar-path" id="sidebarPath">/mnt/ultra-media/</div>
+          </div>
+        </section>
 
         <nav class="cloud-view-nav" aria-label="Vues cloud">
             <button class="nav-btn" data-nav="root" title="Racine" data-od-id="nav-root" type="button">

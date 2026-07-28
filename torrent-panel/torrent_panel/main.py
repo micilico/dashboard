@@ -172,7 +172,13 @@ async def config_js() -> PlainTextResponse:
             [
                 "window.__TORRENT_PANEL_CONFIG__ = {",
                 f'  publicPrefix: "{PUBLIC_PREFIX or ""}",',
+                f'  torrentPanelPrefix: "{PUBLIC_PREFIX or ""}",',
                 f'  prowlarrPanelPrefix: "{PROWLARR_PANEL_PUBLIC_PREFIX or ""}",',
+                f'  cloudPanelPrefix: "{os.getenv("CLOUD_PANEL_PUBLIC_PREFIX", "/cloud-panel").rstrip("/")}",',
+                f'  activityPrefix: "{ACTIVITY_PUBLIC_PREFIX or ""}",',
+                f'  storagePrefix: "{STORAGE_PUBLIC_PREFIX or ""}",',
+                f'  mediaPrefix: "{MEDIA_PUBLIC_PREFIX or ""}",',
+                f'  healthPrefix: "{HEALTH_PUBLIC_PREFIX or ""}",',
                 "};",
             ]
         ),
@@ -190,6 +196,7 @@ def _console_config_js(section: str, prefix: str) -> PlainTextResponse:
                 f'  apiPrefix: "{prefix}/api",',
                 f'  torrentPanelPrefix: "{PUBLIC_PREFIX or ""}",',
                 f'  prowlarrPanelPrefix: "{PROWLARR_PANEL_PUBLIC_PREFIX or ""}",',
+                f'  cloudPanelPrefix: "{os.getenv("CLOUD_PANEL_PUBLIC_PREFIX", "/cloud-panel").rstrip("/")}",',
                 f'  activityPrefix: "{ACTIVITY_PUBLIC_PREFIX or ""}",',
                 f'  storagePrefix: "{STORAGE_PUBLIC_PREFIX or ""}",',
                 f'  mediaPrefix: "{MEDIA_PUBLIC_PREFIX or ""}",',

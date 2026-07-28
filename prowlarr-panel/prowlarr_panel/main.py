@@ -199,7 +199,13 @@ async def config_js() -> PlainTextResponse:
             [
                 "window.__PROWLARR_PANEL_CONFIG__ = {",
                 f'  publicPrefix: "{PUBLIC_PREFIX or ""}",',
+                f'  prowlarrPanelPrefix: "{PUBLIC_PREFIX or ""}",',
                 f'  torrentPanelPrefix: "{TORRENT_PANEL_PUBLIC_PREFIX or ""}",',
+                f'  cloudPanelPrefix: "{os.getenv("CLOUD_PANEL_PUBLIC_PREFIX", "/cloud-panel").rstrip("/")}",',
+                f'  activityPrefix: "{os.getenv("TORRENT_PANEL_ACTIVITY_PUBLIC_PREFIX", "/activity").rstrip("/")}",',
+                f'  storagePrefix: "{os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")}",',
+                f'  mediaPrefix: "{os.getenv("TORRENT_PANEL_MEDIA_PUBLIC_PREFIX", "/media-panel").rstrip("/")}",',
+                f'  healthPrefix: "{os.getenv("TORRENT_PANEL_HEALTH_PUBLIC_PREFIX", "/health").rstrip("/")}",',
                 "};",
             ]
         ),

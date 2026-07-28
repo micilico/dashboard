@@ -35,6 +35,7 @@ console_css_content = common_css + "\n" + resolve_css_imports(STATIC / "console.
 js_files_app = [
     COMMON / "js" / "api.js",
     COMMON / "js" / "dom.js",
+    COMMON / "js" / "navigation.js",
     COMMON / "js" / "focus-trap.js",
     STATIC / "app.js",
 ]
@@ -47,6 +48,7 @@ js_content_app = "\n".join(
 js_files_console = [
     COMMON / "js" / "api.js",
     COMMON / "js" / "dom.js",
+    COMMON / "js" / "navigation.js",
     COMMON / "js" / "focus-trap.js",
     STATIC / "console.js",
 ]

@@ -1,6 +1,7 @@
 const CFG = window.__CLOUD_PANEL_CONFIG__ || {};
 const PP = String(CFG.publicPrefix || "/cloud-panel").replace(/\/$/, "");
 const BASE = `${PP}/`;
+window.DashboardNavigation?.configure(CFG, "cloud");
 
 const S = {
   csrf: "", path: "", files: [], allFiles: [], page: 1, pageSize: 50,

@@ -1,7 +1,13 @@
 const config = window.__PROWLARR_PANEL_CONFIG__ || {};
 const state = {
   publicPrefix: String(config.publicPrefix || "").replace(/\/$/, ""),
+  prowlarrPanelPrefix: String(config.prowlarrPanelPrefix || config.publicPrefix || "/prowlarr-panel").replace(/\/$/, ""),
   torrentPanelPrefix: String(config.torrentPanelPrefix || "/torrent-panel").replace(/\/$/, ""),
+  cloudPanelPrefix: String(config.cloudPanelPrefix || "/cloud-panel").replace(/\/$/, ""),
+  activityPrefix: String(config.activityPrefix || "/activity").replace(/\/$/, ""),
+  storagePrefix: String(config.storagePrefix || "/storage-panel").replace(/\/$/, ""),
+  mediaPrefix: String(config.mediaPrefix || "/media-panel").replace(/\/$/, ""),
+  healthPrefix: String(config.healthPrefix || "/health").replace(/\/$/, ""),
   csrfToken: "",
   indexers: [],
   results: [],
@@ -771,14 +777,7 @@ async function grabRelease(buttonNode) {
 }
 
 function configureLinks() {
-  if (els.homeLink) els.homeLink.href = `${state.torrentPanelPrefix}/?view=home`;
-  if (els.activityLink) els.activityLink.href = "/activity/";
-  if (els.torrentLink) els.torrentLink.href = `${state.torrentPanelPrefix || "/torrent-panel"}/`;
-  if (els.prowlarrLink) els.prowlarrLink.href = prefixed("/");
-  if (els.cloudLink) els.cloudLink.href = "/cloud-panel/";
-  if (els.storageLink) els.storageLink.href = "/storage-panel/";
-  if (els.mediaLink) els.mediaLink.href = "/media-panel/";
-  if (els.healthLink) els.healthLink.href = "/health/";
+  window.DashboardNavigation?.configure(state, "prowlarr");
 }
 
 function handleTabKeydown(event) {

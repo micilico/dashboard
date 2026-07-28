@@ -83,6 +83,13 @@ async def config_js() -> PlainTextResponse:
         "\n".join([
             "window.__CLOUD_PANEL_CONFIG__ = {",
             f'  publicPrefix: "{PUBLIC_PREFIX or ""}",',
+            f'  cloudPanelPrefix: "{PUBLIC_PREFIX or ""}",',
+            f'  torrentPanelPrefix: "{os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")}",',
+            f'  prowlarrPanelPrefix: "{os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")}",',
+            f'  activityPrefix: "{os.getenv("TORRENT_PANEL_ACTIVITY_PUBLIC_PREFIX", "/activity").rstrip("/")}",',
+            f'  storagePrefix: "{os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")}",',
+            f'  mediaPrefix: "{os.getenv("TORRENT_PANEL_MEDIA_PUBLIC_PREFIX", "/media-panel").rstrip("/")}",',
+            f'  healthPrefix: "{os.getenv("TORRENT_PANEL_HEALTH_PUBLIC_PREFIX", "/health").rstrip("/")}",',
             "};",
         ]),
         media_type="application/javascript",

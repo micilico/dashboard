@@ -16,7 +16,13 @@ const DEFAULT_PREFS = {
 
 const state = {
   publicPrefix: String(panelConfig.publicPrefix || "/torrent-panel").replace(/\/$/, ""),
+  torrentPanelPrefix: String(panelConfig.torrentPanelPrefix || panelConfig.publicPrefix || "/torrent-panel").replace(/\/$/, ""),
   prowlarrPanelPrefix: String(panelConfig.prowlarrPanelPrefix || "/prowlarr-panel").replace(/\/$/, ""),
+  cloudPanelPrefix: String(panelConfig.cloudPanelPrefix || "/cloud-panel").replace(/\/$/, ""),
+  activityPrefix: String(panelConfig.activityPrefix || "/activity").replace(/\/$/, ""),
+  storagePrefix: String(panelConfig.storagePrefix || "/storage-panel").replace(/\/$/, ""),
+  mediaPrefix: String(panelConfig.mediaPrefix || "/media-panel").replace(/\/$/, ""),
+  healthPrefix: String(panelConfig.healthPrefix || "/health").replace(/\/$/, ""),
   csrfToken: "",
   activeView: "home",
   torrents: [],
@@ -1812,13 +1818,8 @@ function cancelAddTracker() {
 }
 
 function configureLinks() {
-  if (els.homeNavLink) els.homeNavLink.href = `${route("/")}?view=home`;
-  if (els.activityNavLink) els.activityNavLink.href = "/activity/";
+  window.DashboardNavigation?.configure(state, state.activeView === "home" ? "home" : "torrent");
   if (els.torrentsNavLink) els.torrentsNavLink.href = `${route("/")}?view=torrents`;
-  if (els.prowlarrNavLink) els.prowlarrNavLink.href = `${state.prowlarrPanelPrefix || "/prowlarr-panel"}/`;
-  if (els.storageNavLink) els.storageNavLink.href = "/storage-panel/";
-  if (els.mediaNavLink) els.mediaNavLink.href = "/media-panel/";
-  if (els.healthNavLink) els.healthNavLink.href = "/health/";
 }
 
 async function submitMagnets(event) {

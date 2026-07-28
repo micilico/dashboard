@@ -6,6 +6,7 @@ const state = {
   apiPrefix: consoleConfig.apiPrefix || "/api",
   torrentPanelPrefix: consoleConfig.torrentPanelPrefix || "/torrent-panel",
   prowlarrPanelPrefix: consoleConfig.prowlarrPanelPrefix || "/prowlarr-panel",
+  cloudPanelPrefix: consoleConfig.cloudPanelPrefix || "/cloud-panel",
   activityPrefix: consoleConfig.activityPrefix || "/activity",
   storagePrefix: consoleConfig.storagePrefix || "/storage-panel",
   mediaPrefix: consoleConfig.mediaPrefix || "/media-panel",
@@ -152,21 +153,8 @@ async function refreshSession() {
 }
 
 function configureLinks() {
-  els.homeLink.href = `${state.torrentPanelPrefix}/?view=home`;
-  els.activityLink.href = `${state.activityPrefix}/`;
+  window.DashboardNavigation?.configure(state, state.section);
   els.torrentLink.href = `${state.torrentPanelPrefix}/?view=torrents`;
-  els.prowlarrLink.href = `${state.prowlarrPanelPrefix}/`;
-  if (els.cloudLink) els.cloudLink.href = "/cloud-panel/";
-  els.storageLink.href = `${state.storagePrefix}/`;
-  els.mediaLink.href = `${state.mediaPrefix}/`;
-  els.healthLink.href = `${state.healthPrefix}/`;
-  const map = {
-    activity: els.activityLink,
-    storage: els.storageLink,
-    media: els.mediaLink,
-    health: els.healthLink,
-  };
-  map[state.section]?.setAttribute("aria-current", "page");
 }
 
 function renderList(container, items, emptyText) {

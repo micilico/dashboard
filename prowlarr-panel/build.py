@@ -40,6 +40,7 @@ if css_module_dir.exists():
 js_files = [
     COMMON / "js" / "api.js",
     COMMON / "js" / "dom.js",
+    COMMON / "js" / "navigation.js",
     COMMON / "js" / "focus-trap.js",
     STATIC / "app.js",
 ]

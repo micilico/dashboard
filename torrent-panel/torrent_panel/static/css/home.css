@@ -22,13 +22,14 @@
   font-size: 0.96rem;
 }
 
-.sidebar-footer {
-  display: grid;
-  align-items: stretch;
-}
-
 .shell > * {
   min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .sidebar-footer {
+    display: none;
+  }
 }
 
 .overview-view {
