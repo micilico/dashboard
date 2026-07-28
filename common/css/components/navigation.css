@@ -47,13 +47,15 @@
   align-content: start;
 }
 
-.nav a {
+.nav a,
+.nav button {
   position: relative;
   width: 100%;
   justify-content: flex-start;
   border-color: transparent;
   border-radius: 18px;
   padding: 13px 14px;
+  background: transparent;
   color: var(--muted);
   font-size: 1rem;
   font-weight: 600;
@@ -63,6 +65,9 @@
   gap: 12px;
   min-height: 44px;
   border: 1px solid transparent;
+  appearance: none;
+  cursor: pointer;
+  text-align: left;
   transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
 }
 
@@ -85,9 +90,12 @@
   stroke-linejoin: round;
 }
 
-.nav a:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
+.nav a:hover,
+.nav button:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
 
-.nav a[aria-current="page"] {
+.nav a[aria-current="page"],
+.nav button[aria-current="page"],
+.nav button.active {
   color: var(--text);
   background: var(--accent-soft);
   border-color: color-mix(in oklab, var(--accent), transparent 82%);
@@ -162,6 +170,13 @@
   display: grid;
   gap: 12px;
   min-width: 0;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: clamp(2.5rem, 3vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: var(--tracking-heading);
 }
 
 .page-header-actions {
@@ -258,8 +273,11 @@
 .tab:hover { color: var(--text); background: var(--surface-soft); }
 .tab[aria-selected="true"] {
   color: var(--text);
-  background: transparent;
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent), transparent 82%);
+  border-bottom-left-radius: var(--radius-control);
+  border-bottom-right-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 82%);
 }
 
 .button:active, .tab:active { transform: translateY(1px); }

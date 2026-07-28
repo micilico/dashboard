@@ -1,5 +1,7 @@
 .topbar, .content-panel, .stat, .alert, .dialog, .card, .list-item {
-  border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-card);
 }
 
 .content-panel {
@@ -16,11 +18,11 @@
   margin-top: 0;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 
 .stat {
-  min-height: 112px;
+  min-height: 128px;
   gap: 10px;
   align-content: space-between;
   padding: 24px;
@@ -28,9 +30,12 @@
   background: var(--surface-2);
   display: grid;
 }
-.stat:first-child { background: color-mix(in oklab, var(--accent), transparent 84%); }
+.stat:first-child {
+  border-color: color-mix(in oklab, var(--accent), transparent 82%);
+  background: var(--accent-soft);
+}
 .stat strong { font-size: 1.65rem; line-height: 1; font-variant-numeric: tabular-nums; }
-.stat span { color: var(--text-subtle); font-size: .75rem; letter-spacing: .045em; font-weight: 700; text-transform: uppercase; }
+.stat span { color: var(--text-subtle); font-size: .75rem; letter-spacing: .04em; font-weight: 700; text-transform: uppercase; }
 
 .card, .list-item { padding: 14px; border-radius: var(--radius-card); }
 .card dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px; margin: 10px 0 0; }

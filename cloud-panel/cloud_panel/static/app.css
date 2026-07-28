@@ -7,21 +7,7 @@
   padding-top: 0;
 }
 
-.nav-btn {
-  position: relative;
-  display: inline-flex; align-items: center; gap: 12px; width: 100%; min-height: 44px;
-  padding: 13px 14px; border: 1px solid transparent; border-radius: 18px;
-  background: transparent; color: var(--muted); font-size: 0.95rem; font-weight: 600;
-  cursor: pointer; text-align: left; text-decoration: none;
-  transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
-}
-.nav-btn:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
-.nav-btn.active {
-  color: var(--text);
-  background: var(--accent-soft);
-  border-color: color-mix(in oklab, var(--accent), transparent 82%);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
+.nav-btn { font-size: 0.95rem; }
 .nav-btn .nav-icon { flex: 0 0 22px; width: 22px; height: 22px; }
 .nav-btn .nav-icon svg { width: 22px; height: 22px; stroke-linecap: round; stroke-linejoin: round; }
 .nav-btn .nav-label { font-size: 0.95rem; }
@@ -54,7 +40,7 @@
 }
 
 /* ── Toolbar ── */
-.toolbar {
+.cloud-content .toolbar {
   display: flex;
   align-items: center;
   gap: var(--space-8);
@@ -84,9 +70,17 @@
 .bulk-bar .bulk-count { font-weight: 600; margin-right: auto; }
 
 /* ── File table ── */
-.table-wrap { margin: 0 20px 20px; overflow-x: auto; flex: 1; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.cloud-content .table-wrap {
+  margin: 0 20px 20px;
+  overflow-x: auto;
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: none;
+}
 .file-table { width: 100%; border-collapse: collapse; }
-.file-table th { position: sticky; top: 0; background: var(--surface); padding: var(--space-8) var(--space-12); font-size: .78rem; font-weight: 700; color: var(--text-subtle); text-transform: uppercase; letter-spacing: .04em; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.file-table th { position: sticky; top: 0; background: var(--surface); padding: 14px 12px; font-size: .76rem; font-weight: 700; color: var(--text-subtle); text-transform: uppercase; letter-spacing: .04em; text-align: left; border-bottom: 1px solid var(--border-faint); white-space: nowrap; }
 .file-table th.sortable { cursor: pointer; user-select: none; }
 .file-table th.sortable:hover { color: var(--text); }
 .file-table th .sort-arrow { display: inline-block; width: 12px; color: var(--muted); }
@@ -100,9 +94,9 @@
 .col-fav { width: 36px; }
 .col-actions { width: 120px; text-align: right; }
 
-.file-table td { padding: var(--space-6) var(--space-12); border-bottom: 1px solid var(--border); font-size: .88rem; vertical-align: middle; }
+.file-table td { padding: 12px; border-bottom: 1px solid var(--border-faint); font-size: .88rem; vertical-align: middle; }
 .file-table tr { transition: background var(--motion-fast); }
-.file-table tr:hover { background: var(--surface-2); }
+.file-table tr:hover { background: var(--row-hover); }
 .file-table tr.selected { background: var(--accent-soft); }
 .file-table tr.focused { outline: 2px solid var(--focus); outline-offset: -2px; }
 .skeleton-row { pointer-events: none; }
@@ -199,9 +193,9 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
 
 /* ── Stats grid ── */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-12); padding: var(--space-16); }
-.stat-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-panel); padding: var(--space-16); text-align: center; }
+.stat-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-panel); padding: var(--space-20); text-align: left; min-height: 128px; display: grid; align-content: space-between; gap: var(--space-12); }
 .stat-card .stat-value { font-size: 1.6rem; font-weight: 700; color: var(--text); }
-.stat-card .stat-label { font-size: .82rem; color: var(--muted); margin-top: var(--space-4); }
+.stat-card .stat-label { font-size: .75rem; color: var(--text-subtle); margin-top: var(--space-4); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 
 /* ── Preview ── */
 .preview-dialog { width: min(90vw, 900px); height: min(85vh, 700px); }

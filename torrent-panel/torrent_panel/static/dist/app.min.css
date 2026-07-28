@@ -99,8 +99,8 @@
   --icon-sm: 16px;
   --icon-md: 20px;
   --icon-lg: 24px;
-  --tracking-display: -0.02em;
-  --tracking-heading: -0.015em;
+  --tracking-display: 0;
+  --tracking-heading: 0;
   --font-display: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-family: var(--font-family);
@@ -157,7 +157,7 @@ button:disabled, input:disabled, select:disabled {
 .eyebrow { color: var(--text-subtle); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 h1 { margin-top: 6px; font-size: clamp(1.25rem, 2.5vw, 2.5rem); letter-spacing: var(--tracking-heading); line-height: 1.2; }
 h2 { font-size: clamp(1.375rem, 2vw, 1.5rem); letter-spacing: var(--tracking-heading); line-height: 1.25; }
-h3 { margin-bottom: 10px; font-size: 1.125rem; line-height: 1.35; letter-spacing: -0.01em; }
+h3 { margin-bottom: 10px; font-size: 1.125rem; line-height: 1.35; letter-spacing: 0; }
 h1, h2 { font-family: var(--font-display); }
 h3 { font-family: var(--font-display); }
 
@@ -182,6 +182,7 @@ h3 { font-family: var(--font-display); }
 .button, .tab {
   min-height: 44px; border: 1px solid transparent; border-radius: var(--radius-control);
   padding: 10px 14px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), opacity var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
 }
 .button:active, .tab:active { transform: translateY(1px); }
@@ -204,7 +205,9 @@ h3 { font-family: var(--font-display); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .topbar, .content-panel, .stat, .alert, .dialog, .card, .list-item {
-  border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius-card);
 }
 
 .content-panel {
@@ -221,11 +224,11 @@ h3 { font-family: var(--font-display); }
   margin-top: 0;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
 }
 
 .stat {
-  min-height: 112px;
+  min-height: 128px;
   gap: 10px;
   align-content: space-between;
   padding: 24px;
@@ -233,9 +236,12 @@ h3 { font-family: var(--font-display); }
   background: var(--surface-2);
   display: grid;
 }
-.stat:first-child { background: color-mix(in oklab, var(--accent), transparent 84%); }
+.stat:first-child {
+  border-color: color-mix(in oklab, var(--accent), transparent 82%);
+  background: var(--accent-soft);
+}
 .stat strong { font-size: 1.65rem; line-height: 1; font-variant-numeric: tabular-nums; }
-.stat span { color: var(--text-subtle); font-size: .75rem; letter-spacing: .045em; font-weight: 700; text-transform: uppercase; }
+.stat span { color: var(--text-subtle); font-size: .75rem; letter-spacing: .04em; font-weight: 700; text-transform: uppercase; }
 
 .card, .list-item { padding: 14px; border-radius: var(--radius-card); }
 .card dl { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 8px; margin: 10px 0 0; }
@@ -289,9 +295,11 @@ select[multiple] { min-height: 120px; }
 .field-message.success { color: var(--success); }
 
 .data-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: top; text-align: left; }
-th { color: var(--text-subtle); font-size: 0.76rem; font-weight: 700; text-transform: uppercase; white-space: nowrap; letter-spacing: .04em; }
+th, td { padding: 14px 12px; border-bottom: 1px solid var(--border-faint); vertical-align: middle; text-align: left; }
+th { color: var(--text-subtle); font-size: 0.76rem; font-weight: 700; text-transform: uppercase; white-space: nowrap; letter-spacing: .04em; background: var(--surface); }
 td { min-width: 90px; }
+tbody tr { transition: background var(--motion-fast) var(--ease-standard); }
+tbody tr:hover { background: var(--row-hover); }
 .name-cell { min-width: 260px; overflow-wrap: anywhere; font-weight: 700; }
 .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table-scroll { overflow-x: auto; }
@@ -361,13 +369,15 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   align-content: start;
 }
 
-.nav a {
+.nav a,
+.nav button {
   position: relative;
   width: 100%;
   justify-content: flex-start;
   border-color: transparent;
   border-radius: 18px;
   padding: 13px 14px;
+  background: transparent;
   color: var(--muted);
   font-size: 1rem;
   font-weight: 600;
@@ -377,6 +387,9 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   gap: 12px;
   min-height: 44px;
   border: 1px solid transparent;
+  appearance: none;
+  cursor: pointer;
+  text-align: left;
   transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
 }
 
@@ -399,9 +412,12 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   stroke-linejoin: round;
 }
 
-.nav a:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
+.nav a:hover,
+.nav button:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
 
-.nav a[aria-current="page"] {
+.nav a[aria-current="page"],
+.nav button[aria-current="page"],
+.nav button.active {
   color: var(--text);
   background: var(--accent-soft);
   border-color: color-mix(in oklab, var(--accent), transparent 82%);
@@ -476,6 +492,13 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   display: grid;
   gap: 12px;
   min-width: 0;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: clamp(2.5rem, 3vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: var(--tracking-heading);
 }
 
 .page-header-actions {
@@ -572,8 +595,11 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .tab:hover { color: var(--text); background: var(--surface-soft); }
 .tab[aria-selected="true"] {
   color: var(--text);
-  background: transparent;
-  box-shadow: inset 0 -2px 0 var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent), transparent 82%);
+  border-bottom-left-radius: var(--radius-control);
+  border-bottom-right-radius: var(--radius-control);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 82%);
 }
 
 .button:active, .tab:active { transform: translateY(1px); }

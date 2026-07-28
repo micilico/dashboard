@@ -1,7 +1,9 @@
 .data-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: top; text-align: left; }
-th { color: var(--text-subtle); font-size: 0.76rem; font-weight: 700; text-transform: uppercase; white-space: nowrap; letter-spacing: .04em; }
+th, td { padding: 14px 12px; border-bottom: 1px solid var(--border-faint); vertical-align: middle; text-align: left; }
+th { color: var(--text-subtle); font-size: 0.76rem; font-weight: 700; text-transform: uppercase; white-space: nowrap; letter-spacing: .04em; background: var(--surface); }
 td { min-width: 90px; }
+tbody tr { transition: background var(--motion-fast) var(--ease-standard); }
+tbody tr:hover { background: var(--row-hover); }
 .name-cell { min-width: 260px; overflow-wrap: anywhere; font-weight: 700; }
 .mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table-scroll { overflow-x: auto; }
