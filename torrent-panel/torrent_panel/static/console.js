@@ -31,6 +31,7 @@ const els = {
   activityLink: document.querySelector("#activityLink"),
   torrentLink: document.querySelector("#torrentLink"),
   prowlarrLink: document.querySelector("#prowlarrLink"),
+  cloudLink: document.querySelector("#cloudLink"),
   storageLink: document.querySelector("#storageLink"),
   mediaLink: document.querySelector("#mediaLink"),
   healthLink: document.querySelector("#healthLink"),
@@ -150,6 +151,7 @@ function configureLinks() {
   els.activityLink.href = `${state.activityPrefix}/`;
   els.torrentLink.href = `${state.torrentPanelPrefix}/?view=torrents`;
   els.prowlarrLink.href = `${state.prowlarrPanelPrefix}/`;
+  if (els.cloudLink) els.cloudLink.href = "/cloud-panel/";
   els.storageLink.href = `${state.storagePrefix}/`;
   els.mediaLink.href = `${state.mediaPrefix}/`;
   els.healthLink.href = `${state.healthPrefix}/`;

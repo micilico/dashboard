@@ -1,16 +1,44 @@
-/* ── Nav buttons ── */
-.nav-cloud {
-  display: grid;
-  gap: 10px;
-  align-content: start;
-  border-top: 0;
-  padding-top: 0;
+/* ── Cloud view switcher ── */
+.cloud-view-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 20px 20px 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
 }
 
-.nav-btn { font-size: 0.95rem; }
-.nav-btn .nav-icon { flex: 0 0 22px; width: 22px; height: 22px; }
-.nav-btn .nav-icon svg { width: 22px; height: 22px; stroke-linecap: round; stroke-linejoin: round; }
-.nav-btn .nav-label { font-size: 0.95rem; }
+.cloud-view-nav .nav-btn {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  padding: 9px 12px;
+  font-weight: 600;
+}
+
+.cloud-view-nav .nav-btn:hover {
+  color: var(--text);
+  background: var(--hover-soft);
+}
+
+.cloud-view-nav .nav-btn.active {
+  color: var(--text);
+  border-color: color-mix(in oklab, var(--accent), transparent 82%);
+  background: var(--accent-soft);
+}
+
+.cloud-view-nav .nav-icon,
+.cloud-view-nav .nav-icon svg {
+  width: 18px;
+  height: 18px;
+}
 
 /* ── Sidebar extras ── */
 .sidebar-footer { display: grid; gap: 18px; padding: 0 6px; border-top: 0; font-size: .78rem; margin-top: auto; }
@@ -233,40 +261,17 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
 }
 
 @media (max-width: 767px) {
-  .shell {
-    width: min(100% - 32px, 680px);
-    display: block;
-    padding: 16px 0 40px;
-  }
-  .topbar {
-    position: static;
-    min-height: 0;
-    display: grid;
-    gap: 12px;
-    margin-bottom: 16px;
-    padding: 16px;
-    border: 1px solid var(--border);
-    border-radius: 24px;
-  }
-  .brand-block {
-    grid-template-columns: 52px minmax(0, 1fr);
-    align-items: center;
-    gap: var(--space-12);
-    padding: 0;
-  }
-  .brand-mark { width: 52px; height: 52px; }
-  .brand-copy { display: grid; gap: 2px; }
-  .sidebar-footer {
-    display: none;
-    margin-top: 0;
-    padding: var(--space-12) var(--space-8) 0;
-  }
   .cloud-content {
     grid-column: 1;
     width: 100%;
     min-width: 0;
     margin-top: var(--space-12);
     border-radius: var(--radius-panel);
+  }
+  .cloud-view-nav {
+    margin-inline: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .toolbar,
   .table-wrap,
@@ -282,10 +287,6 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
     width: 100%;
     min-width: 0;
   }
-  .nav-cloud { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .nav-btn { min-height: 54px; flex-direction: column; gap: 3px; padding: 8px 4px; justify-items: center; }
-  .nav-btn .nav-label { font-size: .7rem; text-align: center; }
-  .nav-btn .nav-icon { width: 20px; height: 20px; }
   .col-date { display: none; }
   .col-size { width: 80px; }
   .action-cell { opacity: 1; }

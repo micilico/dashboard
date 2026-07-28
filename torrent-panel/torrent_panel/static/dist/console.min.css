@@ -625,6 +625,166 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   pointer-events: none;
 }
 
+@media (max-width: 1439px) and (min-width: 768px) {
+  .shell {
+    width: 100%;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 0;
+    padding: 0 clamp(24px, 3vw, 36px) 48px 0;
+  }
+
+  .topbar {
+    top: 0;
+    min-height: 100dvh;
+    padding: 24px 14px 18px;
+  }
+
+  .brand-copy,
+  .sidebar-health p,
+  .status-pill span {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 52px;
+    height: 52px;
+    margin-inline: auto;
+  }
+
+  .nav a,
+  .nav button {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    min-height: 54px;
+    padding: 6px 3px;
+  }
+
+  .nav-label {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    font-size: .64rem;
+    line-height: 1.15;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-health {
+    justify-items: center;
+    padding: 0;
+  }
+
+  .sidebar-health-row > span:not(.status-dot),
+  .sidebar-footer .status-pill {
+    display: none;
+  }
+
+  .status-pill {
+    padding-top: 10px;
+    justify-items: center;
+  }
+
+  .nav a[title]:hover::after {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .shell {
+    width: 100%;
+    display: block;
+    padding: clamp(8px, 3vw, 16px) clamp(12px, 4vw, 24px) 40px;
+  }
+
+  .topbar {
+    position: static;
+    min-height: 0;
+    display: grid;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 14px 14px 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+
+  .brand-copy {
+    display: grid;
+  }
+
+  .brand-block {
+    grid-template-columns: 44px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+  }
+
+  .brand-mark {
+    margin: 0;
+    width: 44px;
+    height: 44px;
+  }
+
+  .brand-copy h1 {
+    font-size: 1.25rem;
+  }
+
+  .nav {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    overflow: visible;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .nav a,
+  .nav button {
+    width: 100%;
+    min-width: 0;
+    min-height: 58px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    padding: 6px 3px;
+    border-radius: 10px;
+  }
+
+  .nav-label {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    font-size: .69rem;
+    line-height: 1.2;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-icon,
+  .nav-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .topbar-actions {
+    margin: 0;
+    display: grid;
+  }
+
+  .sidebar-footer {
+    display: none;
+  }
+
+  .nav a[title]:hover::after {
+    display: none;
+  }
+}
+
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 24px 28px; border-bottom: 1px solid var(--border);
@@ -938,5 +1098,103 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   .content-grid,
   .cards-grid {
     margin-top: 16px;
+  }
+}
+
+/* Shared sidebar lockstep with the main torrent app. */
+@media (max-width: 1439px) and (min-width: 768px) {
+  .shell {
+    width: 100%;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 0;
+    padding: 0 clamp(24px, 3vw, 36px) 48px 0;
+  }
+
+  .topbar {
+    top: 0;
+    min-height: 100dvh;
+    padding: 24px 14px 18px;
+  }
+
+  .brand-copy,
+  .sidebar-health p,
+  .status-pill span {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 52px;
+    height: 52px;
+    margin-inline: auto;
+  }
+
+  .nav a {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 3px;
+    min-height: 54px;
+    padding: 6px 3px;
+  }
+
+  .nav-label {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    font-size: .64rem;
+    line-height: 1.15;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 767px) {
+  .shell {
+    width: 100%;
+    display: block;
+    padding: clamp(8px, 3vw, 16px) clamp(12px, 4vw, 24px) 40px;
+  }
+
+  .topbar {
+    position: static;
+    min-height: 0;
+    display: grid;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 14px 14px 12px;
+    border-radius: 16px;
+  }
+
+  .brand-block {
+    grid-template-columns: 44px 1fr;
+  }
+
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+  }
+
+  .nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .nav a {
+    width: 100%;
+    min-width: 0;
+    min-height: 58px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    padding: 6px 3px;
+    border-radius: 10px;
+  }
+
+  .nav-label {
+    display: block;
+    font-size: .69rem;
+    text-align: center;
   }
 }

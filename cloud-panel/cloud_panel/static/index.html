@@ -23,27 +23,39 @@
             <h1>Dashboard</h1>
           </div>
         </div>
-        <nav class="nav nav-cloud" aria-label="Navigation cloud">
-          <button class="nav-btn" data-nav="root" title="Racine" data-od-id="nav-root">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg></span>
-            <span class="nav-label">Racine</span>
-          </button>
-          <button class="nav-btn" data-nav="parent" title="Dossier parent" data-od-id="nav-parent">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M13 5l7 7-7 7"/></svg></span>
-            <span class="nav-label">Dossier parent</span>
-          </button>
-          <button class="nav-btn" data-nav="history" title="Historique" data-od-id="nav-history">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.5V12l3 3"/></svg></span>
-            <span class="nav-label">Historique</span>
-          </button>
-          <button class="nav-btn" data-nav="links" title="Liens de partage" data-od-id="nav-links">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg></span>
-            <span class="nav-label">Liens</span>
-          </button>
-          <button class="nav-btn" data-nav="stats" title="Statistiques" data-od-id="nav-stats">
-            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M6 16l4-6 4 4 4-8"/></svg></span>
-            <span class="nav-label">Statistiques</span>
-          </button>
+        <nav class="nav" aria-label="Navigation principale">
+          <a href="/torrent-panel/?view=home" title="Vue d’ensemble">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.75 10.5 12 4l8.25 6.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-3.75V13.5h-6v6.75H5.25a1.5 1.5 0 0 1-1.5-1.5z"></path></svg></span>
+            <span class="nav-label">Vue d’ensemble</span>
+          </a>
+          <a href="/torrent-panel/" title="Torrents">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"></path></svg></span>
+            <span class="nav-label">Torrents</span>
+          </a>
+          <a href="/prowlarr-panel/" title="Prowlarr">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.25 4.25"></path></svg></span>
+            <span class="nav-label">Prowlarr</span>
+          </a>
+          <a href="/cloud-panel/" title="Cloud" aria-current="page">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"></path></svg></span>
+            <span class="nav-label">Cloud</span>
+          </a>
+          <a href="/storage-panel/" title="Système">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"></rect><rect x="4" y="14" width="16" height="5" rx="1.5"></rect><path d="M8 7.5h.01M8 16.5h.01"></path></svg></span>
+            <span class="nav-label">Système</span>
+          </a>
+          <a href="/media-panel/" title="Médias">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8M8 12h5M8 15h8"></path></svg></span>
+            <span class="nav-label">Médias</span>
+          </a>
+          <a href="/health/" title="Santé">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4.75 18.5 7v5.25c0 4.2-2.6 6.8-6.5 7.99-3.9-1.19-6.5-3.79-6.5-7.99V7z"></path><path d="M9 12h6M12 9v6"></path></svg></span>
+            <span class="nav-label">Santé</span>
+          </a>
+          <a href="/activity/" title="Activité">
+            <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"></path></svg></span>
+            <span class="nav-label">Activité</span>
+          </a>
         </nav>
         <div class="topbar-actions sidebar-footer" data-od-id="cloud-sidebar-footer">
           <div class="sidebar-section" data-od-id="cloud-favorites">
@@ -76,6 +88,29 @@
       </section>
 
       <div class="content-panel cloud-content" id="cloudContent" data-od-id="cloud-content">
+
+        <nav class="cloud-view-nav" aria-label="Vues cloud">
+            <button class="nav-btn" data-nav="root" title="Racine" data-od-id="nav-root" type="button">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg></span>
+              <span>Racine</span>
+            </button>
+            <button class="nav-btn" data-nav="parent" title="Dossier parent" data-od-id="nav-parent" type="button">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M13 5l7 7-7 7"/></svg></span>
+              <span>Parent</span>
+            </button>
+            <button class="nav-btn" data-nav="history" title="Historique" data-od-id="nav-history" type="button">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.5V12l3 3"/></svg></span>
+              <span>Historique</span>
+            </button>
+            <button class="nav-btn" data-nav="links" title="Liens de partage" data-od-id="nav-links" type="button">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg></span>
+              <span>Liens</span>
+            </button>
+            <button class="nav-btn" data-nav="stats" title="Statistiques" data-od-id="nav-stats" type="button">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M6 16l4-6 4 4 4-8"/></svg></span>
+              <span>Statistiques</span>
+            </button>
+        </nav>
 
         <div class="view-files" id="filesView">
           <header class="toolbar">
