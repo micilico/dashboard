@@ -2,8 +2,9 @@
 
 Dashboard personnel auto-hébergé pour piloter qBittorrent, Prowlarr, Jellyfin,
 rclone et un espace de fichiers depuis une interface unique. Les services
-applicatifs restent liés à `127.0.0.1` et sont publiés uniquement par Caddy,
-derrière HTTPS et `basic_auth`.
+applicatifs restent liés à `127.0.0.1` et sont publiés uniquement par Caddy.
+L'interface reste derrière HTTPS et `basic_auth` ; seuls les liens de partage
+Cloud Panel munis d'un jeton non devinable sont accessibles sans ce login.
 
 ## Architecture
 
@@ -108,6 +109,9 @@ validation fonctionnelle, responsive et accessible sont dans
 ## Sécurité
 
 - Caddy est le seul point d’entrée public.
+- La route `/cloud-panel/download/<jeton>` est publique : le jeton généré,
+  révocable et limité dans le temps fait office d'autorisation. Les API et
+  l'interface Cloud Panel restent protégées par `basic_auth`.
 - Toute mutation exige un jeton CSRF et passe par une limite de débit.
 - La CSP interdit les scripts inline, les CDN et l’encapsulation.
 - Les erreurs sont structurées et nettoyées avant de parvenir au navigateur.

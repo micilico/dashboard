@@ -396,4 +396,27 @@ suite('DOM security', () => {
   });
 });
 
+suite('Caddy share-link access', () => {
+  const caddySource = fs.readFileSync(
+    path.join(__dirname, "..", "..", "caddy", "dashboard.conf"),
+    "utf8",
+  );
+  const protectedMatcher = caddySource.match(
+    /@protected\s*\{([\s\S]*?)\}\s*basic_auth\s+@protected/,
+  );
+
+  test('uses a scoped auth matcher', () => {
+    assert.ok(protectedMatcher, "basic_auth must use the @protected matcher");
+  });
+
+  test('allows only the generated download route and its page assets past basic auth', () => {
+    const matcher = protectedMatcher ? protectedMatcher[1] : "";
+    assert.ok(matcher.includes("not path"));
+    assert.ok(matcher.includes("/cloud-panel/download/*"));
+    assert.ok(matcher.includes("/cloud-panel/static/share.css"));
+    assert.ok(matcher.includes("/cloud-panel/static/fonts/Inter-Variable.woff2"));
+    assert.ok(!matcher.includes("/cloud-panel/api/*"), "Cloud Panel APIs must remain protected");
+  });
+});
+
 console.log('\nTous les tests passes.');
