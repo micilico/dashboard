@@ -123,6 +123,11 @@ function configureSummaryGrid(mode) {
   els.summaryGrid.className = `summary-grid summary-grid-console ${mode}`.trim();
 }
 
+function configureContentGrid(mode) {
+  const layout = mode ? ` layout-${mode}` : "";
+  document.querySelector(".content-grid").className = `content-grid${layout}`;
+}
+
 async function api(path, options = {}, retryCsrf = true) {
   const headers = new Headers(options.headers || {});
   headers.set("Accept", "application/json");
@@ -176,6 +181,7 @@ async function postJson(path, payload, successMessage) {
 
 async function renderActivity() {
   configureSummaryGrid("summary-grid-trio");
+  configureContentGrid("8-4");
   els.title.textContent = "Centre d’activité";
   els.subtitle.textContent = "Synthèse transverse des services, des alertes et des simulations d’automatisation.";
   if (els.pageEyebrow) els.pageEyebrow.textContent = "Journal";
@@ -263,6 +269,7 @@ async function renderActivity() {
 
 async function renderStorage() {
   configureSummaryGrid("summary-grid-storage");
+  configureContentGrid("12");
   els.title.textContent = "Panneau de stockage";
   els.subtitle.textContent = "État du montage, statistiques rclone et seuils d’occupation.";
   if (els.pageEyebrow) els.pageEyebrow.textContent = "Système";
@@ -317,6 +324,7 @@ async function renderStorage() {
 }
 
 async function renderMedia() {
+  configureContentGrid("7-5");
   configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Panneau médias";
   els.subtitle.textContent = "Vue légère Jellyfin: statut, tâches, lectures et derniers médias ajoutés.";
@@ -378,6 +386,7 @@ async function renderMedia() {
 }
 
 async function renderHealth() {
+  configureContentGrid("8-4");
   configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Santé du système";
   els.subtitle.textContent = "Liveness, readiness et état global des services exposés via le backend contrôlé.";

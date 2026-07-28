@@ -457,11 +457,11 @@ function setView(view, { push = true } = {}) {
   els.summaryGrid.hidden = true;
   if (els.homeNavLink) {
     if (state.activeView === "home") els.homeNavLink.setAttribute("aria-current", "page");
-    else els.homeNavLink.removeAttribute("aria-current");
+    else els.homeNavLink.removeAttribute?.("aria-current");
   }
   if (els.torrentsNavLink) {
     if (state.activeView === "torrents") els.torrentsNavLink.setAttribute("aria-current", "page");
-    else els.torrentsNavLink.removeAttribute("aria-current");
+    else els.torrentsNavLink.removeAttribute?.("aria-current");
   }
   updateUrl(!push);
 }
@@ -1202,7 +1202,6 @@ function renderHome() {
   renderOverviewMetrics();
   renderServices();
   renderRecentActivity();
-  renderBandwidthChart();
 }
 
 function renderBandwidthChart() {
@@ -2003,6 +2002,7 @@ async function init() {
   configureLinks();
   bindEvents();
   applyUrlState();
+  setView(state.activeView, { push: false });
   renderControls();
   restartRefreshTimer();
   try {

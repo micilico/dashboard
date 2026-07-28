@@ -144,13 +144,13 @@ button:disabled, input:disabled, select:disabled {
 .skip-link:focus { transform: translateY(0); }
 
 .shell {
-  width: min(1600px, calc(100% - 64px));
+  width: 100%;
   min-height: 100dvh;
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
   align-content: start;
-  gap: 20px 32px;
-  padding: 24px 0 56px;
+  gap: 0;
+  padding: 0 clamp(28px, 3.25vw, 52px) 48px 0;
 }
 
 .eyebrow, h1, h2, h3, p { margin: 0; }
@@ -322,16 +322,16 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
 .topbar {
   position: sticky;
-  top: 24px;
+  top: 0;
   grid-column: 1;
   grid-row: 1 / span 20;
   align-self: start;
-  min-height: calc(100dvh - 48px);
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 24px;
-  padding: 28px 18px 18px;
+  padding: 40px 18px 28px;
   border-right: 1px solid var(--border-faint);
   background: var(--bg-secondary);
   border-radius: 0;
@@ -361,6 +361,13 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .brand-copy {
   display: grid;
   gap: 6px;
+}
+
+.brand-copy h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+  line-height: 1.2;
 }
 
 .nav {
@@ -835,9 +842,10 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 }
 .destructive-copy { color: var(--danger-text); }
 .reconnect-banner {
-  position: fixed;
-  inset: 0 0 auto;
+  position: sticky;
+  top: 0;
   z-index: var(--z-reconnect);
+  grid-column: 1 / -1;
   padding: var(--space-10) var(--space-16);
   background: var(--reconnect-bg);
   color: var(--text-on-warning);

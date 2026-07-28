@@ -48,9 +48,10 @@
 }
 .destructive-copy { color: var(--danger-text); }
 .reconnect-banner {
-  position: fixed;
-  inset: 0 0 auto;
+  position: sticky;
+  top: 0;
   z-index: var(--z-reconnect);
+  grid-column: 1 / -1;
   padding: var(--space-10) var(--space-16);
   background: var(--reconnect-bg);
   color: var(--text-on-warning);

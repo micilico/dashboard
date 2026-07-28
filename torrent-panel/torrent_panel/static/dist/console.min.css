@@ -144,13 +144,13 @@ button:disabled, input:disabled, select:disabled {
 .skip-link:focus { transform: translateY(0); }
 
 .shell {
-  width: min(1600px, calc(100% - 64px));
+  width: 100%;
   min-height: 100dvh;
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
   align-content: start;
-  gap: 20px 32px;
-  padding: 24px 0 56px;
+  gap: 0;
+  padding: 0 clamp(28px, 3.25vw, 52px) 48px 0;
 }
 
 .eyebrow, h1, h2, h3, p { margin: 0; }
@@ -322,16 +322,16 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
 .topbar {
   position: sticky;
-  top: 24px;
+  top: 0;
   grid-column: 1;
   grid-row: 1 / span 20;
   align-self: start;
-  min-height: calc(100dvh - 48px);
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 24px;
-  padding: 28px 18px 18px;
+  padding: 40px 18px 28px;
   border-right: 1px solid var(--border-faint);
   background: var(--bg-secondary);
   border-radius: 0;
@@ -361,6 +361,13 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .brand-copy {
   display: grid;
   gap: 6px;
+}
+
+.brand-copy h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.05rem;
+  line-height: 1.2;
 }
 
 .nav {
@@ -835,9 +842,10 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 }
 .destructive-copy { color: var(--danger-text); }
 .reconnect-banner {
-  position: fixed;
-  inset: 0 0 auto;
+  position: sticky;
+  top: 0;
   z-index: var(--z-reconnect);
+  grid-column: 1 / -1;
   padding: var(--space-10) var(--space-16);
   background: var(--reconnect-bg);
   color: var(--text-on-warning);
@@ -870,9 +878,30 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
 .content-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 20px;
   padding: 0 0 0 40px;
+}
+
+.content-grid > :first-child {
+  grid-column: span 8;
+}
+
+.content-grid > :last-child {
+  grid-column: span 4;
+}
+
+.content-grid.layout-7-5 > :first-child {
+  grid-column: span 7;
+}
+
+.content-grid.layout-7-5 > :last-child {
+  grid-column: span 5;
+}
+
+.content-grid.layout-12 > :first-child,
+.content-grid.layout-12 > :last-child {
+  grid-column: 1 / -1;
 }
 
 .content-grid > *,
@@ -929,34 +958,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   border-collapse: collapse;
 }
 
-@media (max-width: 1439px) and (min-width: 1024px) {
-  .shell {
-    grid-template-columns: 92px minmax(0, 1fr);
-    padding-right: 32px;
-  }
-
-  .topbar {
-    padding: 24px 14px 18px;
-  }
-
-  .brand-copy,
-  .nav-label,
-  .sidebar-health p,
-  .status-pill span {
-    display: none;
-  }
-
-  .brand-mark {
-    width: 52px;
-    height: 52px;
-    margin-inline: auto;
-  }
-
-  .nav a {
-    justify-content: center;
-    padding: 12px 10px;
-  }
-
+@media (max-width: 1439px) and (min-width: 768px) {
   .page-header,
   .summary-grid-console,
   .content-grid,
@@ -966,37 +968,6 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 }
 
 @media (max-width: 1023px) {
-  .shell {
-    width: min(100% - 40px, 1200px);
-    grid-template-columns: 80px minmax(0, 1fr);
-    gap: 20px;
-    padding: 16px 0 48px;
-  }
-
-  .topbar {
-    top: 16px;
-    min-height: calc(100dvh - 32px);
-    padding: 18px 10px 12px;
-  }
-
-  .brand-copy,
-  .nav-label,
-  .sidebar-health p,
-  .status-pill span {
-    display: none;
-  }
-
-  .brand-mark {
-    width: 44px;
-    height: 44px;
-    margin-inline: auto;
-  }
-
-  .nav a {
-    justify-content: center;
-    padding: 12px 10px;
-  }
-
   .page-header,
   .summary-grid-console,
   .content-grid,
@@ -1009,74 +980,14 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   }
 
   .summary-grid-console .stat,
-  .summary-grid-storage .stat-span-6 {
-    grid-column: span 1;
-  }
-
-  .content-grid {
-    grid-template-columns: 1fr;
+  .summary-grid-storage .stat-span-6,
+  .content-grid > :first-child,
+  .content-grid > :last-child {
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 767px) {
-  .shell {
-    width: min(100% - 32px, 680px);
-    display: block;
-    padding: 16px 0 40px;
-  }
-
-  .topbar {
-    position: static;
-    min-height: 0;
-    display: grid;
-    gap: 12px;
-    margin-bottom: 16px;
-    padding: 16px;
-    border: 1px solid var(--border);
-    border-radius: 24px;
-  }
-
-  .brand-copy {
-    display: grid;
-  }
-
-  .brand-block {
-    grid-template-columns: 52px 1fr;
-    align-items: center;
-  }
-
-  .brand-mark {
-    margin: 0;
-    width: 52px;
-    height: 52px;
-  }
-
-  .brand-copy h1 {
-    font-size: 1.25rem;
-  }
-
-  .nav {
-    grid-column: 1 / -1;
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 4px;
-    overflow-x: auto;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-    scrollbar-width: none;
-  }
-
-  .nav a {
-    width: auto;
-    min-width: 52px;
-    flex: 0 0 auto;
-  }
-
-  .nav-label,
-  .sidebar-footer {
-    display: none;
-  }
-
   .page-header {
     padding: 0;
     display: grid;
@@ -1098,103 +1009,5 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   .content-grid,
   .cards-grid {
     margin-top: 16px;
-  }
-}
-
-/* Shared sidebar lockstep with the main torrent app. */
-@media (max-width: 1439px) and (min-width: 768px) {
-  .shell {
-    width: 100%;
-    grid-template-columns: 92px minmax(0, 1fr);
-    gap: 0;
-    padding: 0 clamp(24px, 3vw, 36px) 48px 0;
-  }
-
-  .topbar {
-    top: 0;
-    min-height: 100dvh;
-    padding: 24px 14px 18px;
-  }
-
-  .brand-copy,
-  .sidebar-health p,
-  .status-pill span {
-    display: none;
-  }
-
-  .brand-mark {
-    width: 52px;
-    height: 52px;
-    margin-inline: auto;
-  }
-
-  .nav a {
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    gap: 3px;
-    min-height: 54px;
-    padding: 6px 3px;
-  }
-
-  .nav-label {
-    display: block;
-    width: 100%;
-    overflow: hidden;
-    font-size: .64rem;
-    line-height: 1.15;
-    text-align: center;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-@media (max-width: 767px) {
-  .shell {
-    width: 100%;
-    display: block;
-    padding: clamp(8px, 3vw, 16px) clamp(12px, 4vw, 24px) 40px;
-  }
-
-  .topbar {
-    position: static;
-    min-height: 0;
-    display: grid;
-    gap: 12px;
-    margin-bottom: 20px;
-    padding: 14px 14px 12px;
-    border-radius: 16px;
-  }
-
-  .brand-block {
-    grid-template-columns: 44px 1fr;
-  }
-
-  .brand-mark {
-    width: 44px;
-    height: 44px;
-  }
-
-  .nav {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    overflow: visible;
-  }
-
-  .nav a {
-    width: 100%;
-    min-width: 0;
-    min-height: 58px;
-    display: grid;
-    justify-items: center;
-    align-content: center;
-    padding: 6px 3px;
-    border-radius: 10px;
-  }
-
-  .nav-label {
-    display: block;
-    font-size: .69rem;
-    text-align: center;
   }
 }

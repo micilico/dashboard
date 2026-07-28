@@ -24,14 +24,14 @@
           </div>
         </div>
         <nav class="nav" aria-label="Navigation principale">
-          <a id="homeNavLink" href="./?view=home" title="Vue d’ensemble">
+          <a id="homeNavLink" aria-current="page" href="./?view=home" title="Vue d’ensemble">
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M3.75 10.5 12 4l8.25 6.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-3.75V13.5h-6v6.75H5.25a1.5 1.5 0 0 1-1.5-1.5z"></path></svg>
             </span>
             <span class="nav-label">Vue d’ensemble</span>
             <span id="navAlertCount" class="nav-count" hidden>0</span>
           </a>
-          <a id="torrentsNavLink" aria-current="page" href="./?view=torrents" title="Torrents">
+          <a id="torrentsNavLink" href="./?view=torrents" title="Torrents">
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"></path></svg>
             </span>
@@ -91,7 +91,7 @@
 
       <section class="summary-grid" id="summaryGrid" aria-label="Synthèse des torrents" hidden></section>
 
-      <section class="overview-view" id="homeView" aria-labelledby="homeTitle" hidden data-od-id="overview-section">
+      <section class="overview-view" id="homeView" aria-labelledby="homeTitle" data-od-id="overview-section">
         <div class="overview-header" data-od-id="overview-header">
           <div class="overview-copy">
             <p class="eyebrow greeting" id="greeting">Bonsoir</p>
@@ -117,25 +117,6 @@
         <div class="overview-grid">
           <div id="overviewMetrics" class="metrics-grid" aria-label="Indicateurs clés" data-od-id="metrics-row"></div>
           <div class="overview-lower-grid">
-            <section class="overview-card bandwidth-card" aria-labelledby="bandwidthTitle" data-od-id="bandwidth-section">
-              <div class="card-head card-head-spread">
-                <div>
-                  <h3 id="bandwidthTitle">Bande passante</h3>
-                  <p id="bandwidthSummary">Débit descendant et montant en direct.</p>
-                </div>
-              </div>
-              <div id="bandwidthChart" class="bandwidth-chart" aria-label="Graphique débit download/upload">
-                <div class="bandwidth-legend">
-                  <span class="legend-item"><span class="legend-swatch swatch-dl"></span> Download</span>
-                  <span class="legend-item"><span class="legend-swatch swatch-ul"></span> Upload</span>
-                </div>
-                <svg id="bandwidthSvg" class="bandwidth-svg" viewBox="0 0 400 160" preserveAspectRatio="none" aria-hidden="true"></svg>
-                <div id="bandwidthValues" class="bandwidth-values">
-                  <span id="bandwidthDl" class="bw-value bw-dl">—</span>
-                  <span id="bandwidthUl" class="bw-value bw-ul">—</span>
-                </div>
-              </div>
-            </section>
             <section class="overview-card services-card" aria-labelledby="servicesTitle" data-od-id="services-section">
               <div class="card-head card-head-spread">
                 <div>
@@ -161,40 +142,7 @@
         </div>
       </section>
 
-      <details class="toolbar" id="addPanel">
-        <summary>
-          <span>Ajouter des magnets</span>
-          <span class="summary-hint">Panneau repliable</span>
-        </summary>
-        <form id="addForm" class="magnet-form">
-          <label for="magnetInput">Liens magnet</label>
-          <textarea id="magnetInput" name="magnet" inputmode="url" autocomplete="off" placeholder="magnet:?xt=urn:btih:..."></textarea>
-          <div class="form-grid">
-            <label>
-              Catégorie
-              <input id="categoryInput" name="category" autocomplete="off">
-            </label>
-            <label>
-              Tags
-              <input id="tagsInput" name="tags" autocomplete="off" placeholder="film, archive">
-            </label>
-            <label class="check-line">
-              <input id="pausedInput" name="paused" type="checkbox">
-              Démarrer en pause
-            </label>
-            <label class="check-line">
-              <input id="tr4kerTrackerInput" name="tr4kerTracker" type="checkbox">
-              Ajouter l'annonce TR4KER
-            </label>
-          </div>
-          <div class="dialog-actions">
-            <button type="submit" class="button primary" id="addButton">Ajouter</button>
-          </div>
-          <p class="field-message" id="magnetMessage" aria-live="polite"></p>
-        </form>
-      </details>
-
-      <section class="content-panel torrents-panel" id="torrentsView" aria-labelledby="list-title">
+      <section class="content-panel torrents-panel" id="torrentsView" aria-labelledby="list-title" hidden>
         <div class="page-header page-header-panel">
           <div class="page-header-copy">
             <p class="eyebrow">Téléchargements</p>
@@ -206,6 +154,39 @@
             <button id="addTorrentButton" type="button" class="button primary">Ajouter un torrent</button>
           </div>
         </div>
+
+        <details class="toolbar" id="addPanel">
+          <summary>
+            <span>Ajouter des magnets</span>
+            <span class="summary-hint">Panneau repliable</span>
+          </summary>
+          <form id="addForm" class="magnet-form">
+            <label for="magnetInput">Liens magnet</label>
+            <textarea id="magnetInput" name="magnet" inputmode="url" autocomplete="off" placeholder="magnet:?xt=urn:btih:..."></textarea>
+            <div class="form-grid">
+              <label>
+                Catégorie
+                <input id="categoryInput" name="category" autocomplete="off">
+              </label>
+              <label>
+                Tags
+                <input id="tagsInput" name="tags" autocomplete="off" placeholder="film, archive">
+              </label>
+              <label class="check-line">
+                <input id="pausedInput" name="paused" type="checkbox">
+                Démarrer en pause
+              </label>
+              <label class="check-line">
+                <input id="tr4kerTrackerInput" name="tr4kerTracker" type="checkbox">
+                Ajouter l'annonce TR4KER
+              </label>
+            </div>
+            <div class="dialog-actions">
+              <button type="submit" class="button primary" id="addButton">Ajouter</button>
+            </div>
+            <p class="field-message" id="magnetMessage" aria-live="polite"></p>
+          </form>
+        </details>
 
         <div class="quick-filters" id="quickFilters" aria-label="Filtres rapides torrents"></div>
         <div id="activeFilters" class="active-filters" aria-label="Filtres actifs"></div>
@@ -391,7 +372,6 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="/common/js/focus-trap.js" defer></script>
     <script src="./config.js?v=20260727-polish-4"></script>
     <script src="./static/dist/app.min.js?v=20260727-polish-4" defer></script>
   </body>

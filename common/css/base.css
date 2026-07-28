@@ -36,13 +36,13 @@ button:disabled, input:disabled, select:disabled {
 .skip-link:focus { transform: translateY(0); }
 
 .shell {
-  width: min(1600px, calc(100% - 64px));
+  width: 100%;
   min-height: 100dvh;
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
   align-content: start;
-  gap: 20px 32px;
-  padding: 24px 0 56px;
+  gap: 0;
+  padding: 0 clamp(28px, 3.25vw, 52px) 48px 0;
 }
 
 .eyebrow, h1, h2, h3, p { margin: 0; }

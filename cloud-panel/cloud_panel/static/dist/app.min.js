@@ -10,6 +10,9 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
       clearTimeout(timeout);
 
       if (response.ok || response.status < 500) {
+        if (typeof hideReconnectNotice === 'function') {
+          hideReconnectNotice();
+        }
         return response;
       }
 
@@ -19,10 +22,18 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
         }
         await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)));
       } else {
+        if (typeof hideReconnectNotice === 'function') {
+          hideReconnectNotice();
+        }
         return response;
       }
     } catch (error) {
-      if (attempt === maxRetries) throw error;
+      if (attempt === maxRetries) {
+        if (typeof hideReconnectNotice === 'function') {
+          hideReconnectNotice();
+        }
+        throw error;
+      }
       if (attempt === 0 && typeof showReconnectNotice === 'function') {
         showReconnectNotice();
       }

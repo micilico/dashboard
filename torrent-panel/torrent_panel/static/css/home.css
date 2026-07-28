@@ -2,7 +2,7 @@
   border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-panel);
 }
 
-.topbar-actions, .refresh-controls, .dialog-actions, .action-row, .bulk-bar, .nav, .quick-filters {
+.topbar-actions, .refresh-controls, .dialog-actions, .action-row, .bulk-bar, .quick-filters {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 
@@ -27,35 +27,8 @@
   align-items: stretch;
 }
 
-.shell {
-  width: 100%;
-  grid-template-columns: clamp(256px, 18vw, 288px) minmax(0, 1fr);
-  gap: 0;
-  padding: 0 clamp(28px, 3.25vw, 52px) 48px 0;
-}
-
 .shell > * {
   min-width: 0;
-}
-
-.topbar {
-  top: 0;
-  min-height: 100dvh;
-  padding: 40px clamp(20px, 1.9vw, 30px) 28px;
-  border-right: 1px solid var(--border-soft);
-  background: var(--bg-secondary);
-}
-
-.topbar .brand-copy h1 {
-  margin: 0;
-  color: var(--accent);
-  font-size: 1.05rem;
-  line-height: 1.2;
-}
-
-.nav a[aria-current="page"] {
-  background: var(--border-quiet);
-  border-color: var(--border-soft);
 }
 
 .overview-view {
@@ -470,68 +443,6 @@
 
 .overview-card .card-head {
   margin-bottom: 0;
-}
-
-.bandwidth-card {
-  grid-column: span 12;
-  min-height: 220px;
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  padding: 22px 24px;
-}
-
-.bandwidth-chart {
-  display: grid;
-  gap: 8px;
-}
-
-.bandwidth-legend {
-  display: flex;
-  gap: 20px;
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.legend-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-}
-
-.swatch-dl { background: var(--accent); }
-.swatch-ul { background: var(--success); }
-
-.bandwidth-svg {
-  width: 100%;
-  height: 140px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--surface-2);
-}
-
-.bandwidth-values {
-  display: flex;
-  gap: 24px;
-  font-size: 0.9rem;
-}
-
-.bw-value {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.bw-dl { color: var(--accent); }
-.bw-ul { color: var(--success); }
-
-@media (max-width: 767px) {
-  .bandwidth-card { grid-column: 1; }
 }
 
 .page-header-panel {

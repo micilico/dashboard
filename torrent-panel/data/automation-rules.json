@@ -13,8 +13,8 @@
     "mode": "simulation",
     "createdAt": "2026-07-20T08:00:19.344127+00:00",
     "updatedAt": "2026-07-20T08:00:19.344127+00:00",
-    "lastExecutedAt": null,
-    "lastResult": "never"
+    "lastExecutedAt": "2026-07-28T10:50:36.565235+00:00",
+    "lastResult": "no_match"
   },
   {
     "id": "6b3d83fb52d2",
@@ -30,8 +30,8 @@
     "mode": "simulation",
     "createdAt": "2026-07-20T08:00:19.344127+00:00",
     "updatedAt": "2026-07-20T08:00:19.344127+00:00",
-    "lastExecutedAt": null,
-    "lastResult": "never"
+    "lastExecutedAt": "2026-07-28T10:50:36.565243+00:00",
+    "lastResult": "no_match"
   },
   {
     "id": "d61c2d199977",
@@ -47,7 +47,7 @@
     "mode": "simulation",
     "createdAt": "2026-07-20T08:00:19.344127+00:00",
     "updatedAt": "2026-07-20T08:00:19.344127+00:00",
-    "lastExecutedAt": null,
-    "lastResult": "never"
+    "lastExecutedAt": "2026-07-28T10:50:36.565247+00:00",
+    "lastResult": "matched"
   }
 ]
