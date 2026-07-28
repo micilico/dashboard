@@ -661,15 +661,18 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   .nav a,
   .nav button {
     display: grid;
+    grid-template-rows: 22px minmax(16px, auto);
     justify-items: center;
     align-content: center;
     gap: 3px;
-    min-height: 54px;
+    min-height: 72px;
     padding: 6px 3px;
   }
 
   .nav-label {
-    display: block;
+    display: block !important;
+    visibility: visible;
+    opacity: 1;
     width: 100%;
     overflow: hidden;
     font-size: .64rem;
