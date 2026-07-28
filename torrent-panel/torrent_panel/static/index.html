@@ -231,6 +231,13 @@
             Tri
             <select id="sortSelect"></select>
           </label>
+          <label>
+            Sens
+            <select id="sortDirectionSelect">
+              <option value="asc">Croissant</option>
+              <option value="desc">Décroissant</option>
+            </select>
+          </label>
           <button id="resetFilters" type="button" class="button secondary">Réinitialiser</button>
         </div>
 
@@ -258,7 +265,7 @@
             <input id="selectVisible" type="checkbox">
             <span id="selectVisibleLabel">Tout sélectionner</span>
           </label>
-          <span id="visibleSelectionSummary" class="selection-summary" aria-live="polite">0 fichier affiché</span>
+          <span id="visibleSelectionSummary" class="selection-summary" aria-live="polite">0 torrent affiché</span>
         </div>
 
         <div id="bulkBar" class="bulk-bar" hidden>

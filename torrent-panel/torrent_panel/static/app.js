@@ -103,6 +103,7 @@ const els = {
   tagFilter: document.querySelector("#tagFilter"),
   trackerFilter: document.querySelector("#trackerFilter"),
   sortSelect: document.querySelector("#sortSelect"),
+  sortDirectionSelect: document.querySelector("#sortDirectionSelect"),
   resetFilters: document.querySelector("#resetFilters"),
   clearActiveFilters: document.querySelector("#clearActiveFilters"),
   quickFilters: document.querySelector("#quickFilters"),
@@ -642,6 +643,7 @@ function renderControls() {
     }),
   );
   els.sortSelect.value = state.prefs.sort;
+  if (els.sortDirectionSelect) els.sortDirectionSelect.value = state.prefs.direction;
   renderQuickFilters();
   renderFilterNotice();
   renderFollowNotice();
@@ -681,8 +683,8 @@ function sortTorrents(torrents) {
   return [...torrents].sort((leftTorrent, rightTorrent) => {
     if (key === "default") {
       const groupDiff = (GROUP_ORDER[stateMeta(leftTorrent).group] ?? 99) - (GROUP_ORDER[stateMeta(rightTorrent).group] ?? 99);
-      if (groupDiff) return groupDiff;
-      return (Number(rightTorrent.downloadSpeed) || 0) - (Number(leftTorrent.downloadSpeed) || 0);
+      if (groupDiff) return groupDiff * direction;
+      return ((Number(rightTorrent.downloadSpeed) || 0) - (Number(leftTorrent.downloadSpeed) || 0)) * direction;
     }
     const left = sortValue(leftTorrent, key);
     const right = sortValue(rightTorrent, key);
@@ -881,7 +883,7 @@ function renderSelection(visible = filteredTorrents()) {
   els.selectVisibleLabel.textContent = allVisibleSelected ? "Tout désélectionner" : "Tout sélectionner";
   els.visibleSelectionSummary.textContent = visibleHashes.length
     ? `${selectedVisible.length} sur ${visibleHashes.length} sélectionné${selectedVisible.length > 1 ? "s" : ""}`
-    : "Aucun fichier affiché";
+    : "Aucun torrent affiché";
   els.bulkBar.hidden = state.selected.size === 0;
   els.bulkCount.textContent = `${state.selected.size} sélectionné${state.selected.size > 1 ? "s" : ""}`;
 }
@@ -1906,6 +1908,7 @@ function bindEvents() {
   els.tagFilter.addEventListener("change", () => updatePreference("tag", els.tagFilter.value));
   els.trackerFilter.addEventListener("change", () => updatePreference("tracker", els.trackerFilter.value));
   els.sortSelect.addEventListener("change", () => updatePreference("sort", els.sortSelect.value));
+  els.sortDirectionSelect?.addEventListener("change", () => updatePreference("direction", els.sortDirectionSelect.value));
   els.resetFilters.addEventListener("click", resetFilters);
   els.clearActiveFilters.addEventListener("click", resetFilters);
   els.autoRefreshToggle.addEventListener("change", () => {

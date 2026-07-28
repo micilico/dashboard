@@ -255,8 +255,12 @@
 }
 
 .action-row .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 40px;
   padding: 8px 10px;
+  text-align: center;
 }
 
 .row-status {

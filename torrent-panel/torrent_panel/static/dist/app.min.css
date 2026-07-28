@@ -1855,8 +1855,12 @@ td input[type="checkbox"] {
 }
 
 .action-row .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 40px;
   padding: 8px 10px;
+  text-align: center;
 }
 
 .row-status {
@@ -2423,6 +2427,8 @@ legend {
   .torrent-table td:nth-child(9) { width: 76px; }
   .torrent-table th:nth-child(10),
   .torrent-table td:nth-child(10) { width: 244px; }
+  .torrent-table th:nth-child(11),
+  .torrent-table td:nth-child(11) { width: 268px; }
 
   .torrent-table .name-button {
     width: 100%;
@@ -2438,6 +2444,7 @@ legend {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: stretch;
+    gap: 8px;
   }
 
   .torrent-table .action-row .button {
@@ -2519,7 +2526,8 @@ legend {
 
   .torrent-table td:nth-child(2),
   .torrent-table td:nth-child(4),
-  .torrent-table td:nth-child(10) {
+  .torrent-table td:nth-child(10),
+  .torrent-table td:nth-child(11) {
     grid-column: 1 / -1;
   }
 
@@ -2600,7 +2608,8 @@ legend {
   .torrent-table td,
   .torrent-table td:nth-child(2),
   .torrent-table td:nth-child(4),
-  .torrent-table td:nth-child(10) {
+  .torrent-table td:nth-child(10),
+  .torrent-table td:nth-child(11) {
     grid-column: 1;
   }
 
@@ -2664,6 +2673,11 @@ legend {
     grid-row: 2;
   }
 
+  .torrent-table td:nth-child(11) {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+
   .torrent-table .name-button {
     min-height: 44px;
     font-size: .98rem;
@@ -2676,8 +2690,8 @@ legend {
 
   .torrent-table .action-row .button {
     min-height: 44px;
-    padding: 7px 8px;
-    font-size: .82rem;
+    padding: 7px 10px;
+    font-size: .84rem;
   }
 
   .torrent-table .row-status:empty {
@@ -2731,6 +2745,11 @@ legend {
   .torrent-table td:nth-child(10) {
     grid-column: 8 / 13;
     grid-row: 2;
+  }
+
+  .torrent-table td:nth-child(11) {
+    grid-column: 1 / -1;
+    grid-row: 4;
   }
 
   .torrent-table td:nth-child(5) { grid-column: 1 / 3; grid-row: 3; }
