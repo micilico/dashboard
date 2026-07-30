@@ -309,7 +309,7 @@ function renderBulkBar() {
 function getSingleSelectedFolder() {
   if (S.selected.size !== 1) return null;
   const selectedPath = [...S.selected][0];
-  return S.allFiles.find(item => item.path === selectedPath && item.is_dir) || null;
+  return [...S.files, ...S.allFiles].find(item => item.path === selectedPath && item.is_dir) || null;
 }
 
 function toggleSelect(path) {
