@@ -957,6 +957,23 @@ function renderAlerts() {
   );
 }
 
+function createSystemState(type, title, message, options = {}) {
+  if (window.DashboardDOM?.state) {
+    return window.DashboardDOM.state({ type, title, message, compact: options.compact !== false });
+  }
+  const node = document.createElement("div");
+  node.className = `system-state ${type}${options.compact !== false ? " compact" : ""}`;
+  node.setAttribute("role", type === "error" || type === "unavailable" ? "alert" : "status");
+  const titleNode = document.createElement("p");
+  titleNode.className = "system-state-title";
+  titleNode.textContent = title;
+  const messageNode = document.createElement("p");
+  messageNode.className = "system-state-message";
+  messageNode.textContent = message;
+  node.append(titleNode, messageNode);
+  return node;
+}
+
 function renderServices() {
   const services = Array.isArray(state.dashboard.services) ? state.dashboard.services : [];
   const orderedNames = ["qBittorrent", "Prowlarr", "rclone", "Jellyfin"];
@@ -964,7 +981,17 @@ function renderServices() {
     .map((name) => services.find((item) => String(item.name || "").toLowerCase() === name.toLowerCase()))
     .filter(Boolean);
   const operational = services.filter((item) => item.status === "operational").length;
-  els.servicesSummary.textContent = `${operational}/${services.length} service(s) opérationnel(s).`;
+  els.servicesSummary.textContent = services.length
+    ? `${operational}/${services.length} service(s) opérationnel(s).`
+    : "Statuts indisponibles.";
+  if (!visibleServices.length) {
+    els.servicesGrid.replaceChildren(createSystemState(
+      "unavailable",
+      "Services indisponibles",
+      "Les statuts qBittorrent, Prowlarr, rclone et Jellyfin réapparaîtront à la prochaine synchronisation.",
+    ));
+    return;
+  }
   els.servicesGrid.replaceChildren(
     ...visibleServices.map((item) => {
       const link = document.createElement(item.action?.url ? "a" : "div");
@@ -1042,36 +1069,40 @@ function trendText(points) {
 
 function renderOverviewMetrics() {
   const overview = state.dashboard.overview || {};
-  pushMetricHistory("downloadSpeedBytes", Number(overview.downloadSpeedBytes || 0));
-  pushMetricHistory("uploadSpeedBytes", Number(overview.uploadSpeedBytes || 0));
-  pushMetricHistory("activeTorrents", Number(overview.activeTorrents || 0));
+  const hasMetric = (key) => Number.isFinite(Number(overview[key]));
+  if (hasMetric("downloadSpeedBytes")) pushMetricHistory("downloadSpeedBytes", Number(overview.downloadSpeedBytes));
+  if (hasMetric("uploadSpeedBytes")) pushMetricHistory("uploadSpeedBytes", Number(overview.uploadSpeedBytes));
+  if (hasMetric("activeTorrents")) pushMetricHistory("activeTorrents", Number(overview.activeTorrents));
   const cards = [
     {
       label: "Débit descendant",
-      value: formatSpeed(overview.downloadSpeedBytes || 0),
+      value: hasMetric("downloadSpeedBytes") ? formatSpeed(overview.downloadSpeedBytes) : "Indisponible",
       meta: "Téléchargement actuel",
       icon: "download",
       historyKey: "downloadSpeedBytes",
+      available: hasMetric("downloadSpeedBytes"),
     },
     {
       label: "Débit montant",
-      value: formatSpeed(overview.uploadSpeedBytes || 0),
+      value: hasMetric("uploadSpeedBytes") ? formatSpeed(overview.uploadSpeedBytes) : "Indisponible",
       meta: "Envoi actuel",
       icon: "upload",
       historyKey: "uploadSpeedBytes",
+      available: hasMetric("uploadSpeedBytes"),
     },
     {
       label: "Torrents actifs",
-      value: String(overview.activeTorrents || 0),
+      value: hasMetric("activeTorrents") ? String(overview.activeTorrents) : "Indisponible",
       meta: "Téléchargements et partages",
       icon: "speed",
       historyKey: "activeTorrents",
+      available: hasMetric("activeTorrents"),
     },
   ];
   els.overviewMetrics.replaceChildren(
     ...cards.map((card) => {
       const article = document.createElement("article");
-      article.className = "overview-card metric-card";
+      article.className = `overview-card metric-card${card.available ? "" : " unavailable"}`;
       const top = document.createElement("div");
       top.className = "metric-top";
       const iconWrap = document.createElement("div");
@@ -1087,8 +1118,12 @@ function renderOverviewMetrics() {
       const sparkline = document.createElement("div");
       sparkline.className = "sparkline";
       const history = state.metricHistory[card.historyKey] || [];
-      sparkline.innerHTML = sparklineSvg(history);
-      sparkline.setAttribute("aria-label", trendText(history));
+      if (card.available) {
+        sparkline.innerHTML = sparklineSvg(history);
+        sparkline.setAttribute("aria-label", trendText(history));
+      } else {
+        sparkline.replaceChildren(createSystemState("unavailable", "Donnée absente", "En attente du backend.", { compact: true }));
+      }
       article.append(top, sparkline, Object.assign(document.createElement("p"), { className: "metric-meta", textContent: card.meta }));
       return article;
     }),
@@ -1110,10 +1145,11 @@ function renderRecentActivity() {
     ? `${items.length} événement(s) récents affichés.`
     : "Aucun événement récent disponible.";
   if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "activity-empty";
-    empty.textContent = "Activité indisponible pour le moment.";
-    els.activityList.replaceChildren(empty);
+    els.activityList.replaceChildren(createSystemState(
+      "empty",
+      "Aucune activité récente",
+      "Les événements de téléchargement, scan et stockage apparaîtront ici dès qu’ils seront disponibles.",
+    ));
     return;
   }
   els.activityList.replaceChildren(

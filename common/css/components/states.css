@@ -1,0 +1,78 @@
+.system-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-8);
+  min-height: 164px;
+  padding: var(--space-32) var(--space-16);
+  color: var(--muted);
+  text-align: center;
+}
+
+.system-state.compact {
+  min-height: 96px;
+  padding: var(--space-24) var(--space-16);
+}
+
+.system-state-icon {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-subtle);
+}
+
+.system-state-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.system-state-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.system-state-message {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted);
+}
+
+.system-state.error .system-state-icon,
+.system-state.unavailable .system-state-icon {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.system-state.loading .system-state-icon {
+  border-color: var(--info-border);
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.system-state.empty .system-state-icon {
+  border-color: var(--border);
+  background: var(--neutral-soft);
+}
+
+.empty-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-8);
+  min-height: 164px;
+  padding: var(--space-32) var(--space-16);
+  color: var(--muted);
+  text-align: center;
+}

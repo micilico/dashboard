@@ -1,6 +1,6 @@
-- Services:
+- Accès rapides:
     - qBittorrent:
-        description: Interface ultra.cc via tunnel SSH local au VPS
+        description: Suivi des torrents, files et actions rapides
         href: /torrent-panel/
         widget:
           type: qbittorrent
@@ -11,20 +11,20 @@
           enableLeechSize: true
 
     - Prowlarr:
-        description: API ultra.cc via tunnel SSH local au VPS
+        description: Recherche, indexeurs et captures
         href: /prowlarr-panel/
         widget:
           type: prowlarr
           url: http://host.docker.internal:16124/prowlarr
           key: "{{HOMEPAGE_VAR_PROWLARR_API_KEY}}"
 
-    - Cloud Panel:
-        description: Gestionnaire de fichiers pour le montage rclone
+    - Cloud:
+        description: Parcourir, transférer et organiser les fichiers
         href: /cloud-panel/
         icon: cloud-upload-outline
 
     - Jellyfin:
-        description: Instance locale du 2e VPS
+        description: Bibliothèque, lectures en cours et état serveur
         widget:
           type: jellyfin
           url: "{{HOMEPAGE_VAR_JELLYFIN_URL}}"
@@ -32,9 +32,9 @@
           enableBlocks: true
           enableNowPlaying: true
 
-- Storage:
-    - rclone mount:
-        description: Statistiques rc du montage /mnt/ultra-media
+- Stockage:
+    - Montage média:
+        description: Activité de transfert et état du stockage
         widget:
           type: customapi
           url: http://host.docker.internal:5572/core/stats
@@ -43,10 +43,10 @@
           refreshInterval: 10000
           mappings:
             - field: transfers
-              label: Transfers
+              label: Transferts
             - field: speed
-              label: Speed
+              label: Vitesse
             - field: bytes
-              label: Bytes
+              label: Données
             - field: errors
-              label: Errors
+              label: Erreurs

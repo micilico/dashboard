@@ -129,7 +129,7 @@ function clearNode(node) {
   node.replaceChildren();
 }
 
-const { element, button } = window.DashboardDOM;
+const { element, button, state: systemState } = window.DashboardDOM;
 
 function formatBytes(value) {
   const bytes = Number(value) || 0;
@@ -550,7 +550,14 @@ function renderApplications() {
       children: [element("h3", { text: text(item.name) }), dl],
     });
   });
-  if (!cards.length) cards.push(element("div", { className: "empty", text: "Aucune application a afficher." }));
+  if (!cards.length) {
+    cards.push(systemState({
+      type: "empty",
+      title: "Aucune application",
+      message: "Aucune application connectée n'est disponible pour le moment.",
+      compact: true,
+    }));
+  }
   els.appsGrid.replaceChildren(...cards);
 }
 
@@ -578,8 +585,18 @@ function renderHealth() {
       ],
     }),
   );
-  els.alertsList.replaceChildren(...(alerts.length ? alerts : [element("div", { className: "empty", text: "Aucune alerte systeme." })]));
-  els.historyList.replaceChildren(...(events.length ? events : [element("div", { className: "empty", text: "Aucun evenement recent." })]));
+  els.alertsList.replaceChildren(...(alerts.length ? alerts : [systemState({
+    type: "empty",
+    title: "Aucune alerte",
+    message: "La santé Prowlarr ne signale aucun problème système.",
+    compact: true,
+  })]));
+  els.historyList.replaceChildren(...(events.length ? events : [systemState({
+    type: "empty",
+    title: "Aucun événement récent",
+    message: "Les dernières opérations apparaîtront ici après synchronisation.",
+    compact: true,
+  })]));
   els.healthTab.textContent = state.alerts.length > 0 ? `Sante (${state.alerts.length})` : "Sante";
 }
 

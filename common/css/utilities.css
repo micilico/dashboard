@@ -1,6 +1,6 @@
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 16px; padding: 24px 28px; border-bottom: 1px solid var(--border);
+  gap: 16px; padding: 24px 24px 8px; border-bottom: 1px solid var(--border);
 }
 .panel-head > div { display: grid; gap: 6px; }
 .panel-head p, .card-head p, .muted { color: var(--muted); font-size: .9rem; }
@@ -21,9 +21,9 @@
 .badge.downloading, .badge.sharing, .badge.complete { color: var(--success-text); background: var(--success-soft); }
 .badge.waiting, .badge.checking, .badge.paused { color: var(--warning-text); background: var(--warning-soft); }
 .empty { padding: 36px 20px; color: var(--muted); text-align: center; }
-.inline-stack { display: grid; gap: 12px; padding: 16px 20px 0; }
+.inline-stack { display: grid; gap: 12px; padding: 16px 20px 0; margin-inline: 20px; }
 .inline-stack .alert { margin: 0; }
-.split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px; }
+.split { display: grid; grid-template-columns: 7fr 5fr; gap: 20px; padding: 20px; }
 .alert {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin: 16px 20px 0;
@@ -35,6 +35,7 @@
 .status-unavailable { color: var(--danger); }
 .content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; grid-column: 2; }
 .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 24px; grid-column: 2; }
+.card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; }
 .sr-only {
   position: absolute;
   width: 1px;
@@ -53,10 +54,38 @@
   bottom: var(--space-16);
   z-index: var(--z-reconnect);
   max-width: min(420px, calc(100vw - var(--space-32)));
-  padding: var(--space-10) var(--space-16);
+  padding: var(--space-12) var(--space-16);
   background: var(--reconnect-bg);
   color: var(--text-on-warning);
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-panel);
   font-weight: 700;
+}
+
+@media (max-width: 1023px) {
+  .split,
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .panel-head,
+  .split,
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .panel-head {
+    padding: 16px;
+    align-items: stretch;
+  }
+
+  .split,
+  .card-grid,
+  .inline-stack {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
 }

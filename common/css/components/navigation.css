@@ -41,11 +41,13 @@
   gap: 6px;
 }
 
-.brand-copy h1 {
+.brand-copy h1,
+.product-name {
   margin: 0;
   color: var(--text);
   font-size: 1.05rem;
   line-height: 1.2;
+  font-weight: 700;
 }
 
 .nav {
@@ -55,7 +57,8 @@
 }
 
 .nav a,
-.nav button {
+.nav button,
+.nav-more summary {
   position: relative;
   width: 100%;
   justify-content: flex-start;
@@ -78,6 +81,23 @@
   transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
 }
 
+.nav-more {
+  display: contents;
+}
+
+.nav-more summary {
+  display: none;
+  list-style: none;
+}
+
+.nav-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-more-panel {
+  display: contents;
+}
+
 .nav-icon {
   flex: 0 0 22px;
   width: 22px;
@@ -98,11 +118,13 @@
 }
 
 .nav a:hover,
-.nav button:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
+.nav button:hover,
+.nav-more summary:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
 
 .nav a[aria-current="page"],
 .nav button[aria-current="page"],
-.nav button.active {
+.nav button.active,
+.nav-more[open] > summary {
   color: var(--text);
   background: var(--accent-soft);
   border-color: color-mix(in oklab, var(--accent), transparent 82%);
@@ -179,6 +201,7 @@
   min-width: 0;
 }
 
+.page-header h1,
 .page-header h2 {
   margin: 0;
   font-size: clamp(2.5rem, 3vw, 3rem);
@@ -337,7 +360,8 @@
   }
 
   .nav a,
-  .nav button {
+  .nav button,
+  .nav-more summary {
     display: grid;
     grid-template-rows: 22px minmax(16px, auto);
     justify-items: center;
@@ -358,6 +382,14 @@
     text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .nav-more-panel {
+    display: contents;
+  }
+
+  .nav-more summary {
+    display: none;
   }
 
   .sidebar-health {
@@ -419,10 +451,14 @@
     font-size: 1.25rem;
   }
 
+  .product-name {
+    font-size: 1.25rem;
+  }
+
   .nav {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
     overflow: visible;
     padding-top: 10px;
@@ -430,7 +466,8 @@
   }
 
   .nav a,
-  .nav button {
+  .nav button,
+  .nav-more summary {
     width: 100%;
     min-width: 0;
     min-height: 58px;
@@ -451,6 +488,49 @@
     text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .nav-more {
+    position: relative;
+    display: block;
+    min-width: 0;
+  }
+
+  .nav-more summary {
+    display: grid;
+  }
+
+  .nav-more-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 20;
+    width: min(260px, calc(100vw - 28px));
+    display: none;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--bg-secondary);
+    box-shadow: var(--shadow-dialog);
+  }
+
+  .nav-more[open] .nav-more-panel {
+    display: grid;
+  }
+
+  .nav-more-panel a {
+    display: flex;
+    justify-content: flex-start;
+    gap: 10px;
+    min-height: 48px;
+    padding: 10px 12px;
+  }
+
+  .nav-more-panel .nav-label {
+    width: auto;
+    font-size: .92rem;
+    text-align: left;
   }
 
   .nav-icon,

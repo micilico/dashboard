@@ -97,11 +97,6 @@
   font-size: 1rem;
 }
 
-.table-wrap table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
 @media (max-width: 1439px) and (min-width: 768px) {
   .page-header,
   .summary-grid-console,
@@ -138,6 +133,7 @@
     gap: 16px;
   }
 
+  .page-header h1,
   .page-header h2 {
     font-size: clamp(2.375rem, 11vw, 2.625rem);
   }

@@ -34,7 +34,7 @@ from .csrf_guard import require_action_guard
 
 router = APIRouter()
 
-_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud Panel</title><link rel="stylesheet" href="{assets}/static/share.css?v=20260725-a"></head><body class="{body_class}"><main class="share-shell">{body}</main></body></html>"""
+_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud</title><link rel="stylesheet" href="{assets}/static/share.css?v=20260725-a"></head><body class="{body_class}"><main class="share-shell">{body}</main></body></html>"""
 
 
 def _asset_prefix() -> str:
@@ -93,7 +93,7 @@ def _notice_card(title: str, message: str, variant: str = "error") -> str:
     extra = '<div class="notice notice-' + variant + '"><strong>' + title + '</strong><br>' + message + "</div>"
     return _render_page(
         title,
-        '<section class="share-card"><div class="logo">' + _SLICE_LOGO + '</div>' + extra + '<div class="ft">Cloud Panel &middot; Lien securise</div></section>',
+        '<section class="share-card"><div class="logo">' + _SLICE_LOGO + '</div>' + extra + '<div class="ft">Cloud &middot; Lien sécurisé</div></section>',
     )
 
 
@@ -120,7 +120,7 @@ PASSWORD_FORM = _render_page(
 <label class="field-label">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
 <button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au contenu</button>
-</form><div class="ft">Cloud Panel &middot; Lien securise</div></section>""",
+</form><div class="ft">Cloud &middot; Lien sécurisé</div></section>""",
 )
 
 PASSWORD_WRONG = _render_page(
@@ -131,7 +131,7 @@ PASSWORD_WRONG = _render_page(
 <label class="field-label">Mot de passe</label>
 <input type="password" name="password" required placeholder="Saisir le mot de passe">
 <button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Reessayer</button>
-</form><div class="ft">Cloud Panel &middot; Lien securise</div></section>""",
+</form><div class="ft">Cloud &middot; Lien sécurisé</div></section>""",
 )
 
 
@@ -145,7 +145,7 @@ _DOWNLOAD_BODY = """<div class="logo">""" + _SLICE_LOGO + """</div>
 <div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">{file_type}</div></div>
 </div>
 <a href="{dl_url}" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
-<div class="ft">Cloud Panel &middot; Lien securise</div>"""
+<div class="ft">Cloud &middot; Lien sécurisé</div>"""
 
 def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, dl_url: str) -> str:
     icon_svg = _ICONS.get(category, _ICONS["file"])
@@ -287,7 +287,7 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
             '</div><nav class="folder-crumbs" aria-label="Chemin">' + "".join(crumbs) + "</nav>"
             + parent
             + content
-            + '<div class="ft ft-center">Cloud Panel &middot; Dossier securise</div></section>'
+            + '<div class="ft ft-center">Cloud &middot; Dossier sécurisé</div></section>'
         ),
         body_class="folder-page",
     )

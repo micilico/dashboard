@@ -39,8 +39,7 @@
     grid-column: 1;
   }
 
-  .form-grid,
-  .filters {
+  .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -134,7 +133,6 @@
   .service-row { align-items: flex-start; }
   .service-row-status { white-space: normal; }
   .activity-list { padding: 0; border: 0; }
-  .filters { margin: 12px; padding: 14px; }
   .page-header-panel {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -151,8 +149,7 @@
 }
 
 @media (max-width: 640px) {
-  .form-grid,
-  .filters {
+  .form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -160,7 +157,6 @@
     grid-template-columns: 1fr;
   }
 
-  .filters .button,
   .dialog-actions .button {
     width: 100%;
   }
@@ -334,12 +330,13 @@
   .torrent-table .name-button {
     width: 100%;
     max-width: none;
+    min-width: 0;
     min-height: 44px;
     padding: 0;
     font-size: 1.05rem;
     line-height: 1.45;
-    overflow-wrap: break-word;
-    word-break: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .torrent-table .badge {
@@ -581,12 +578,11 @@
   .stat { min-height: 80px; padding: 12px; }
   .stat strong { font-size: 1.2rem; }
   .panel-head { padding: 16px; flex-direction: column; align-items: stretch; }
-  .filters { margin: 8px; padding: 10px; }
   .home-grid, .home-card { padding: 12px; }
   .quick-actions { grid-template-columns: 1fr; }
   .torrent-table tbody { padding: 0 8px 12px; gap: 8px; }
   .torrent-table tr { padding: 12px; }
-  .name-button { font-size: 0.95rem; }
+  .torrent-table .name-button { font-size: 0.95rem; }
   .dialog, .detail-dialog { width: calc(100% - 16px); }
 }
 

@@ -1,35 +1,16 @@
 @media (max-width: 1180px) {
   .summary-grid, .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .filters, .search-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 767px) {
-  .panel-head, .filters, .search-form, .split, .card-grid { display: grid; grid-template-columns: 1fr; }
   .status-pill { min-width: 0; text-align: left; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .picker-actions, .category-choices, .grab-actions { display: grid; grid-template-columns: 1fr; }
-  .table-scroll { overflow-x: visible; }
-  .data-table, .data-table thead, .data-table tbody, .data-table tr, .data-table th, .data-table td { display: block; }
-  .data-table thead {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
-  }
-  .data-table tr {
-    margin: 12px; padding: 14px 12px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface-2);
-  }
-  .data-table td {
-    display: grid; grid-template-columns: minmax(92px, 34%) minmax(0, 1fr); gap: 10px;
-    border: 0; padding: 10px 0; min-height: 44px;
-  }
-  .data-table td::before {
-    content: attr(data-label); color: var(--muted); font-size: 0.82rem; font-weight: 700;
-  }
   th, td { padding: 10px 8px; }
 }
 @media (max-width: 375px) {
   .summary-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
   .stat { min-height: 80px; padding: 12px; }
   .stat strong { font-size: 1.2rem; }
-  .panel-head { padding: 16px; flex-direction: column; align-items: stretch; }
-  .data-table tr { margin: 8px; padding: 10px; }
 }
 @media (min-width: 1440px) {
   .summary-grid { gap: 16px; }

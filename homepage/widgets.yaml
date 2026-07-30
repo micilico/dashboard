@@ -11,9 +11,8 @@
     target: _blank
 
 - resources:
-    label: Ultra Media
+    label: Stockage média
     disk: /mnt/ultra-media
     expanded: true
     diskUnits: bytes
     refresh: 10000
-

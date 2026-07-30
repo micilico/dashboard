@@ -95,6 +95,7 @@ const context = {
 };
 
 const source = fs.readFileSync("torrent-panel/torrent_panel/static/app.js", "utf8");
+const consoleSource = fs.readFileSync("torrent-panel/torrent_panel/static/console.js", "utf8");
 const overviewHtml = fs.readFileSync("torrent-panel/torrent_panel/static/index.html", "utf8");
 
 assert.equal(overviewHtml.includes("Votre espace média"), false);
@@ -110,6 +111,20 @@ assert.equal(source.includes("storageVisualization"), false);
 assert.equal(source.includes("Operationnel"), false);
 assert.equal(source.includes("form.innerHTML"), false);
 assert.equal(source.includes("row.innerHTML"), false);
+assert.equal(consoleSource.includes("innerHTML"), false);
+assert.match(consoleSource, /function panel\(title, subtitle, bodyChildren/);
+assert.match(consoleSource, /systemState\(\{ type: "empty"/);
+assert.match(consoleSource, /className: "table-wrap table-scroll"/);
+assert.match(source, /function createSystemState/);
+assert.match(source, /Services indisponibles/);
+assert.match(source, /Aucune activité récente/);
+assert.match(source, /metric-card\$\{card\.available \? "" : " unavailable"\}/);
+assert.equal(source.includes('empty.className = "activity-empty"'), false);
+
+const overviewCss = fs.readFileSync("torrent-panel/torrent_panel/static/css/home.css", "utf8");
+assert.equal(overviewCss.includes("min-height: 350px"), false);
+assert.match(overviewCss, /\.services-list \.system-state/);
+assert.match(overviewCss, /\.metric-card\.unavailable/);
 
 vm.runInNewContext(
   `${source}

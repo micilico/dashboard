@@ -61,12 +61,9 @@
   --pulse-success-start: rgba(94, 230, 168, 0.4);
   --pulse-success-end: rgba(94, 230, 168, 0);
   --space-4: 4px;
-  --space-6: 6px;
   --space-8: 8px;
-  --space-10: 10px;
   --space-12: 12px;
   --space-16: 16px;
-  --space-20: 20px;
   --space-24: 24px;
   --space-32: 32px;
   --space-48: 48px;
@@ -86,6 +83,7 @@
   --motion-close: 200ms;
   --z-sticky: 5;
   --z-toast: 20;
+  --z-popover: 40;
   --z-overlay: 50;
   --z-reconnect: 100;
   --icon-sm: 16px;

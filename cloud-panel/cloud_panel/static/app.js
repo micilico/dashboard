@@ -8,6 +8,7 @@ const S = {
   sortKey: "name", sortDir: "asc", search: "",
   renameTarget: null, deleteTarget: null, shareTarget: null,
   selected: new Set(), focusedIdx: -1, favs: [],
+  selectionMode: false, actionMenuTarget: null, actionMenuInvoker: null,
   view: "files", loading: false, hasMore: true, obs: null,
   diskUsed: "", diskTotal: "", diskPct: 0,
   uploadRows: new Map(),
@@ -96,7 +97,7 @@ function clearError() { $("alert").hidden = true; }
 
 // ── Navigation ──
 function navigate(p) {
-  S.view = "files"; S.path = p; S.page = 1; S.files = []; S.hasMore = true; S.selected = new Set(); S.focusedIdx = -1;
+  S.view = "files"; S.path = p; S.page = 1; S.files = []; S.hasMore = true; S.selected = new Set(); S.focusedIdx = -1; S.selectionMode = false;
   ["files","history","links","stats"].forEach(x => { const el = $(x + "View"); if (el) el.hidden = x !== "files"; });
   qsa(".sidebar-link").forEach(b => b.classList.toggle("active", b.dataset.nav === "files"));
   loadFiles(); updateUrl();
@@ -189,6 +190,15 @@ function renderFiles() {
   const empty = $("emptyState");
   const sentinel = $("scrollSentinel");
   const pagBar = $("paginationBar");
+  $("filesView").classList.toggle("selection-mode", S.selectionMode);
+  const selectionButton = $("btnSelectionMode");
+  if (selectionButton) {
+    selectionButton.setAttribute("aria-pressed", S.selectionMode ? "true" : "false");
+    selectionButton.classList.toggle("active", S.selectionMode);
+    const label = qs("span", selectionButton);
+    if (label) label.textContent = S.selectionMode ? "Terminer" : "Sélectionner";
+  }
+  closeFileActionMenu();
 
   if (items.length === 0) {
     body.replaceChildren(); empty.hidden = false;
@@ -206,6 +216,7 @@ function renderFiles() {
     const td0 = document.createElement("td"); td0.className = "col-check";
     const cb = document.createElement("input"); cb.type = "checkbox";
     cb.checked = S.selected.has(f.path);
+    cb.setAttribute("aria-label", `Sélectionner ${f.name}`);
     cb.addEventListener("change", () => toggleSelect(f.path));
     td0.append(cb);
 
@@ -213,8 +224,18 @@ function renderFiles() {
     const td1 = document.createElement("td");
     const nc = document.createElement("div"); nc.className = "file-name-cell";
     const ic = document.createElement("span"); ic.className = `file-icon ${f.is_dir ? "folder" : fileIcon(f.name)}`; ic.innerHTML = fileIconSVG(fileIcon(f.name, f.is_dir));
-    const nm = document.createElement("span"); nm.className = `file-name${f.is_dir ? " dir" : ""}`; nm.textContent = f.name; nm.title = f.name;
-    if (f.is_dir) nm.addEventListener("click", () => navigate(f.path));
+    const nm = document.createElement(f.is_dir ? "button" : "span");
+    nm.className = `file-name${f.is_dir ? " dir" : ""}`;
+    nm.textContent = f.name;
+    nm.title = f.name;
+    if (f.is_dir) {
+      nm.type = "button";
+      nm.setAttribute("aria-label", `Ouvrir ${f.name}`);
+      nm.addEventListener("click", () => {
+        if (S.selectionMode) toggleSelect(f.path);
+        else navigate(f.path);
+      });
+    }
     nc.append(ic, nm); td1.append(nc);
 
     // Size
@@ -232,28 +253,22 @@ function renderFiles() {
 
     // Actions
     const td5 = document.createElement("td"); td5.className = "action-cell";
-    const acts = document.createElement("div"); acts.style.display = "flex"; acts.style.gap = "2px"; acts.style.justifyContent = "flex-end";
-    if (!f.is_dir) {
-      const dl = document.createElement("a"); dl.className = "action-btn"; dl.href = au(`/files/download?path=${encodeURIComponent(f.path)}`);
-      dl.setAttribute("aria-label", "Télécharger"); dl.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>';
-      acts.append(dl);
-      const pv = document.createElement("button"); pv.className = "action-btn"; pv.setAttribute("aria-label", "Aperçu");
-      pv.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.25"/><path d="M12 8v4l3 3"/></svg>';
-      pv.addEventListener("click", (e) => { e.stopPropagation(); openPreview(f, e.currentTarget); }); acts.append(pv);
-    }
-    const sh = document.createElement("button"); sh.className = "action-btn"; sh.setAttribute("aria-label", "Partager");
-    sh.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>';
-    sh.addEventListener("click", (e) => { e.stopPropagation(); openShare(f, e.currentTarget); }); acts.append(sh);
-    const rn = document.createElement("button"); rn.className = "action-btn"; rn.setAttribute("aria-label", "Renommer");
-    rn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M15.25 5.25 18.75 8.75M7.75 16.25l-1 2 2-1L16 10 14 8Z"/></svg>';
-    rn.addEventListener("click", (e) => { e.stopPropagation(); openRename(f, e.currentTarget); }); acts.append(rn);
-    const dt = document.createElement("button"); dt.className = "action-btn danger"; dt.setAttribute("aria-label", "Supprimer");
-    dt.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7.75h14M9 7.75V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2.25M19 7.75v11a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 18.75V7.75"/></svg>';
-    dt.addEventListener("click", (e) => { e.stopPropagation(); openDelete(f, e.currentTarget); }); acts.append(dt);
+    const acts = document.createElement("div"); acts.className = "row-actions";
+    const more = document.createElement("button"); more.className = "action-btn"; more.type = "button";
+    more.setAttribute("aria-haspopup", "menu");
+    more.setAttribute("aria-expanded", "false");
+    more.setAttribute("aria-label", `Actions pour ${f.name}`);
+    more.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>';
+    more.addEventListener("click", (e) => { e.stopPropagation(); openFileActionMenu(f, e.currentTarget); });
+    acts.append(more);
     td5.append(acts);
 
     tr.append(td0, td1, td2, td3, td4, td5);
-    tr.addEventListener("click", (e) => { if (!e.target.closest("button,a,input")) S.focusedIdx = i; });
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("button,a,input")) return;
+      S.focusedIdx = i;
+      if (S.selectionMode) toggleSelect(f.path);
+    });
     return tr;
   }));
 
@@ -274,7 +289,7 @@ function renderFiles() {
 function renderBreadcrumb() {
   const parts = S.path ? S.path.replace(/\\/g, "/").split("/").filter(Boolean) : [];
   const el = $("breadcrumb"); el.replaceChildren();
-  const rl = document.createElement("a"); rl.href = "#"; rl.textContent = "Cloud Panel";
+  const rl = document.createElement("a"); rl.href = "#"; rl.textContent = "Cloud";
   rl.addEventListener("click", (e) => { e.preventDefault(); navigate(""); }); el.append(rl);
   let acc = "";
   for (const p of parts) {
@@ -300,6 +315,7 @@ function renderSidebarDisk() {
 function renderBulkBar() {
   const el = $("bulkBar"); const n = S.selected.size;
   if (n === 0) { el.hidden = true; return; }
+  S.selectionMode = true;
   el.hidden = false;
   qs("#bulkCount", el).textContent = `${n} sélectionné${n > 1 ? "s" : ""}`;
   const selectedFolder = getSingleSelectedFolder();
@@ -313,14 +329,75 @@ function getSingleSelectedFolder() {
 }
 
 function toggleSelect(path) {
+  S.selectionMode = true;
   if (S.selected.has(path)) S.selected.delete(path); else S.selected.add(path);
   renderFiles(); renderBulkBar();
 }
 function selectAll() {
+  S.selectionMode = true;
   const items = getSortedFiltered();
   if (S.selected.size === items.filter(f => !f.is_dir).length) S.selected.clear();
   else items.filter(f => !f.is_dir).forEach(f => S.selected.add(f.path));
   renderFiles(); renderBulkBar();
+}
+
+function setSelectionMode(enabled) {
+  S.selectionMode = enabled;
+  if (!enabled) S.selected.clear();
+  renderFiles();
+  renderBulkBar();
+}
+
+function menuItem(label, icon, action, options = {}) {
+  const item = document.createElement(options.href ? "a" : "button");
+  if (options.danger) item.classList.add("danger");
+  item.setAttribute("role", "menuitem");
+  if (options.href) item.href = options.href;
+  else item.type = "button";
+  item.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg><span>${label}</span>`;
+  item.addEventListener("click", (event) => {
+    if (!options.href) event.preventDefault();
+    closeFileActionMenu();
+    action?.(event);
+  });
+  return item;
+}
+
+function closeFileActionMenu() {
+  const menu = $("fileActionMenu");
+  if (!menu) return;
+  menu.hidden = true;
+  menu.replaceChildren();
+  if (S.actionMenuInvoker) S.actionMenuInvoker.setAttribute("aria-expanded", "false");
+  S.actionMenuTarget = null;
+  S.actionMenuInvoker = null;
+}
+
+function openFileActionMenu(file, invoker) {
+  const menu = $("fileActionMenu");
+  if (!menu) return;
+  if (S.actionMenuTarget?.path === file.path) { closeFileActionMenu(); return; }
+  closeFileActionMenu();
+  S.actionMenuTarget = file;
+  S.actionMenuInvoker = invoker;
+  invoker.setAttribute("aria-expanded", "true");
+  const items = [];
+  if (!file.is_dir) {
+    items.push(menuItem("Télécharger", '<path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/>', null, { href: au(`/files/download?path=${encodeURIComponent(file.path)}`) }));
+    items.push(menuItem("Aperçu", '<circle cx="12" cy="12" r="8.25"/><path d="M12 8v4l3 3"/>', () => openPreview(file, invoker)));
+  }
+  items.push(menuItem("Partager", '<path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/>', () => openShare(file, invoker)));
+  items.push(menuItem("Renommer", '<path d="M15.25 5.25 18.75 8.75M7.75 16.25l-1 2 2-1L16 10 14 8Z"/>', () => openRename(file, invoker)));
+  items.push(menuItem("Sélectionner", '<path d="M9 11.5 11 13.5 15.5 8.5"/><rect x="4" y="4" width="16" height="16" rx="3"/>', () => toggleSelect(file.path)));
+  items.push(menuItem("Supprimer", '<path d="M5 7.75h14M9 7.75V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2.25M19 7.75v11a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 18.75V7.75"/>', () => openDelete(file, invoker), { danger: true }));
+  menu.replaceChildren(...items);
+  const rect = invoker.getBoundingClientRect();
+  menu.hidden = false;
+  const width = Math.min(240, window.innerWidth - 24);
+  menu.style.width = `${width}px`;
+  menu.style.left = `${Math.max(12, Math.min(window.innerWidth - width - 12, rect.right - width))}px`;
+  menu.style.top = `${Math.min(window.innerHeight - menu.offsetHeight - 12, rect.bottom + 8)}px`;
+  qs("[role='menuitem']", menu)?.focus();
 }
 
 // ── Favorites ──
@@ -612,6 +689,14 @@ async function uploadOne(file) {
 
 // ── Select All ──
 $("selectAll").addEventListener("change", selectAll);
+$("btnSelectionMode").addEventListener("click", () => setSelectionMode(!S.selectionMode));
+document.addEventListener("click", (event) => {
+  if (event.target.closest("#fileActionMenu") || event.target.closest(".action-btn")) return;
+  closeFileActionMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeFileActionMenu();
+});
 
 // ── Sort ──
 function sortByHeader(th) {
@@ -651,7 +736,7 @@ $("searchInput").addEventListener("input", () => {
 });
 
 // ── Bulk actions ──
-$("bulkClear").addEventListener("click", () => { S.selected.clear(); renderFiles(); renderBulkBar(); });
+$("bulkClear").addEventListener("click", () => setSelectionMode(false));
 $("bulkDelete").addEventListener("click", (event) => {
   if (!S.selected.size) return;
   $("bulkDeleteDescription").textContent = `Supprimer ${S.selected.size} élément${S.selected.size > 1 ? "s" : ""} sélectionné${S.selected.size > 1 ? "s" : ""} ?`;

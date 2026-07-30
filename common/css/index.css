@@ -7,4 +7,6 @@
 @import url('./components/tables.css');
 @import url('./components/dialogs.css');
 @import url('./components/navigation.css');
+@import url('./components/menus.css');
+@import url('./components/states.css');
 @import url('./utilities.css');

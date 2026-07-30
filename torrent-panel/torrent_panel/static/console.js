@@ -40,6 +40,8 @@ const els = {
   sidebarStatusDetail: document.querySelector("#sidebarStatusDetail"),
 };
 
+const { element, state: systemState } = window.DashboardDOM;
+
 function showToast(message) {
   els.toast.textContent = message;
   els.toast.hidden = false;
@@ -91,6 +93,34 @@ function card(label, value, hint = "", className = "") {
   article.append(top, strong);
   if (hint) article.append(Object.assign(document.createElement("p"), { className: "muted", textContent: hint }));
   return article;
+}
+
+function panel(title, subtitle, bodyChildren = [], actions = []) {
+  const section = element("section", { className: "panel" });
+  const heading = element("div", {
+    children: [
+      element("h2", { text: title }),
+      subtitle ? element("p", { className: "muted", text: subtitle }) : null,
+    ].filter(Boolean),
+  });
+  const head = element("div", { className: "panel-head", children: [heading, ...actions] });
+  const body = element("div", { className: "panel-body", children: bodyChildren });
+  section.append(head, body);
+  return section;
+}
+
+function listContainer(id, className = "list") {
+  return element("div", { className, attrs: { id } });
+}
+
+function healthTable(rows) {
+  const table = element("table", { className: "data-table" });
+  const headRow = element("tr", {
+    children: ["Service", "Liveness", "Readiness", "Dernier succès", "Message"].map((label) => element("th", { text: label })),
+  });
+  const tbody = element("tbody", { attrs: { id: "healthRows" }, children: rows });
+  table.append(element("thead", { children: [headRow] }), tbody);
+  return element("div", { className: "table-wrap table-scroll", children: [table] });
 }
 
 function setRefreshStamp() {
@@ -158,7 +188,9 @@ function configureLinks() {
 }
 
 function renderList(container, items, emptyText) {
-  container.replaceChildren(...(items.length ? items : [Object.assign(document.createElement("div"), { className: "empty", textContent: emptyText })]));
+  container.replaceChildren(...(items.length ? items : [
+    systemState({ type: "empty", title: emptyText, compact: true }),
+  ]));
 }
 
 async function postJson(path, payload, successMessage) {
@@ -237,18 +269,12 @@ async function renderActivity() {
   });
 
   els.contentA.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Chronologie récente</h2><p class="muted">Événements consolidés sans secret.</p></div></div><div class="panel-body"><div id="timelineList" class="timeline"></div></div>`,
-    }),
+    panel("Chronologie récente", "Événements consolidés sans secret.", [listContainer("timelineList", "timeline")]),
   );
   renderList(document.querySelector("#timelineList"), timelineItems, "Aucun événement récent.");
 
   els.contentB.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Notifications</h2><p class="muted">Déduplication, acquittement et réouverture.</p></div></div><div class="panel-body"><div id="notificationList" class="list"></div></div>`,
-    }),
+    panel("Notifications", "Déduplication, acquittement et réouverture.", [listContainer("notificationList")]),
   );
   renderList(document.querySelector("#notificationList"), alertItems, "Aucune alerte active.");
 
@@ -295,17 +321,16 @@ async function renderStorage() {
   });
 
   els.contentA.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Montage et seuils</h2><p class="muted">Chemin surveillé: ${text(disk.path)}</p></div>${badge(disk.mounted ? "Monté" : "Indisponible", disk.mounted ? "ok" : "error").outerHTML}</div><div class="panel-body"><p class="muted">Statut: ${text(disk.status)}.</p></div>`,
-    }),
+    panel(
+      "Montage et seuils",
+      `Chemin surveillé: ${text(disk.path)}`,
+      [element("p", { className: "muted", text: `Statut: ${text(disk.status)}.` })],
+      [badge(disk.mounted ? "Monté" : "Indisponible", disk.mounted ? "ok" : "error")],
+    ),
   );
 
   els.contentB.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Transferts actifs</h2><p class="muted">Dernière réponse réussie: ${formatDate(rclone.lastSuccessfulResponseAt)}</p></div></div><div class="panel-body"><div id="transferList" class="list"></div></div>`,
-    }),
+    panel("Transferts actifs", `Dernière réponse réussie: ${formatDate(rclone.lastSuccessfulResponseAt)}`, [listContainer("transferList")]),
   );
   renderList(document.querySelector("#transferList"), transfers, rclone.errorMessage || "Aucun transfert actif.");
   els.cardsGrid.replaceChildren();
@@ -356,18 +381,12 @@ async function renderMedia() {
   });
 
   els.contentA.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Derniers médias ajoutés</h2><p class="muted">Ouverture native via Jellyfin disponible.</p></div></div><div class="panel-body"><div id="recentMediaList" class="list"></div></div>`,
-    }),
+    panel("Derniers médias ajoutés", "Ouverture native via Jellyfin disponible.", [listContainer("recentMediaList")]),
   );
   renderList(document.querySelector("#recentMediaList"), recentItems, (payload.errors || []).join(" ") || "Aucun média récent.");
 
   els.contentB.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Tâches planifiées</h2><p class="muted">Tâches et scans observables.</p></div></div><div class="panel-body"><div id="taskList" class="list"></div></div>`,
-    }),
+    panel("Tâches planifiées", "Tâches et scans observables.", [listContainer("taskList")]),
   );
   renderList(document.querySelector("#taskList"), tasks, "Aucune tâche visible.");
   els.cardsGrid.replaceChildren();
@@ -418,12 +437,8 @@ async function renderHealth() {
   });
 
   els.contentA.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Vérifications</h2><p class="muted">Séparation liveness/readiness.</p></div></div><div class="panel-body"><div class="table-wrap"><table><thead><tr><th>Service</th><th>Liveness</th><th>Readiness</th><th>Dernier succès</th><th>Message</th></tr></thead><tbody id="healthRows"></tbody></table></div></div>`,
-    }),
+    panel("Vérifications", "Séparation liveness/readiness.", [healthTable(rows)]),
   );
-  document.querySelector("#healthRows").replaceChildren(...rows);
 
   const alertItems = (payload.alerts || []).map((item) => {
     const article = document.createElement("article");
@@ -436,10 +451,7 @@ async function renderHealth() {
     return article;
   });
   els.contentB.replaceChildren(
-    Object.assign(document.createElement("section"), {
-      className: "panel",
-      innerHTML: `<div class="panel-head"><div><h2>Alertes corrélées</h2><p class="muted">Dernières alertes utiles seulement.</p></div></div><div class="panel-body"><div id="healthAlertList" class="list"></div></div>`,
-    }),
+    panel("Alertes corrélées", "Dernières alertes utiles seulement.", [listContainer("healthAlertList")]),
   );
   renderList(document.querySelector("#healthAlertList"), alertItems, "Aucune alerte.");
   els.cardsGrid.replaceChildren();

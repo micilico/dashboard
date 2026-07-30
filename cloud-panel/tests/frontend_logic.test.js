@@ -406,6 +406,15 @@ suite('DOM security', () => {
     assert.ok(appSource.includes('"bulkShareFolder").hidden = !selectedFolder'));
     assert.ok(appSource.includes('"bulkShareFolder").addEventListener("click"'));
   });
+
+  test('mobile file rows use selection mode and an action menu', () => {
+    assert.ok(appSource.includes("selectionMode: false"));
+    assert.ok(appSource.includes('classList.toggle("selection-mode", S.selectionMode)'));
+    assert.ok(appSource.includes('cb.setAttribute("aria-label", `Sélectionner ${f.name}`)'));
+    assert.ok(appSource.includes("function openFileActionMenu"));
+    assert.ok(appSource.includes('role", "menuitem"'));
+    assert.ok(!appSource.includes('acts.style.display = "flex"'));
+  });
 });
 
 suite('Caddy share-link access', () => {

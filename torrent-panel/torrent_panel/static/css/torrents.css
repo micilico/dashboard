@@ -6,14 +6,6 @@
   padding: 24px 24px 8px;
 }
 
-.filters {
-  margin: 0 20px 16px;
-  padding: 16px 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--surface-2);
-}
-
 .secondary-panel {
   margin: 0 20px 16px;
   overflow: hidden;

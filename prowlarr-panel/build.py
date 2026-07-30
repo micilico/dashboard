@@ -7,12 +7,15 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT.parent))
 from common import resolve_css_imports  # noqa: E402
+from common.shell import render_shell_files  # noqa: E402
 
 STATIC = ROOT / "prowlarr_panel" / "static"
 COMMON = ROOT / "common" if (ROOT / "common").exists() else ROOT.parent / "common"
 DIST = STATIC / "dist"
 
 DIST.mkdir(parents=True, exist_ok=True)
+
+render_shell_files(STATIC, {"index.html": "prowlarr"})
 
 # Self-hosted fonts must live next to the generated bundle so relative URLs
 # keep working behind any configured public prefix.
