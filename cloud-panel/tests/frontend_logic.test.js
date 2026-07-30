@@ -394,6 +394,12 @@ suite('DOM security', () => {
   test('new-tab preview links isolate the opener', () => {
     assert.ok(appSource.includes('download.rel = "noopener noreferrer"'));
   });
+
+  test('current folder can be shared as a navigable folder link', () => {
+    assert.ok(appSource.includes("function openShareCurrentFolder"));
+    assert.ok(appSource.includes('"Racine cloud"'));
+    assert.ok(appSource.includes('is_dir: true'));
+  });
 });
 
 suite('Caddy share-link access', () => {

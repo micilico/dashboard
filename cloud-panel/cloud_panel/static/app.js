@@ -355,6 +355,11 @@ function openShare(f, trigger) {
   qs("#sharePassword", $("shareDialog")).value = "";
   openDialog($("shareDialog"), trigger);
 }
+function openShareCurrentFolder(trigger) {
+  const cleanPath = (S.path || "").replace(/\/+$/, "");
+  const folderName = cleanPath ? cleanPath.split("/").filter(Boolean).pop() : "Racine cloud";
+  openShare({ name: folderName, path: cleanPath, is_dir: true }, trigger);
+}
 $("confirmShareBtn").addEventListener("click", async () => {
   const f = S.shareTarget; if (!f) return;
   const mode = qs("#shareMode", $("shareDialog")).value;
@@ -448,6 +453,7 @@ function openDelete(f, trigger) { S.deleteTarget = f; qs("#deleteName", $("delet
 // ── Events ──
 $("btnUpload").addEventListener("click", (event) => openDialog($("uploadDialog"), event.currentTarget));
 $("btnMkdir").addEventListener("click", (event) => { $("mkdirNameInput").value = ""; qs("#mkdirMessage", $("mkdirDialog")).textContent = ""; openDialog($("mkdirDialog"), event.currentTarget); });
+$("btnShareFolder").addEventListener("click", (event) => openShareCurrentFolder(event.currentTarget));
 $("btnSync").addEventListener("click", async () => {
   setButtonBusy($("btnSync"), true);
   try { await api(au("/files/refresh"), { method: "POST" }); toast("Cache actualisé."); loadFiles(); } catch (e) { showError(e); }

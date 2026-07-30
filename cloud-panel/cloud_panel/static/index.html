@@ -139,6 +139,10 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 Nouveau dossier
               </button>
+              <button id="btnShareFolder" class="button secondary" title="Partager le dossier courant" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>
+                Partager dossier
+              </button>
               <button id="btnSync" class="button secondary" title="Synchroniser" aria-label="Synchroniser" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
               </button>
@@ -222,7 +226,7 @@
       <form method="dialog" id="shareForm">
         <h2>Partager</h2>
         <p id="shareItem" class="dialog-name"></p>
-        <p class="muted">Lien privé, accessible aux utilisateurs authentifiés du dashboard.</p>
+        <p class="muted">Lien public révocable, avec mot de passe optionnel et durée limitée.</p>
         <label>Durée de validité
           <select id="shareExpiry"><option value="1">1 jour</option><option value="4">4 jours</option><option value="7" selected>7 jours</option><option value="30">30 jours</option></select>
         </label>
