@@ -302,6 +302,14 @@ function renderBulkBar() {
   if (n === 0) { el.hidden = true; return; }
   el.hidden = false;
   qs("#bulkCount", el).textContent = `${n} sélectionné${n > 1 ? "s" : ""}`;
+  const selectedFolder = getSingleSelectedFolder();
+  $("bulkShareFolder").hidden = !selectedFolder;
+}
+
+function getSingleSelectedFolder() {
+  if (S.selected.size !== 1) return null;
+  const selectedPath = [...S.selected][0];
+  return S.allFiles.find(item => item.path === selectedPath && item.is_dir) || null;
 }
 
 function toggleSelect(path) {
@@ -679,6 +687,11 @@ $("bulkShare").addEventListener("click", async () => {
   }
   const detail = errors && lastErr ? ` — Derniere erreur: ${lastErr}` : "";
   toast(`${results.length} lien${results.length > 1 ? "s" : ""} généré${results.length > 1 ? "s" : ""}${errors ? `, ${errors} erreur${errors > 1 ? "s" : ""}${detail}` : ""}${results.length ? " et copié(s)" : ""}.`);
+});
+$("bulkShareFolder").addEventListener("click", (event) => {
+  const selectedFolder = getSingleSelectedFolder();
+  if (!selectedFolder) return;
+  openShare(selectedFolder, event.currentTarget);
 });
 $("bulkDownload").addEventListener("click", async () => {
   const it = [...S.selected]; if (!it.length) return;

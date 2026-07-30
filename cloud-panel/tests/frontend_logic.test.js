@@ -400,6 +400,12 @@ suite('DOM security', () => {
     assert.ok(appSource.includes('"Racine cloud"'));
     assert.ok(appSource.includes('is_dir: true'));
   });
+
+  test('selected folder exposes a navigable folder bulk action', () => {
+    assert.ok(appSource.includes("function getSingleSelectedFolder"));
+    assert.ok(appSource.includes('"bulkShareFolder").hidden = !selectedFolder'));
+    assert.ok(appSource.includes('"bulkShareFolder").addEventListener("click"'));
+  });
 });
 
 suite('Caddy share-link access', () => {
