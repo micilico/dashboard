@@ -183,7 +183,7 @@ def _nav(current: str, *, home_badge: bool = False) -> str:
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></span>
               <span class="nav-label">Plus</span>
             </button>
-            <div class="nav-more-panel" id="nav-more-panel" hidden>
+            <div class="nav-more-panel" id="nav-more-panel" aria-hidden="true">
 {overflow_links}
             </div>
           </div>

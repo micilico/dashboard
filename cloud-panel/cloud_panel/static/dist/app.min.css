@@ -495,7 +495,6 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .nav-more { display: contents; }
 .nav-more-toggle { display: none !important; }
 .nav-more-panel { display: contents; }
-.nav-more-panel[hidden] { display: none !important; }
 
 .nav-icon {
   flex: 0 0 22px;
@@ -910,7 +909,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
     box-shadow: var(--shadow-dialog);
   }
 
-  .nav-more-panel:not([hidden]) {
+  .nav-more.is-open .nav-more-panel {
     display: grid;
   }
 
