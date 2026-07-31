@@ -463,7 +463,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
 .nav {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   align-content: start;
 }
 
@@ -474,17 +474,18 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   width: 100%;
   justify-content: flex-start;
   border-color: transparent;
-  border-radius: 18px;
-  padding: 13px 14px;
+  border-radius: 14px;
+  padding: 11px 14px;
   background: transparent;
   color: var(--muted);
   font-size: 1rem;
   font-weight: 600;
   text-decoration: none;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 44px;
+  column-gap: 12px;
+  min-height: 48px;
   border: 1px solid transparent;
   appearance: none;
   cursor: pointer;
@@ -494,12 +495,43 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
 .nav-more { display: contents; }
 .nav-more-toggle { display: none !important; }
-.nav-more-panel { display: contents; }
+.nav-more-panel { display: grid; gap: 6px; }
+
+/* Keep the secondary destinations visually grouped while preserving one
+   shared icon/text axis across the whole sidebar. */
+.nav-more {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-faint);
+}
+
+.nav-more-panel {
+  min-width: 0;
+}
+
+/* Keep disclosure fallbacks and the live button equally usable. */
+.nav-more > summary {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  min-height: 48px;
+  padding: 11px 14px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.nav-more > summary::-webkit-details-marker { display: none; }
 
 .nav-icon {
   flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -526,6 +558,15 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   background: var(--accent-soft);
   border-color: color-mix(in oklab, var(--accent), transparent 82%);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.nav-label {
+  min-width: 0;
+  line-height: 1.25;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav a.is-upcoming { border-style: dashed; color: var(--muted); }
@@ -784,6 +825,21 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   .nav-more-toggle { display: none !important; }
   .nav-more-panel { display: contents; }
 
+  .nav-more {
+    display: contents;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+  }
+
+  .nav-more > summary {
+    min-height: 72px;
+    padding: 6px 3px;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    row-gap: 3px;
+  }
+
   .sidebar-health {
     justify-items: center;
     padding: 0;
@@ -890,6 +946,14 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
   .nav-more-toggle { display: grid !important; }
 
+  .nav-more > summary {
+    min-height: 58px;
+    padding: 6px 3px;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    row-gap: 3px;
+  }
+
   .nav-more-toggle {
     display: grid;
   }
@@ -925,6 +989,10 @@ th[aria-sort="descending"]::after { content: " ▼"; }
     width: auto;
     font-size: .92rem;
     text-align: left;
+  }
+
+  .nav-label {
+    text-align: center;
   }
 
   .nav-icon,
