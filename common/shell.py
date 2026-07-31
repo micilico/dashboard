@@ -85,8 +85,8 @@ NAV_ITEMS = (
 
 SHELL_DEFAULTS = {
     "home": {
-        "status": "Tous les services sont opérationnels",
-        "detail": "Surveillance en direct.",
+        "status": "Vérification en cours",
+        "detail": "Connexion aux services en cours.",
         "meta_label": "Dernière mise a jour",
         "meta_id": "refreshStatus",
         "time_id": "lastCheck",
@@ -94,8 +94,8 @@ SHELL_DEFAULTS = {
         "brand_href": "./?view=home",
     },
     "torrent": {
-        "status": "Tous les services sont opérationnels",
-        "detail": "Surveillance en direct.",
+        "status": "Vérification en cours",
+        "detail": "Connexion aux services en cours.",
         "meta_label": "Dernière mise a jour",
         "meta_id": "refreshStatus",
         "time_id": "lastCheck",
@@ -178,15 +178,15 @@ def _nav(current: str, *, home_badge: bool = False) -> str:
     overflow_links = "\n".join(overflow)
     return f"""        <nav class="nav" aria-label="Navigation principale">
 {chr(10).join(primary)}
-          <details class="nav-more">
-            <summary aria-label="Afficher les destinations secondaires">
+          <div class="nav-more">
+            <button class="nav-more-toggle" type="button" aria-expanded="false" aria-controls="nav-more-panel" aria-label="Afficher les destinations secondaires">
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></span>
               <span class="nav-label">Plus</span>
-            </summary>
-            <div class="nav-more-panel">
+            </button>
+            <div class="nav-more-panel" id="nav-more-panel" hidden>
 {overflow_links}
             </div>
-          </details>
+          </div>
         </nav>"""
 
 

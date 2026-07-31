@@ -48,6 +48,8 @@
   margin: 0 20px 16px;
 }
 
+.inspector-toggle { display: none; }
+
 .cloud-inspector-card {
   min-width: 0;
   padding: 16px;
@@ -77,9 +79,17 @@
 }
 
 @media (max-width: 767px) {
+  .inspector-toggle {
+    display: inline-flex;
+    width: calc(100% - 24px);
+    margin: 12px;
+    justify-content: center;
+  }
   .cloud-inspector {
     margin-inline: 0;
   }
+  .cloud-inspector[hidden] { display: none; }
+  .cloud-inspector:not([hidden]) { display: grid; }
 }
 
 /* ── Cloud content panel ── */
@@ -319,13 +329,15 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
     margin-inline: 0;
   }
   .toolbar {
-    padding: 14px;
+    padding: 10px;
+    gap: 8px;
   }
   .toolbar-left {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
+  .toolbar-left .button { min-height: 44px; }
   .toolbar-left .button {
     width: 100%;
     justify-content: center;

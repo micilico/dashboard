@@ -469,7 +469,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
 .nav a,
 .nav button,
-.nav-more summary {
+.nav-more-toggle {
   position: relative;
   width: 100%;
   justify-content: flex-start;
@@ -492,22 +492,10 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   transition: color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
 }
 
-.nav-more {
-  display: contents;
-}
-
-.nav-more summary {
-  display: none;
-  list-style: none;
-}
-
-.nav-more summary::-webkit-details-marker {
-  display: none;
-}
-
-.nav-more-panel {
-  display: contents;
-}
+.nav-more { display: contents; }
+.nav-more-toggle { display: none !important; }
+.nav-more-panel { display: contents; }
+.nav-more-panel[hidden] { display: none !important; }
 
 .nav-icon {
   flex: 0 0 22px;
@@ -529,13 +517,12 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 }
 
 .nav a:hover,
-.nav button:hover,
-.nav-more summary:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
+.nav button:hover { color: var(--text); background: var(--hover-soft); border-color: var(--hover-soft); }
 
 .nav a[aria-current="page"],
 .nav button[aria-current="page"],
 .nav button.active,
-.nav-more[open] > summary {
+.nav-more.is-open > .nav-more-toggle {
   color: var(--text);
   background: var(--accent-soft);
   border-color: color-mix(in oklab, var(--accent), transparent 82%);
@@ -772,7 +759,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
   .nav a,
   .nav button,
-  .nav-more summary {
+  .nav-more-toggle {
     display: grid;
     grid-template-rows: 22px minmax(16px, auto);
     justify-items: center;
@@ -788,20 +775,15 @@ th[aria-sort="descending"]::after { content: " ▼"; }
     opacity: 1;
     width: 100%;
     overflow: hidden;
-    font-size: .64rem;
+    font-size: .75rem;
     line-height: 1.15;
     text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .nav-more-panel {
-    display: contents;
-  }
-
-  .nav-more summary {
-    display: none;
-  }
+  .nav-more-toggle { display: none !important; }
+  .nav-more-panel { display: contents; }
 
   .sidebar-health {
     justify-items: center;
@@ -878,7 +860,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 
   .nav a,
   .nav button,
-  .nav-more summary {
+  .nav-more-toggle {
     width: 100%;
     min-width: 0;
     min-height: 58px;
@@ -894,7 +876,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
     display: block;
     width: 100%;
     overflow: hidden;
-    font-size: .69rem;
+    font-size: .75rem;
     line-height: 1.2;
     text-align: center;
     text-overflow: ellipsis;
@@ -907,7 +889,9 @@ th[aria-sort="descending"]::after { content: " ▼"; }
     min-width: 0;
   }
 
-  .nav-more summary {
+  .nav-more-toggle { display: grid !important; }
+
+  .nav-more-toggle {
     display: grid;
   }
 
@@ -926,7 +910,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
     box-shadow: var(--shadow-dialog);
   }
 
-  .nav-more[open] .nav-more-panel {
+  .nav-more-panel:not([hidden]) {
     display: grid;
   }
 
@@ -1243,6 +1227,8 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   margin: 0 20px 16px;
 }
 
+.inspector-toggle { display: none; }
+
 .cloud-inspector-card {
   min-width: 0;
   padding: 16px;
@@ -1272,9 +1258,17 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 }
 
 @media (max-width: 767px) {
+  .inspector-toggle {
+    display: inline-flex;
+    width: calc(100% - 24px);
+    margin: 12px;
+    justify-content: center;
+  }
   .cloud-inspector {
     margin-inline: 0;
   }
+  .cloud-inspector[hidden] { display: none; }
+  .cloud-inspector:not([hidden]) { display: grid; }
 }
 
 /* ── Cloud content panel ── */
@@ -1514,13 +1508,15 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
     margin-inline: 0;
   }
   .toolbar {
-    padding: 14px;
+    padding: 10px;
+    gap: 8px;
   }
   .toolbar-left {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
+  .toolbar-left .button { min-height: 44px; }
   .toolbar-left .button {
     width: 100%;
     justify-content: center;

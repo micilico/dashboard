@@ -14,7 +14,16 @@ const DEFAULT_PREFS = {
   lastTags: "",
 };
 
+const BACKEND_STATES = Object.freeze({
+  loading: "loading",
+  ready: "ready",
+  degraded: "degraded",
+  unavailable: "unavailable",
+  empty: "empty",
+});
+
 const state = {
+  backendStatus: BACKEND_STATES.loading,
   publicPrefix: String(panelConfig.publicPrefix || "/torrent-panel").replace(/\/$/, ""),
   torrentPanelPrefix: String(panelConfig.torrentPanelPrefix || panelConfig.publicPrefix || "/torrent-panel").replace(/\/$/, ""),
   prowlarrPanelPrefix: String(panelConfig.prowlarrPanelPrefix || "/prowlarr-panel").replace(/\/$/, ""),
@@ -1209,6 +1218,23 @@ function retryWorkflow(entryId, scope, trigger) {
 }
 
 function renderHome() {
+  const backendStatus = state.backendStatus || BACKEND_STATES.loading;
+  if (backendStatus === BACKEND_STATES.loading || backendStatus === BACKEND_STATES.unavailable || backendStatus === BACKEND_STATES.empty) {
+    const unavailable = backendStatus === BACKEND_STATES.unavailable;
+    const empty = backendStatus === BACKEND_STATES.empty;
+    els.homeTitle.innerHTML = unavailable ? "Backend indisponible." : empty ? "Aucune donnée pour le moment." : "Vérification en cours.";
+    els.homeSummary.textContent = unavailable
+      ? "Le backend Torrent ne répond pas. Les données affichées ne sont pas disponibles."
+      : empty
+        ? "La connexion est prête, mais aucun torrent ou service n’a encore remonté de données."
+        : "Connexion aux services en cours de vérification.";
+    els.homeStatusBadge?.classList.toggle("is-warning", unavailable);
+    els.homeStatusText.textContent = unavailable ? "Services indisponibles" : empty ? "Aucune donnée" : "Vérification en cours";
+    if (els.statusText) els.statusText.textContent = unavailable ? "Backend indisponible" : empty ? "Aucune donnée" : "Vérification en cours";
+    if (els.sidebarStatusDetail) els.sidebarStatusDetail.textContent = unavailable ? "Réessayez pour relancer la vérification." : empty ? "Aucune donnée remontée." : "Connexion en cours…";
+    renderAlerts(); renderOverviewMetrics(); renderServices(); renderRecentActivity();
+    return;
+  }
   const critical = Number(state.dashboard.criticalCount || 0);
   const operationalServices = (state.dashboard.services || []).filter((item) => item.status === "operational").length;
   const totalServices = (state.dashboard.services || []).length;
@@ -1393,6 +1419,8 @@ async function loadTorrents({ silent = false, force = false } = {}) {
   if (!silent) els.refreshStatus.textContent = "Actualisation...";
 
   state.refreshPromise = (async () => {
+    state.backendStatus = BACKEND_STATES.loading;
+    renderHome();
     try {
       const [dashboardPayload, torrentPayload, storagePayload, activityPayload, trackerStatsPayload] = await Promise.all([
         api(route("/api/dashboard"), { cache: "no-store" }),
@@ -1426,6 +1454,9 @@ async function loadTorrents({ silent = false, force = false } = {}) {
         state.lastSignature = signature;
       }
       clearError();
+      state.backendStatus = torrents.length || state.dashboard.services.length
+        ? BACKEND_STATES.ready
+        : BACKEND_STATES.empty;
       render();
       window.setTimeout(() => {
         tryAutoTr4kerTracker();
@@ -1439,6 +1470,8 @@ async function loadTorrents({ silent = false, force = false } = {}) {
         els.refreshStatus.textContent = `À jour ${state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" })}`;
       }
     } catch (error) {
+      state.backendStatus = "unavailable";
+      renderHome();
       showError(error);
       const lastCheck = els.lastCheck;
       if (lastCheck && state.lastUpdatedAt) {

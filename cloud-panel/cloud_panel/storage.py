@@ -62,12 +62,17 @@ def format_size(size_bytes: int) -> str:
     return f"{size_bytes:.1f} PB"
 
 
-def list_directory(relative_path: str = '') -> dict:
+def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, search: str = '') -> dict:
     """List directory contents with metadata."""
     target_dir = resolve_path_within(MOUNT_PATH, relative_path)
     if not os.path.isdir(target_dir):
         raise ValueError('Dossier introuvable')
-    items = get_cached_scandir(target_dir)
+    all_items = get_cached_scandir(target_dir)
+    if search:
+        query = search.casefold()
+        all_items = [item for item in all_items if query in item['name'].casefold()]
+    total = len(all_items)
+    items = all_items[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
     try:
         usage = shutil.disk_usage(MOUNT_PATH)
         disk_used = format_size(usage.used)
@@ -78,6 +83,7 @@ def list_directory(relative_path: str = '') -> dict:
         disk_percent = 0
     return {
         'items': items,
+        'total': total,
         'current_path': relative_path,
         'disk_used': disk_used,
         'disk_total': disk_total,

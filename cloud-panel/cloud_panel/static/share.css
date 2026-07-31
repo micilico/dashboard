@@ -133,7 +133,7 @@ body {
 .mi-lbl {
   margin-bottom: 4px;
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -395,12 +395,12 @@ input:focus { border-color: var(--accent); }
 }
 
 .mini-btn {
-  min-height: 34px;
+  min-height: 44px;
   padding: 7px 12px;
   border: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .mini-btn:hover {

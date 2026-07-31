@@ -113,41 +113,37 @@ a {
     color var(--dashboard-motion-fast) var(--dashboard-ease);
 }
 
-[class*="card"],
-[class*="Card"],
-[class*="service"],
-[class*="Service"],
-[class*="widget"],
-[class*="Widget"],
-[class*="item"],
-[class*="Item"] {
+.service-card,
+.service-card-container,
+.bookmark,
+.bookmark-container,
+.widget,
+.widget-container {
   border-color: var(--dashboard-border) !important;
   border-radius: var(--dashboard-radius-panel) !important;
   background-color: var(--dashboard-surface-2) !important;
   box-shadow: none !important;
 }
 
-[class*="card"]:hover,
-[class*="Card"]:hover,
-[class*="service"]:hover,
-[class*="Service"]:hover,
+.service-card:hover,
+.service-card-container:hover,
+.bookmark:hover,
+.bookmark-container:hover,
 .dashboard-launcher-link:hover {
   border-color: var(--dashboard-border-hover) !important;
   background-color: var(--dashboard-surface-3) !important;
 }
 
-[class*="description"],
-[class*="Description"],
-[class*="subtitle"],
-[class*="Subtitle"],
-[class*="text-muted"],
-[class*="secondary"] {
+.service-card-description,
+.service-card-subtitle,
+.text-muted,
+.text-secondary {
   color: var(--dashboard-muted) !important;
 }
 
-[class*="group"],
-[class*="Group"],
-[class*="section"],
+.service-group,
+.service-section,
+.widget-group,
 [class*="Section"] {
   border-color: var(--dashboard-border) !important;
 }

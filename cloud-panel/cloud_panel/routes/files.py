@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import zipfile
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form, Response, Query
 from fastapi.responses import FileResponse
 
 from common import error_detail
@@ -31,10 +31,16 @@ async def session(request: Request, response: Response) -> dict[str, str]:
 
 
 @router.get("/files")
-async def get_files(request: Request, path: str = ""):
+async def get_files(
+    request: Request,
+    path: str = "",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    search: str = Query("", max_length=200),
+):
     """List directory contents."""
     try:
-        result = list_directory(path)
+        result = list_directory(path, offset=offset, limit=limit, search=search)
         return result
     except ValueError:
         raise HTTPException(

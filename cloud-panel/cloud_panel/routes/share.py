@@ -115,11 +115,11 @@ PASSWORD_FORM = _render_page(
     "Mot de passe requis",
     """<section class="share-card"><div class="logo">""" + _SLICE_LOGO + """</div>
 <h2 class="share-heading">Mot de passe requis</h2>
-<p class="share-copy">Ce contenu est protege par un mot de passe.</p>
+<p class="share-copy">Ce contenu est protégé par un mot de passe.</p>
 <form class="password-form" method="get">
-<label class="field-label">Mot de passe</label>
-<input type="password" name="password" required placeholder="Saisir le mot de passe">
-<button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Acceder au contenu</button>
+<label class="field-label" for="share-password">Mot de passe</label>
+<input id="share-password" type="password" name="password" required placeholder="Saisir le mot de passe">
+<button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Accéder au contenu</button>
 </form><div class="ft">Cloud &middot; Lien sécurisé</div></section>""",
 )
 
@@ -128,9 +128,9 @@ PASSWORD_WRONG = _render_page(
     """<section class="share-card"><div class="logo">""" + _SLICE_LOGO + """</div>
 <div class="notice notice-error"><strong>Mot de passe incorrect</strong><br>Le mot de passe fourni est incorrect.</div>
 <form class="password-form password-form-retry" method="get">
-<label class="field-label">Mot de passe</label>
-<input type="password" name="password" required placeholder="Saisir le mot de passe">
-<button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Reessayer</button>
+<label class="field-label" for="share-password-retry">Mot de passe</label>
+<input id="share-password-retry" type="password" name="password" required placeholder="Saisir le mot de passe">
+<button type="submit" class="btn form-submit"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Réessayer</button>
 </form><div class="ft">Cloud &middot; Lien sécurisé</div></section>""",
 )
 
@@ -144,7 +144,7 @@ _DOWNLOAD_BODY = """<div class="logo">""" + _SLICE_LOGO + """</div>
 {expires_row}
 <div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">{file_type}</div></div>
 </div>
-<a href="{dl_url}" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Telecharger le fichier</a>
+<a href="{dl_url}" class="btn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>Télécharger le fichier</a>
 <div class="ft">Cloud &middot; Lien sécurisé</div>"""
 
 def _download_page(filename: str, size: str, category: str, file_type: str, download_count: int, expires: str, dl_url: str) -> str:
@@ -213,7 +213,7 @@ def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
 
 def _folder_page(token: str, link: dict, listing: dict, password: Optional[str]) -> str:
     expires_at = link.get("expires_at")
-    expires = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y a %H:%M") if expires_at else "Aucune"
+    expires = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y à %H:%M") if expires_at else "Aucune"
     password_param = None
     crumbs = []
     for idx, crumb in enumerate(listing["breadcrumbs"]):
@@ -238,8 +238,8 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
                 '<a class="mini-btn" href="' + html.escape(open_url, quote=True) + '">Ouvrir</a>'
                 if item["is_dir"]
                 else (
-                    ('<a class="mini-btn" target="_blank" rel="noopener noreferrer" href="' + html.escape(preview_url, quote=True) + '">Apercu</a>' if item["previewable"] else "")
-                    + '<a class="mini-btn" href="' + html.escape(download_url, quote=True) + '">Telecharger</a>'
+                    ('<a class="mini-btn" target="_blank" rel="noopener noreferrer" href="' + html.escape(preview_url, quote=True) + '">Aperçu</a>' if item["previewable"] else "")
+                    + '<a class="mini-btn" href="' + html.escape(download_url, quote=True) + '">Télécharger</a>'
                 )
             )
             name_html = (
@@ -475,7 +475,7 @@ async def download_share(
         expires_at = link.get("expires_at")
         expires_str = ""
         if expires_at:
-            expires_str = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y a %H:%M")
+            expires_str = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y à %H:%M")
 
         dl_url = str(request.url)
         sep = "&" if "?" in dl_url else "?"

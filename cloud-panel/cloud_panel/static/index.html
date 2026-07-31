@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cloud · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260730-folder-share">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260730-folder-share-selection">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -41,12 +41,12 @@
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"></path></svg></span>
             <span class="nav-label">Cloud</span>
           </a>
-          <details class="nav-more">
-            <summary aria-label="Afficher les destinations secondaires">
+          <div class="nav-more">
+            <button class="nav-more-toggle" type="button" aria-expanded="false" aria-controls="nav-more-panel" aria-label="Afficher les destinations secondaires">
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01"></path></svg></span>
               <span class="nav-label">Plus</span>
-            </summary>
-            <div class="nav-more-panel">
+            </button>
+            <div class="nav-more-panel" id="nav-more-panel" hidden>
           <a id="mediaLink" href="/media-panel/" data-shell-nav="media">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8M8 12h5M8 15h8"></path></svg></span>
             <span class="nav-label">Médias</span>
@@ -64,7 +64,7 @@
             <span class="nav-label">Activité</span>
           </a>
             </div>
-          </details>
+          </div>
         </nav>
         <div class="topbar-actions sidebar-footer">
           <div class="sidebar-health" aria-live="polite">
@@ -97,7 +97,8 @@
       </section>
 
       <div class="content-panel cloud-content" id="cloudContent" data-od-id="cloud-content">
-        <section class="cloud-inspector" aria-label="Informations cloud">
+        <button id="inspectorToggle" class="inspector-toggle button secondary" type="button" aria-expanded="false" aria-controls="cloudInspector">Afficher les informations du cloud</button>
+        <section class="cloud-inspector" id="cloudInspector" aria-label="Informations cloud">
           <div class="cloud-inspector-card sidebar-section" data-od-id="cloud-favorites">
             <div class="sidebar-section-title">Favoris</div>
             <div id="favoritesList" class="favorites-list">
@@ -326,7 +327,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <div id="fileActionMenu" class="action-menu" role="menu" hidden></div>
 
-    <script src="./config.js?v=20260730-folder-share"></script>
-    <script src="./static/dist/app.min.js?v=20260730-folder-share" defer></script>
+    <script src="./config.js?v=20260730-folder-share-selection"></script>
+    <script src="./static/dist/app.min.js?v=20260730-folder-share-selection" defer></script>
   </body>
 </html>

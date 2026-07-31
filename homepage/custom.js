@@ -18,8 +18,9 @@
     }
   }
 
-  function enhanceLinks() {
-    document.querySelectorAll("a[href]").forEach((link) => {
+  function enhanceLinks(root = document) {
+    const links = root.matches?.("a[href]") ? [root] : root.querySelectorAll("a[href]");
+    links.forEach((link) => {
       const path = normalizePath(link.getAttribute("href"));
       if (launcherRoutes.has(path)) {
         link.classList.add("dashboard-launcher-link");
@@ -50,6 +51,15 @@
     markReady();
   }
 
-  const observer = new MutationObserver(enhanceLinks);
+  let queued = false;
+  const observer = new MutationObserver((mutations) => {
+    const added = mutations.flatMap((mutation) => [...mutation.addedNodes]).filter((node) => node.nodeType === Node.ELEMENT_NODE);
+    if (!added.length || queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      added.forEach(enhanceLinks);
+    });
+  });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
