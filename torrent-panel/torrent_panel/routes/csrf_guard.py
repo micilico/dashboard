@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Header, HTTPException, Request
 
-from common import error_detail
+from common import error_detail, require_csrf_token
 from common.csrf import client_key as _common_client_key
 from common.csrf import cleanup_csrf_tokens as _common_cleanup
 from common.csrf import csrf_cookie_matches as _common_cookie_matches
@@ -37,15 +37,14 @@ def client_key(request):
 
 
 async def require_action_guard(request: Request, x_torrent_panel_csrf: str | None = Header(default=None)) -> None:
-    if (
-        not x_torrent_panel_csrf
-        or not csrf_cookie_matches(request, x_torrent_panel_csrf)
-        or not csrf_token_is_valid(request.app, x_torrent_panel_csrf)
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
-        )
+    require_csrf_token(
+        request.app,
+        request,
+        x_torrent_panel_csrf,
+        CSRF_COOKIE,
+        CSRF_TOKEN_TTL_SECONDS,
+        MAX_CSRF_TOKENS,
+    )
 
     if not request.app.state.action_limiter.allow(client_key(request)):
         raise HTTPException(

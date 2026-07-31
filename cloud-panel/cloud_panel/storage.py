@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import time
-from pathlib import Path
 
 from fastapi import UploadFile
 
@@ -140,7 +139,7 @@ async def upload_file_streaming(
             'size': format_size(total_size),
             'path': os.path.relpath(final_path, MOUNT_PATH),
         }
-    except Exception as e:
+    except Exception:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
         logger.exception('Upload failed')

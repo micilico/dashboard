@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from common import build_csp, client_key as _client_key, error_detail as _error_detail, RateLimiter
+from common import build_csp, client_key as _client_key, error_detail as _error_detail, require_csrf_token, RateLimiter
 from common.monitoring import init_sentry
 from common.csrf import (
     cleanup_csrf_tokens as _cleanup_csrf_tokens,
@@ -167,15 +167,14 @@ def client_key(request: Request) -> str:
 
 def require_action_guard(kind: str):
     def guard(request: Request, x_prowlarr_panel_csrf: str | None = Header(default=None)) -> None:
-        if (
-            not x_prowlarr_panel_csrf
-            or not csrf_cookie_matches(request, x_prowlarr_panel_csrf)
-            or not csrf_token_is_valid(request.app, x_prowlarr_panel_csrf)
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
-            )
+        require_csrf_token(
+            request.app,
+            request,
+            x_prowlarr_panel_csrf,
+            CSRF_COOKIE,
+            CSRF_TOKEN_TTL_SECONDS,
+            MAX_CSRF_TOKENS,
+        )
 
         limiter = request.app.state.limiters[kind]
         if not limiter.allow(f"{kind}:{client_key(request)}"):

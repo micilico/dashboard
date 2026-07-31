@@ -13,23 +13,21 @@ _sys_path_root = Path(__file__).resolve().parents[2]
 if str(_sys_path_root) not in sys.path:
     sys.path.insert(0, str(_sys_path_root))
 
-from common import build_csp, RateLimiter
-from common.monitoring import init_sentry
+from common import build_csp, RateLimiter  # noqa: E402
+from common.monitoring import init_sentry  # noqa: E402
 
-from .config import (
+from .config import (  # noqa: E402
     PUBLIC_PREFIX,
-    CSRF_TOKEN_TTL_SECONDS,
-    MAX_CSRF_TOKENS,
     MAX_RATE_KEYS,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_SECONDS,
     STATIC_DIR,
 )
-from .routes.files import router as files_router
-from .routes.favorites import router as favorites_router
-from .routes.share import download_share, router as share_router
+from .routes.files import router as files_router  # noqa: E402
+from .routes.favorites import router as favorites_router  # noqa: E402
+from .routes.share import download_share, router as share_router  # noqa: E402
 
-from logging import basicConfig, getLogger
+from logging import basicConfig, getLogger  # noqa: E402
 
 basicConfig(level=os.getenv("CLOUD_PANEL_LOG_LEVEL", "INFO"))
 logger = getLogger("cloud_panel")

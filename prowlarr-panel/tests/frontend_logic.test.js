@@ -167,11 +167,13 @@ function createEnvironment() {
 
 const { context, elements } = createEnvironment();
 const domSource = fs.readFileSync("common/js/dom.js", "utf8");
+const commonApiSource = fs.readFileSync("common/js/api.js", "utf8");
 const source = fs.readFileSync("prowlarr-panel/prowlarr_panel/static/app.js", "utf8").replace(
   "init().catch(showError);",
   "globalThis.__testApi = { state, renderIndexers, renderResults, renderGrabNotice, buildTorrentFollowUrl, setView, handleTabKeydown };",
 );
 vm.runInNewContext(domSource, context);
+vm.runInNewContext(commonApiSource, context);
 vm.runInNewContext(source, context);
 const api = context.__testApi;
 

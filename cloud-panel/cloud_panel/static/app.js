@@ -32,11 +32,7 @@ function rt(p) { return p === "/" ? BASE : `${PP}${p.startsWith("/") ? p : "/" +
 function au(p) { return rt(`/api${p}`); }
 function shareUrl(token) { return `${window.location.origin}${rt(`/download/${token}`)}`; }
 
-function fmtSize(b) {
-  const n = Number(b) || 0; if (n === 0) return "0 o";
-  const u = ["o", "Ko", "Mo", "Go", "To"]; const i = Math.min(Math.floor(Math.log(Math.abs(n)) / Math.log(1024)), 4);
-  return `${(n / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
-}
+const fmtSize = formatBytes;
 function fmtDate(ts) { const n = Number(ts); return n > 0 ? new Date(n * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : ""; }
 function fmtRel(t) { if (!t) return "Jamais"; const d = Date.now() - new Date(t).getTime(); if (d < 6e4) return "À l’instant"; if (d < 36e5) return `Il y a ${Math.round(d / 6e4)} min`; return `Il y a ${Math.round(d / 36e5)} h`; }
 
@@ -66,43 +62,29 @@ function fileIconSVG(type) {
 }
 
 // ── API ──
-async function api(path, opts = {}, retry = true) {
-  const h = new Headers(opts.headers || {});
-  h.set("Accept", "application/json");
-  const fd = opts.body instanceof FormData;
-  const se = opts.body instanceof URLSearchParams;
-  if (opts.body && !fd && !se && !h.has("Content-Type")) h.set("Content-Type", "application/json");
-  if ((opts.method || "GET").toUpperCase() !== "GET") h.set("X-Cloud-Panel-CSRF", S.csrf);
-  const r = await fetchWithRetry(path, { timeout: 60000, ...opts, headers: h, credentials: "same-origin" });
-  if (typeof hideReconnectNotice === 'function') hideReconnectNotice();
-  const p = await r.json().catch(() => ({}));
-  if (r.ok) return p;
-  const d = typeof p.detail === "object" && p.detail ? p.detail : {};
-  const e = new Error(d.message || p.detail || "Action impossible.");
-  e.code = d.code || `http_${r.status}`; e.recovery = d.recovery || "Réessayer"; e.status = r.status;
-  if (r.status === 403 && e.code === "csrf_expired" && retry) { await refreshSession(); return api(path, opts, false); }
-  throw e;
-}
-async function refreshSession() {
-  for (let i = 0; i < 3; i++) {
-    try { const r = await api(au("/session"), { cache: "no-store" }, false); S.csrf = r.csrfToken; if (S.csrf) return; } catch {}
-    await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-  }
-  toast("Erreur: impossible d'initialiser la session. Rechargez la page.");
-}
+const cloudApiClient = createApiClient({
+  csrfHeader: "X-Cloud-Panel-CSRF",
+  getCsrfToken: () => S.csrf,
+  setCsrfToken: (token) => { S.csrf = token; },
+  sessionPath: au("/session"),
+  fetchOptions: { timeout: 60000 },
+  refreshAttempts: 3,
+});
+const api = cloudApiClient.request;
+const refreshSession = async () => {
+  try { await cloudApiClient.refreshSession(); }
+  catch { toast("Erreur: impossible d'initialiser la session. Rechargez la page."); }
+};
 
 // ── Toast ──
-function toast(msg) {
-  const el = $("toast"); el.textContent = msg; el.hidden = false;
-  clearTimeout(toast._t); toast._t = setTimeout(() => el.hidden = true, 4200);
-}
+const toast = createToast(() => $("toast"));
 function setButtonBusy(button, busy) {
   if (!button) return;
   button.disabled = busy;
   button.classList.toggle("is-loading", busy);
   button.setAttribute("aria-busy", busy ? "true" : "false");
 }
-function showError(e) { const el = $("alert"); qs("#alertText", el).textContent = e?.message || "Action impossible."; el.hidden = false; }
+function showError(e) { showErrorMessage($("alert"), e, { messageElement: qs("#alertText", $("alert")), fallback: "Action impossible." }); }
 function clearError() { $("alert").hidden = true; }
 
 // ── Navigation ──

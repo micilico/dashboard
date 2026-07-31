@@ -7,7 +7,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -17,17 +17,13 @@ if str(_sys_path_root) not in sys.path:
 
 from common import build_csp, RateLimiter  # noqa: E402
 from common.monitoring import init_sentry  # noqa: E402
-from common.csrf import cleanup_csrf_tokens as _common_cleanup  # noqa: E402
 from common.csrf import csrf_cookie_matches, csrf_token_is_valid  # noqa: E402
 
 from .config import (  # noqa: E402
     ACTIVITY_PUBLIC_PREFIX,
     AUTOMATION_RULES_STATE_PATH,
     CONSOLE_PREFIXES,
-    CSRF_COOKIE,
-    CSRF_TOKEN_TTL_SECONDS,
     HEALTH_PUBLIC_PREFIX,
-    MAX_CSRF_TOKENS,
     MAX_RATE_KEYS,
     MEDIA_PUBLIC_PREFIX,
     NOTIFICATION_STATE_PATH,
@@ -38,10 +34,14 @@ from .config import (  # noqa: E402
     STATIC_DIR,
     STORAGE_PUBLIC_PREFIX,
     TRACKER_STATS_STATE_PATH,
-    TRUSTED_PROXY_IPS,
 )
 from .qbittorrent import QbitConfig, QBittorrentClient, QbitError  # noqa: E402
 from .routes.automations import router as automations_router  # noqa: E402
+from .routes.csrf_guard import (  # noqa: E402
+    cleanup_csrf_tokens,
+    client_key,
+    require_action_guard,
+)
 from .routes.dashboard import router as dashboard_router  # noqa: E402
 from .routes.media_automation import router as media_automation_router  # noqa: E402
 from .routes.notifications import router as notifications_router  # noqa: E402
@@ -129,35 +129,6 @@ async def add_security_headers(request: Request, call_next):
 def error_detail(code: str, message: str, recovery: str) -> dict[str, str]:
     from common import error_detail as _ed
     return _ed(code, message, recovery)
-
-
-def cleanup_csrf_tokens(app_instance, now=None):
-    return _common_cleanup(app_instance, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS, now)
-
-
-def client_key(request: Request) -> str:
-    from common.csrf import client_key as _ck
-    return _ck(request, TRUSTED_PROXY_IPS)
-
-
-def require_action_guard(request: Request, x_torrent_panel_csrf: str | None = None):
-    from fastapi import Header
-    if x_torrent_panel_csrf is None:
-        x_torrent_panel_csrf = request.headers.get("X-Torrent-Panel-CSRF")
-    if (
-        not x_torrent_panel_csrf
-        or not csrf_cookie_matches(request, x_torrent_panel_csrf, CSRF_COOKIE)
-        or not csrf_token_is_valid(request.app, x_torrent_panel_csrf, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS)
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
-        )
-    if not request.app.state.action_limiter.allow(client_key(request)):
-        raise HTTPException(
-            status_code=429,
-            detail=error_detail("rate_limited", "Trop d'actions en peu de temps.", "Réessayer"),
-        )
 
 
 @app.get("/")

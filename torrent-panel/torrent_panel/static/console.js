@@ -42,32 +42,12 @@ const els = {
 
 const { element, state: systemState } = window.DashboardDOM;
 
-function showToast(message) {
-  els.toast.textContent = message;
-  els.toast.hidden = false;
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 4200);
-}
-
 function text(value, fallback = "—") {
   const cleaned = String(value ?? "").trim();
   return cleaned || fallback;
 }
 
-function formatBytes(value) {
-  const bytes = Number(value) || 0;
-  if (bytes <= 0) return "0 o";
-  const units = ["o", "Ko", "Mo", "Go", "To"];
-  let amount = bytes;
-  let unit = 0;
-  while (amount >= 1024 && unit < units.length - 1) {
-    amount /= 1024;
-    unit += 1;
-  }
-  return `${amount.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
+const showToast = createToast(() => els.toast);
 
 function formatDate(value) {
   if (!value) return "—";
@@ -159,28 +139,14 @@ function configureContentGrid(mode) {
   document.querySelector(".content-grid").className = `content-grid${layout}`;
 }
 
-async function api(path, options = {}, retryCsrf = true) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Accept", "application/json");
-  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if ((options.method || "GET").toUpperCase() !== "GET" && state.csrfToken) headers.set("X-Torrent-Panel-CSRF", state.csrfToken);
-  const response = await fetchWithRetry(path, { ...options, headers, credentials: "same-origin" });
-  const payload = await response.json().catch(() => ({}));
-  if (response.ok) return payload;
-  const detail = typeof payload.detail === "object" && payload.detail ? payload.detail : {};
-  const error = new Error(detail.message || payload.detail || "Action impossible pour le moment.");
-  error.code = detail.code || `http_${response.status}`;
-  if (response.status === 403 && error.code === "csrf_expired" && retryCsrf) {
-    await refreshSession();
-    return api(path, options, false);
-  }
-  throw error;
-}
-
-async function refreshSession() {
-  const payload = await api(`${state.apiPrefix}/session`, { cache: "no-store" }, false);
-  state.csrfToken = payload.csrfToken || "";
-}
+const consoleApiClient = createApiClient({
+  csrfHeader: "X-Torrent-Panel-CSRF",
+  getCsrfToken: () => state.csrfToken,
+  setCsrfToken: (token) => { state.csrfToken = token; },
+  sessionPath: `${state.apiPrefix}/session`,
+});
+const api = consoleApiClient.request;
+const refreshSession = consoleApiClient.refreshSession;
 
 function configureLinks() {
   window.DashboardNavigation?.configure(state, state.section);

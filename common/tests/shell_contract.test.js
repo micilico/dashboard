@@ -39,8 +39,11 @@ for (const file of htmlFiles) {
   assert.deepEqual(ids, navIds, `${file}: global nav ids must match the Prowlarr shell`);
   assert.deepEqual(labels, navLabels, `${file}: global nav labels changed`);
   assert.ok(nav.includes('id="cloudLink"'), `${file}: Cloud nav item is required`);
-  assert.ok(nav.includes('<details class="nav-more">'), `${file}: secondary mobile destinations must live in Plus`);
-  assert.equal((nav.match(/<summary aria-label="Afficher les destinations secondaires">/g) || []).length, 1, `${file}: expected one Plus summary`);
+  assert.equal((nav.match(/<div class="nav-more">/g) || []).length, 1, `${file}: expected one Plus container`);
+  assert.equal((nav.match(/<button class="nav-more-toggle"[^>]*>/g) || []).length, 1, `${file}: expected one Plus toggle`);
+  assert.equal((nav.match(/<button class="nav-more-toggle"[^>]*aria-expanded="false"[^>]*>/g) || []).length, 1, `${file}: Plus toggle must expose aria-expanded`);
+  assert.equal((nav.match(/<button class="nav-more-toggle"[^>]*aria-controls="nav-more-panel"[^>]*>/g) || []).length, 1, `${file}: Plus toggle must control the secondary panel`);
+  assert.equal((nav.match(/<div class="nav-more-panel" id="nav-more-panel" aria-hidden="true">/g) || []).length, 1, `${file}: secondary panel must expose aria-hidden`);
   assert.equal((nav.match(/<svg viewBox="0 0 24 24"/g) || []).length, navOrder.length + 1, `${file}: every nav item plus the Plus control needs an icon`);
   assert.equal((html.match(/aria-current="page"/g) || []).length, 1, `${file}: expected exactly one current page`);
   assert.equal((html.match(/<h1\b/g) || []).length, 1, `${file}: expected exactly one destination h1`);

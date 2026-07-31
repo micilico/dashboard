@@ -131,29 +131,6 @@ function clearNode(node) {
 
 const { element, button, state: systemState } = window.DashboardDOM;
 
-function formatBytes(value) {
-  const bytes = Number(value) || 0;
-  if (bytes === 0) return "0 o";
-  const units = ["o", "Ko", "Mo", "Go", "To"];
-  const index = Math.min(Math.floor(Math.log(Math.abs(bytes)) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function describeError(error) {
-  const message = error?.message || "Action impossible pour le moment.";
-  const recovery = error?.recovery || "Reessayer";
-  return `${message} ${recovery}.`;
-}
-
-function showToast(message) {
-  els.toast.textContent = message;
-  els.toast.hidden = false;
-  window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    els.toast.hidden = true;
-  }, 4200);
-}
-
 function setRefreshStamp() {
   const now = new Date();
   if (els.lastCheck) {
@@ -206,44 +183,26 @@ function buildTorrentFollowUrl(title, indexer = "") {
   return `${url.pathname}${url.search}`;
 }
 
-function showError(error) {
-  els.alertText.textContent = describeError(error);
-  els.alert.hidden = false;
-}
-
 function clearError() {
   els.alert.hidden = true;
   els.alertText.textContent = "";
 }
 
+const showToast = createToast(() => els.toast);
+const showError = (error) => showErrorMessage(els.alert, error, { messageElement: els.alertText, recovery: "Reessayer" });
+
 function route(path) {
   return prefixed(path);
 }
 
-async function api(path, options = {}, retryCsrf = true) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Accept", "application/json");
-  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if ((options.method || "GET").toUpperCase() !== "GET") headers.set("X-Prowlarr-Panel-CSRF", state.csrfToken);
-  const response = await fetchWithRetry(path, { ...options, headers, credentials: "same-origin" });
-  const payload = await response.json().catch(() => ({}));
-  if (response.ok) return payload;
-  const detail = typeof payload.detail === "object" && payload.detail ? payload.detail : {};
-  const error = new Error(detail.message || payload.detail || "Action impossible pour le moment.");
-  error.code = detail.code || `http_${response.status}`;
-  error.recovery = detail.recovery || "Reessayer";
-  error.status = response.status;
-  if (response.status === 403 && error.code === "csrf_expired" && retryCsrf) {
-    await refreshSession();
-    return api(path, options, false);
-  }
-  throw error;
-}
-
-async function refreshSession() {
-  const session = await api(route("/api/session"), { cache: "no-store" }, false);
-  state.csrfToken = session.csrfToken;
-}
+const prowlarrApiClient = createApiClient({
+  csrfHeader: "X-Prowlarr-Panel-CSRF",
+  getCsrfToken: () => state.csrfToken,
+  setCsrfToken: (token) => { state.csrfToken = token; },
+  sessionPath: route("/api/session"),
+});
+const api = prowlarrApiClient.request;
+const refreshSession = prowlarrApiClient.refreshSession;
 
 function setBusy(key, busy) {
   if (busy) state.busy.add(key);

@@ -4,8 +4,6 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Any
 
 from .config import DB_PATH
 

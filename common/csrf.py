@@ -3,7 +3,9 @@ from __future__ import annotations
 import secrets
 import time
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+
+from .security import error_detail
 
 
 def cleanup_csrf_tokens(app_instance: FastAPI, csrf_token_ttl: int, max_csrf_tokens: int, now: float | None = None) -> None:
@@ -21,6 +23,26 @@ def cleanup_csrf_tokens(app_instance: FastAPI, csrf_token_ttl: int, max_csrf_tok
 def csrf_token_is_valid(app_instance: FastAPI, token: str, csrf_token_ttl: int, max_csrf_tokens: int) -> bool:
     cleanup_csrf_tokens(app_instance, csrf_token_ttl, max_csrf_tokens)
     return token in app_instance.state.csrf_tokens
+
+
+def require_csrf_token(
+    app_instance: FastAPI,
+    request: Request,
+    token: str | None,
+    csrf_cookie_name: str,
+    csrf_token_ttl: int,
+    max_csrf_tokens: int,
+) -> None:
+    """Validate the double-submit CSRF token and raise the shared API error."""
+    if (
+        not token
+        or not csrf_cookie_matches(request, token, csrf_cookie_name)
+        or not csrf_token_is_valid(app_instance, token, csrf_token_ttl, max_csrf_tokens)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("csrf_expired", "Session de protection expirée.", "Actualiser la session"),
+        )
 
 
 def csrf_cookie_matches(request: Request, token: str, csrf_cookie_name: str) -> bool:

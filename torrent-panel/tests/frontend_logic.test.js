@@ -95,6 +95,7 @@ const context = {
 };
 
 const source = fs.readFileSync("torrent-panel/torrent_panel/static/app.js", "utf8");
+const commonApiSource = fs.readFileSync("common/js/api.js", "utf8");
 const consoleSource = fs.readFileSync("torrent-panel/torrent_panel/static/console.js", "utf8");
 const overviewHtml = fs.readFileSync("torrent-panel/torrent_panel/static/index.html", "utf8");
 
@@ -127,7 +128,8 @@ assert.match(overviewCss, /\.services-list \.system-state/);
 assert.match(overviewCss, /\.metric-card\.unavailable/);
 
 vm.runInNewContext(
-  `${source}
+  `${commonApiSource}
+${source}
 globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, state, els };`,
   context,
 );

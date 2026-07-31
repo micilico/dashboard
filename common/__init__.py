@@ -9,12 +9,13 @@ from .security import build_csp, error_detail
 from .types import ErrorDetail
 
 try:
-    from .csrf import cleanup_csrf_tokens, client_key, csrf_cookie_matches, csrf_token_is_valid, set_csrf_cookie
+    from .csrf import cleanup_csrf_tokens, client_key, csrf_cookie_matches, csrf_token_is_valid, require_csrf_token, set_csrf_cookie
 except ModuleNotFoundError:  # pragma: no cover - allows frontend-only tooling without FastAPI installed
     cleanup_csrf_tokens = None
     client_key = None
     csrf_cookie_matches = None
     csrf_token_is_valid = None
+    require_csrf_token = None
     set_csrf_cookie = None
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "client_key",
     "csrf_cookie_matches",
     "csrf_token_is_valid",
+    "require_csrf_token",
     "set_csrf_cookie",
     "build_csp",
     "error_detail",
