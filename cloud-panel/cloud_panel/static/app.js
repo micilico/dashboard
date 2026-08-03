@@ -200,6 +200,7 @@ function renderFiles() {
 
   body.replaceChildren(...items.map((f, i) => {
     const tr = document.createElement("tr");
+    tr.dataset.path = f.path;
     if (S.selected.has(f.path)) tr.classList.add("selected");
     if (i === S.focusedIdx) { tr.classList.add("focused"); tr.tabIndex = 0; }
 
@@ -255,6 +256,24 @@ function renderFiles() {
     td5.append(acts);
 
     tr.append(td0, td1, td2, td3, td4, td5);
+    tr.draggable = true;
+    tr.addEventListener("dragstart", (e) => dragPayload(e, f));
+    tr.addEventListener("dragend", clearDrag);
+    if (f.is_dir) {
+      tr.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        tr.classList.add("drop-target");
+      });
+      tr.addEventListener("dragleave", () => tr.classList.remove("drop-target"));
+      tr.addEventListener("drop", (e) => {
+        e.preventDefault();
+        tr.classList.remove("drop-target");
+        const items = readDragItems(e);
+        if (items.length) moveItemsTo(f.path, items);
+        else if (e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files, f.path);
+      });
+    }
     tr.addEventListener("click", (e) => {
       if (e.target.closest("button,a,input")) return;
       S.focusedIdx = i;
@@ -281,15 +300,118 @@ function renderBreadcrumb() {
   const parts = S.path ? S.path.replace(/\\/g, "/").split("/").filter(Boolean) : [];
   const el = $("breadcrumb"); el.replaceChildren();
   const rl = document.createElement("a"); rl.href = "#"; rl.textContent = "Cloud";
-  rl.addEventListener("click", (e) => { e.preventDefault(); navigate(""); }); el.append(rl);
+  rl.addEventListener("click", (e) => { e.preventDefault(); navigate(""); });
+  makeDropTarget(rl, "");
+  el.append(rl);
   let acc = "";
   for (const p of parts) {
     const sp = document.createElement("span"); sp.className = "sep"; sp.textContent = "/"; el.append(sp);
     acc = acc ? `${acc}/${p}` : p;
     const lk = document.createElement("a"); lk.href = "#"; lk.textContent = p;
-    lk.addEventListener("click", (e) => { e.preventDefault(); navigate(acc); }); el.append(lk);
+    lk.addEventListener("click", (e) => { e.preventDefault(); navigate(acc); });
+    makeDropTarget(lk, acc);
+    el.append(lk);
   }
   qs("#sidebarPath").textContent = `/mnt/ultra-media/${S.path ? S.path + "/" : ""}`;
+}
+
+// ── Drag & drop (déplacer) ──
+let dragItems = [];
+
+function dragPayload(e, f) {
+  const selectedPaths = [...S.selected];
+  const items = selectedPaths.includes(f.path) && selectedPaths.length
+    ? selectedPaths.map(p => S.selectedItems.get(p) || { path: p, name: p.split("/").pop(), is_dir: false })
+    : [f];
+  dragItems = items.map(i => ({ path: i.path, name: i.name, is_dir: Boolean(i.is_dir) }));
+  e.dataTransfer.setData("application/x-cloud-item", JSON.stringify(dragItems));
+  e.dataTransfer.setData("text/plain", dragItems.map(i => i.name).join(", "));
+  e.dataTransfer.effectAllowed = "move";
+  qsa("#fileBody tr").forEach(tr => {
+    if (dragItems.some(i => i.path === tr.dataset.path)) tr.classList.add("dragging");
+  });
+}
+
+function clearDrag() {
+  qsa("#fileBody tr.dragging").forEach(tr => tr.classList.remove("dragging"));
+  dragItems = [];
+}
+
+function readDragItems(e) {
+  const raw = e.dataTransfer.getData("application/x-cloud-item");
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function dropLabel(destPath) {
+  return destPath ? destPath.split("/").filter(Boolean).pop() : "Racine";
+}
+
+async function moveItemsTo(destPath, items) {
+  const label = dropLabel(destPath);
+  const names = items.map(i => i.name);
+  const srcDirs = new Set(items.map(i => i.path.split("/").slice(0, -1).join("/")));
+  if (srcDirs.size === 1 && [...srcDirs][0] === destPath) {
+    toast(`« ${names.join(", ")} » est déjà dans « ${label} »`);
+    return;
+  }
+  if (items.some(it => it.is_dir && (destPath === it.path || destPath.startsWith(it.path + "/")))) {
+    toast("Impossible de déplacer un dossier dans lui-même");
+    return;
+  }
+  let moved = 0;
+  const errors = [];
+  for (const it of items) {
+    const srcDir = it.path.split("/").slice(0, -1).join("/");
+    const name = it.path.split("/").pop();
+    const fd = new FormData();
+    fd.append("path", srcDir);
+    fd.append("name", name);
+    fd.append("dest", destPath);
+    try {
+      await api(au("/files/move"), { method: "POST", body: fd });
+      moved++;
+    } catch (e) {
+      errors.push(`${name} : ${e.message}`);
+    }
+  }
+  if (moved) {
+    toast(moved === items.length
+      ? (items.length === 1 ? `« ${items[0].name} » déplacé vers « ${label} »` : `${moved} éléments déplacés vers « ${label} »`)
+      : `${moved}/${items.length} éléments déplacés`);
+  }
+  if (errors.length) {
+    toast(`Déplacement refusé : ${errors.slice(0, 2).join(" · ")}`);
+  }
+  S.selected.clear();
+  S.selectedItems.clear();
+  setSelectionMode(false);
+  loadFiles();
+}
+
+function makeDropTarget(el, destPathOrGetter) {
+  if (!el || el.dataset.dropTarget) return;
+  el.dataset.dropTarget = "1";
+  el.classList.add("drop-crumb");
+  const resolveDest = () => (typeof destPathOrGetter === "function" ? destPathOrGetter() : destPathOrGetter);
+  el.addEventListener("dragover", (e) => {
+    if (!dragItems.length) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    el.classList.add("drop-active");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drop-active"));
+  el.addEventListener("drop", (e) => {
+    e.preventDefault();
+    el.classList.remove("drop-active");
+    const items = readDragItems(e);
+    if (items.length) moveItemsTo(resolveDest(), items);
+  });
 }
 
 function renderSidebarDisk() {
@@ -300,7 +422,11 @@ function renderSidebarDisk() {
     qs(".sidebar-disk-fill", el).style.width = `${pct}%`;
     qs(".sidebar-disk-fill", el).style.background = pct > 90 ? "var(--danger)" : pct > 75 ? "var(--warning)" : "var(--success)";
     qs(".sidebar-disk-text", el).textContent = `${S.diskUsed} / ${S.diskTotal}`;
-  } else el.hidden = true;
+    window.DashboardDOM?.updateDiskRing({ percent: pct, usedLabel: S.diskUsed, totalLabel: S.diskTotal });
+  } else {
+    el.hidden = true;
+    window.DashboardDOM?.hideDiskRing();
+  }
 }
 
 function renderBulkBar() {
@@ -570,6 +696,43 @@ qsa("[data-nav]").forEach(b => b.addEventListener("click", () => {
   else if (v === "stats") switchView("stats");
 }));
 
+// Cibles de dépôt : Racine / Parent
+makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="root"]'), "");
+makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="parent"]'), () => S.path.split("/").filter(Boolean).slice(0, -1).join("/"));
+
+// Dépôt de fichiers du bureau sur toute la vue Fichiers (upload)
+(function wireFilesViewUpload() {
+  const view = $("filesView");
+  if (!view) return;
+  let depth = 0;
+  const hasFiles = (e) => e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files");
+  view.addEventListener("dragenter", (e) => {
+    if (dragItems.length || !hasFiles(e)) return;
+    e.preventDefault();
+    depth++;
+    view.classList.add("upload-target");
+  });
+  view.addEventListener("dragleave", () => {
+    if (dragItems.length) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) view.classList.remove("upload-target");
+  });
+  view.addEventListener("dragover", (e) => {
+    if (dragItems.length || !hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+  view.addEventListener("drop", (e) => {
+    if (dragItems.length) return;
+    depth = 0;
+    view.classList.remove("upload-target");
+    if (hasFiles(e) && e.dataTransfer.files.length) {
+      e.preventDefault();
+      startUpload(e.dataTransfer.files);
+    }
+  });
+})();
+
 function switchView(v) {
   S.view = v; updateUrl();
   ["files","history","links","stats"].forEach(x => {
@@ -662,7 +825,8 @@ $("uploadZone").addEventListener("drop", e => { e.preventDefault(); $("uploadZon
 $("fileInput").addEventListener("change", () => { if ($("fileInput").files.length) { startUpload($("fileInput").files); $("fileInput").value = ""; } });
 $("cancelUploadBtn").addEventListener("click", () => { $("uploadDialog").close(); $("uploadProgress").hidden = true; });
 
-async function startUpload(files) {
+async function startUpload(files, targetPath) {
+  const destPath = targetPath || S.path;
   $("uploadMessage").textContent = ""; $("uploadProgress").hidden = false;
   S.uploadRows.clear();
   $("uploadProgress").replaceChildren(...Array.from(files).map(f => {
@@ -676,12 +840,12 @@ async function startUpload(files) {
     S.uploadRows.set(f, r);
     return r;
   }));
-  for (const f of files) await uploadOne(f);
+  for (const f of files) await uploadOne(f, destPath);
   toast("Téléversement terminé."); $("uploadProgress").hidden = true; loadFiles();
 }
 
-async function uploadOne(file) {
-  const fd = new FormData(); fd.append("path", S.path); fd.append("file", file);
+async function uploadOne(file, destPath) {
+  const fd = new FormData(); fd.append("path", destPath); fd.append("file", file);
   const row = S.uploadRows.get(file);
   const fill = qs(".pfill", row); const st = qs(".pstatus", row);
   try {

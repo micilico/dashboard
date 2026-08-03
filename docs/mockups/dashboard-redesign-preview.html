@@ -1,0 +1,2304 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard · Aperçu de la refonte</title>
+<style>
+/* ============================================================
+   Tokens réels extraits de common/css/tokens.css (source de vérité)
+   ============================================================ */
+:root {
+  color-scheme: dark;
+  --bg: #07080b;
+  --bg-secondary: #0B0D12;
+  --surface: #101217;
+  --surface-2: #151821;
+  --surface-3: #1a1e29;
+  --surface-interactive: #1A1E29;
+  --text: #f5f5f7;
+  --muted: #a7abb5;
+  --text-subtle: #7E8491;
+  --border: rgba(255, 255, 255, 0.09);
+  --accent: #7c6cff;
+  --accent-strong: #9a8fff;
+  --accent-action: #6958ed;
+  --accent-action-hover: #5f4ddb;
+  --accent-soft: color-mix(in oklab, var(--accent), transparent 82%);
+  --danger: #ff6b72;
+  --danger-strong: #e95b63;
+  --warning: #f4bd62;
+  --focus: #7c6cff;
+  --success: #5ee6a8;
+  --success-soft: rgba(94, 230, 168, 0.11);
+  --success-border: rgba(34, 197, 94, 0.25);
+  --success-text: #9bf0c8;
+  --warning-soft: rgba(244, 189, 98, 0.11);
+  --warning-border: rgba(245, 158, 11, 0.25);
+  --warning-text: #ffd792;
+  --danger-soft: rgba(255, 107, 114, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.25);
+  --danger-text: #fecaca;
+  --info-soft: rgba(96, 165, 250, 0.11);
+  --info-border: rgba(96, 165, 250, 0.25);
+  --info-text: #dbeafe;
+  --file-video: #a78bfa;
+  --file-audio: #34d399;
+  --file-image: #f472b6;
+  --file-pdf: #f87171;
+  --file-archive: #fbbf24;
+  --overlay-scrim: rgba(0, 0, 0, 0.6);
+  --surface-elevated: rgba(16, 18, 23, 0.94);
+  --hover-soft: rgba(255, 255, 255, 0.04);
+  --surface-soft: rgba(255, 255, 255, 0.035);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --border-faint: rgba(255, 255, 255, 0.06);
+  --border-soft: rgba(255, 255, 255, 0.08);
+  --border-quiet: rgba(255, 255, 255, 0.07);
+  --border-hover: rgba(255, 255, 255, 0.18);
+  --text-on-accent: #ffffff;
+  --pulse-success-start: rgba(94, 230, 168, 0.4);
+  --pulse-success-end: rgba(94, 230, 168, 0);
+  --space-4: 4px; --space-8: 8px; --space-12: 12px; --space-16: 16px;
+  --space-24: 24px; --space-32: 32px; --space-48: 48px; --space-64: 64px; --space-96: 96px;
+  --radius-control: 12px; --radius-panel: 18px; --radius-card: 24px; --radius-hero: 32px;
+  --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.08);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.35);
+  --ease-standard: cubic-bezier(0.28, 0, 0.22, 1);
+  --motion-fast: 160ms; --motion-base: 220ms; --motion-open: 280ms; --motion-close: 200ms;
+  --z-sticky: 5; --z-toast: 20; --z-popover: 40; --z-overlay: 50;
+  --font-display: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-family);
+}
+
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../../common/fonts/Inter-Variable.woff2') format('woff2');
+}
+
+/* ============ Base ============ */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(124, 108, 255, 0.1), transparent 320px), var(--bg);
+}
+a { color: inherit; }
+button, input, select { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid var(--focus); outline-offset: 2px;
+}
+.skip-link { position: absolute; left: -999px; top: 8px; background: var(--surface-2); color: var(--text); padding: 10px 16px; border-radius: var(--radius-control); z-index: 100; }
+.skip-link:focus { left: 8px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+h1, h2, h3, p { margin: 0; }
+svg { display: block; }
+
+/* ============ Barre d'aperçu (pas du produit) ============ */
+.preview-bar {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 8px 20px;
+  background: color-mix(in oklab, var(--bg), transparent 6%);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px dashed color-mix(in oklab, var(--accent), transparent 55%);
+  font-size: 0.85rem; color: var(--muted);
+}
+.preview-bar strong { color: var(--accent-strong); font-weight: 600; }
+.preview-badge { padding: 4px 10px; border: 1px solid var(--accent-soft); background: var(--accent-soft); border-radius: 999px; color: var(--accent-strong); font-size: 0.75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+
+/* ============ Shell / Sidebar ============ */
+.shell { display: grid; grid-template-columns: 224px minmax(0, 1fr); max-width: 1600px; margin-inline: auto; }
+.sidebar {
+  position: sticky; top: 0; height: 100dvh;
+  display: grid; grid-template-rows: auto 1fr auto; gap: 24px;
+  padding: 28px 18px 24px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 12px; padding: 0 8px; }
+.brand-mark { display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.brand-mark svg { width: 26px; height: 26px; }
+.brand-copy p { margin: 0; }
+.eyebrow { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .12em; color: var(--accent-strong); font-weight: 600; }
+.product-name { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+
+.nav { display: grid; gap: 4px; align-content: start; }
+.nav a {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 44px; padding: 0 14px;
+  border-radius: var(--radius-control);
+  color: var(--muted); text-decoration: none; font-weight: 500; font-size: 0.95rem;
+  transition: background var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.nav a:hover { background: var(--surface-interactive); color: var(--text); }
+.nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.nav a.active .nav-icon { color: var(--accent-strong); }
+.nav-icon { display: inline-flex; width: 20px; height: 20px; color: var(--text-subtle); }
+.nav-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nav a.active .nav-icon { color: var(--accent-strong); }
+.nav-sep { height: 1px; margin: 10px 8px; background: var(--border); }
+.nav-count { margin-left: auto; min-width: 22px; min-height: 22px; display: inline-grid; place-items: center; padding: 0 6px; border-radius: 999px; background: var(--danger-soft); color: var(--danger-text); font-size: 0.75rem; }
+
+.sidebar-footer { display: grid; gap: 16px; padding: 16px 8px 0; border-top: 1px solid var(--border); }
+.status-row { display: flex; align-items: center; gap: 10px; color: var(--success-text); font-size: 0.9rem; font-weight: 600; }
+.status-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--success); animation: pulse 2.5s ease-in-out infinite; }
+.status-dot.warn { background: var(--warning); animation: none; }
+.status-dot.bad { background: var(--danger); animation: none; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--pulse-success-start); } 70% { box-shadow: 0 0 0 10px var(--pulse-success-end); } 100% { box-shadow: 0 0 0 0 var(--pulse-success-end); } }
+.sidebar-foot-meta { color: var(--text-subtle); font-size: 0.78rem; }
+.disk-ring-row { display: flex; align-items: center; gap: 12px; }
+.disk-ring { position: relative; width: 52px; height: 52px; flex: 0 0 auto; }
+.disk-ring svg { transform: rotate(-90deg); }
+.disk-ring .track { stroke: var(--border); }
+.disk-ring .fill { stroke: var(--accent); transition: stroke-dashoffset 600ms var(--ease-standard); }
+.disk-ring .fill.warn { stroke: var(--warning); }
+.disk-ring .fill.bad { stroke: var(--danger); }
+.disk-ring-text { position: absolute; inset: 0; display: grid; place-items: center; font-size: 0.62rem; font-weight: 700; color: var(--text); }
+.disk-copy { display: grid; gap: 2px; }
+.disk-copy strong { font-size: 0.85rem; }
+.disk-copy span { color: var(--text-subtle); font-size: 0.75rem; }
+
+/* ============ Main / Screens ============ */
+.main { min-width: 0; padding: 0 clamp(24px, 3vw, 48px) 64px; }
+.screen { display: grid; gap: 24px; padding-top: 40px; }
+
+.demo-controls {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 10px 14px;
+  border: 1px dashed color-mix(in oklab, var(--accent), transparent 60%);
+  border-radius: var(--radius-control);
+  background: color-mix(in oklab, var(--accent), transparent 94%);
+}
+.demo-tag { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--accent-strong); margin-right: 4px; }
+.demo-controls .button { min-height: 34px; padding: 6px 12px; font-size: 0.82rem; }
+
+/* ============ Boutons ============ */
+.button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 0 18px;
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--surface-2); color: var(--text);
+  font-weight: 600; font-size: 0.92rem; cursor: pointer; text-decoration: none;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.button:hover { background: var(--surface-3); border-color: var(--border-hover); }
+.button:active { transform: translateY(1px); }
+.button.primary { background: var(--accent-action); border-color: transparent; color: var(--text-on-accent); box-shadow: 0 8px 24px color-mix(in oklab, var(--accent), transparent 82%); }
+.button.primary:hover { background: var(--accent-action-hover); }
+.button.danger { background: var(--danger-soft); border-color: var(--danger-border); color: var(--danger-text); }
+.button.danger:hover { background: var(--danger-deep, rgba(127, 29, 29, 0.35)); }
+.button.tertiary { background: transparent; border-color: transparent; color: var(--muted); }
+.button.tertiary:hover { color: var(--text); background: var(--hover-soft); }
+.button.sm { min-height: 34px; padding: 0 12px; font-size: 0.82rem; }
+.icon-button {
+  width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface-soft); color: var(--text);
+  cursor: pointer; transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard);
+}
+.icon-button:hover { background: var(--surface-hover); border-color: var(--border-hover); }
+.icon-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-button.accent { background: var(--accent-action); border-color: transparent; color: #fff; }
+.icon-button.accent:hover { background: var(--accent-action-hover); }
+
+/* ============ Vue d'ensemble ============ */
+.overview-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 28px; }
+.overview-copy { display: grid; gap: 14px; max-width: 760px; }
+.overview-title { font-size: clamp(3rem, 4vw, 3.9rem); line-height: 1.02; font-weight: 700; letter-spacing: 0; transition: color var(--motion-base) var(--ease-standard); }
+.overview-title.is-warning { color: var(--warning-text); }
+.status-summary { color: var(--muted); font-size: 1.02rem; max-width: 42rem; }
+.overview-badge {
+  display: inline-flex; align-items: center; gap: 10px; width: fit-content;
+  min-height: 40px; padding: 8px 16px;
+  border: 1px solid var(--success-border); border-radius: 999px; background: var(--success-soft); color: var(--success-text);
+  font-size: 0.9rem; font-weight: 600;
+}
+.overview-badge.is-warning { border-color: var(--warning-border); background: var(--warning-soft); color: var(--warning-text); }
+.overview-badge.is-danger { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger-text); }
+.overview-badge .status-dot { width: 8px; height: 8px; }
+.overview-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+
+.alert-strip { display: grid; gap: 10px; }
+.alert-item { display: grid; gap: 8px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); }
+.alert-item.critical { border-color: var(--danger-border); background: color-mix(in oklab, var(--danger), transparent 88%); }
+.alert-item.warning { border-color: var(--warning-border); background: var(--warning-soft); }
+.alert-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.alert-head strong { font-size: 0.95rem; }
+.alert-head .time { margin-left: auto; color: var(--text-subtle); font-size: 0.8rem; }
+.alert-item p { color: var(--muted); font-size: 0.88rem; }
+.severity-pill { padding: 3px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; }
+.severity-pill.critical { background: var(--danger-soft); color: var(--danger-text); }
+.severity-pill.warning { background: var(--warning-soft); color: var(--warning-text); }
+
+.overview-grid, .metrics-grid, .overview-lower-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 18px; }
+.metrics-grid, .overview-lower-grid { grid-column: 1 / -1; }
+
+.overview-card { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-card); box-shadow: var(--shadow-panel); padding: 22px 24px; }
+.card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.card-head h3 { font-size: 1.15rem; font-weight: 700; }
+.card-head p { color: var(--text-subtle); font-size: 0.85rem; margin-top: 3px; }
+.card-link { color: var(--accent); font-weight: 600; font-size: 0.9rem; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
+
+.metric-card {
+  grid-column: span 4;
+  position: relative; min-height: 168px;
+  display: grid; grid-template-columns: 1fr; align-content: space-between; gap: 14px;
+  padding: 22px 24px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel);
+  transition: transform var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), background var(--motion-base) var(--ease-standard);
+}
+.metric-card:hover { transform: translateY(-2px); border-color: var(--border-hover); background: var(--surface-2); }
+.metric-top { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.metric-icon { width: 50px; height: 50px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-strong); }
+.metric-icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.metric-label { font-size: 0.95rem; font-weight: 700; }
+.metric-meta { color: var(--text-subtle); font-size: 0.8rem; margin-top: 2px; }
+.metric-value { font-size: clamp(2.1rem, 3vw, 2.7rem); line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; align-self: end; }
+.metric-value small { font-size: 0.6em; color: var(--muted); font-weight: 500; margin-left: 4px; }
+.sparkline { position: absolute; right: 22px; bottom: 20px; width: min(34%, 130px); height: 44px; }
+.sparkline svg { width: 100%; height: 100%; overflow: visible; }
+.sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.sparkline circle { fill: var(--accent); }
+
+.services-card { grid-column: span 8; display: grid; align-content: start; gap: 8px; }
+.activity-card { grid-column: span 4; display: grid; align-content: start; gap: 8px; }
+.services-list { display: grid; gap: 8px; }
+.service-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-height: 60px; padding: 9px 14px;
+  border: 1px solid var(--border-quiet); border-radius: 14px; background: var(--surface-quiet, rgba(255,255,255,0.018));
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.service-row:hover { background: var(--surface-2); border-color: var(--border-hover); transform: translateX(2px); }
+.service-row-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.service-row-icon { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.service-row-icon svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.service-row-copy { display: grid; gap: 2px; min-width: 0; }
+.service-row-copy strong { font-size: 0.95rem; }
+.service-row-copy span { color: var(--text-subtle); font-size: 0.78rem; }
+.service-row-status { display: inline-flex; align-items: center; gap: 8px; color: var(--success-text); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+.service-row.warn .service-row-status { color: var(--warning-text); }
+.service-row.bad .service-row-status { color: var(--danger-text); }
+.service-row-status .dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
+.service-row .chev { color: var(--text-subtle); }
+.service-row .chev svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+.activity-list { display: grid; padding: 0 8px; border: 1px solid var(--border-faint); border-radius: 14px; }
+.activity-item { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 70px; padding: 8px 0; border-top: 1px solid var(--border-quiet); }
+.activity-item:first-child { border-top: 0; }
+.activity-icon { width: 42px; height: 42px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.activity-icon.success { background: var(--success-soft); color: var(--success-text); border-color: transparent; }
+.activity-icon.warning { background: var(--warning-soft); color: var(--warning-text); border-color: transparent; }
+.activity-icon.danger { background: var(--danger-soft); color: var(--danger-text); border-color: transparent; }
+.activity-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.activity-copy { display: grid; gap: 2px; min-width: 0; }
+.activity-copy strong { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-copy span { color: var(--text-subtle); font-size: 0.78rem; }
+
+/* ============ Squelettes ============ */
+.skeleton {
+  position: relative; overflow: hidden;
+  background: var(--surface-2); border-radius: 8px;
+  min-height: 16px;
+}
+.skeleton::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--accent), transparent 92%), transparent);
+  transform: translateX(-100%); animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton-block { border: 0; box-shadow: none; background: var(--surface-2); padding: 22px 24px; }
+.skeleton .s-line { height: 12px; border-radius: 6px; margin-bottom: 10px; background: color-mix(in oklab, var(--text), transparent 88%); }
+.skeleton .s-line.short { width: 55%; }
+.skeleton .s-line.xs { width: 35%; }
+
+/* ============ Torrents ============ */
+.page-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+.page-header-copy { display: grid; gap: 8px; }
+.page-header h1, .page-header h2 { font-size: clamp(2.4rem, 3vw, 2.9rem); line-height: 1.05; font-weight: 700; letter-spacing: 0; }
+.page-subtitle { color: var(--muted); font-size: 0.95rem; max-width: 42rem; }
+.page-header-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+
+.quick-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px; background: var(--accent-soft); color: var(--text); font-size: 0.85rem; }
+.filter-chip button { background: none; border: 0; color: inherit; cursor: pointer; padding: 0; display: inline-flex; }
+.filter-chip button svg { width: 14px; height: 14px; stroke: currentColor; }
+
+.filters {
+  position: sticky; top: 60px; z-index: var(--z-sticky);
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) auto; gap: 12px; align-items: end;
+  padding: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface-elevated);
+  backdrop-filter: blur(12px);
+  transition: box-shadow var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard);
+}
+.filters.is-stuck { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); border-color: var(--border-hover); }
+.filters label { display: grid; gap: 6px; font-size: 0.78rem; color: var(--text-subtle); font-weight: 600; }
+.filters input, .filters select {
+  width: 100%; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-control);
+  background: var(--surface-2); color: var(--text); font-size: 0.9rem; font-weight: 400;
+}
+.filters input:focus, .filters select:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.filters .search-wrap { position: relative; }
+.filters .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--text-subtle); pointer-events: none; }
+.filters .search-wrap input { padding-left: 36px; }
+mark { background: color-mix(in oklab, var(--accent), transparent 45%); color: var(--text); border-radius: 3px; padding: 0 1px; }
+
+.toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.toolbar-row .hint { color: var(--text-subtle); font-size: 0.82rem; }
+.segmented { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
+.segmented button { min-height: 34px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 600; font-size: 0.82rem; }
+.segmented button.on { background: var(--accent-soft); color: var(--text); }
+
+.bulk-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--accent-soft); border-radius: var(--radius-panel); background: color-mix(in oklab, var(--accent), transparent 90%); }
+.bulk-bar strong { font-size: 0.9rem; margin-right: auto; }
+
+.table-shell { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); overflow: hidden; }
+table.torrent-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.torrent-table th {
+  text-align: left; padding: 12px 14px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-subtle); background: var(--surface-quiet, rgba(255,255,255,0.018)); border-bottom: 1px solid var(--border);
+  font-weight: 700; white-space: nowrap;
+}
+.torrent-table td { padding: 12px 14px; border-bottom: 1px solid var(--border-faint); vertical-align: middle; font-variant-numeric: tabular-nums; }
+.torrent-table tbody tr { transition: background var(--motion-fast) var(--ease-standard); }
+.torrent-table tbody tr:hover { background: var(--surface-2); }
+.torrent-table tbody tr:last-child td { border-bottom: 0; }
+.torrent-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.torrent-name .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; font-weight: 500; }
+.torrent-name .type-ic { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--file-video); }
+.torrent-name .type-ic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
+.status-badge .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.status-badge.downloading { background: var(--accent-soft); color: var(--accent-strong); }
+.status-badge.seeding { background: var(--success-soft); color: var(--success-text); }
+.status-badge.paused { background: var(--warning-soft); color: var(--warning-text); }
+.status-badge.queued { background: var(--neutral-soft, rgba(148,163,184,0.14)); color: var(--muted); }
+.status-badge.error { background: var(--danger-soft); color: var(--danger-text); }
+.progress-cell { display: flex; align-items: center; gap: 10px; min-width: 120px; }
+.progress-track { flex: 1; height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; min-width: 70px; }
+.progress-fill { height: 100%; border-radius: 999px; background: var(--accent); transition: width 400ms var(--ease-standard); }
+.progress-fill.ok { background: var(--success); }
+.progress-cell .pct { font-size: 0.8rem; color: var(--muted); width: 40px; text-align: right; }
+.row-actions { display: flex; gap: 4px; opacity: 0.35; transition: opacity var(--motion-fast) var(--ease-standard); }
+.torrent-table tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
+.row-actions button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.row-actions button:hover { color: var(--text); border-color: var(--border-hover); background: var(--surface-3); }
+.row-actions button.danger:hover { color: var(--danger-text); border-color: var(--danger-border); }
+.row-actions svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Compacte */
+.torrents-screen.compact .torrent-table td { padding: 6px 12px; }
+.torrents-screen.compact .torrent-table th { padding: 9px 12px; }
+.torrents-screen.compact .torrent-name .name { max-width: 240px; font-size: 0.84rem; }
+.torrents-screen.compact .torrent-name .type-ic { width: 24px; height: 24px; }
+.torrents-screen.compact .progress-track { height: 4px; }
+
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; color: var(--muted); font-size: 0.85rem; }
+
+/* ============ Cloud ============ */
+.cloud-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cloud-toolbar .breadcrumb { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; margin-left: auto; padding: 0 14px; height: 44px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); font-size: 0.85rem; color: var(--muted); }
+.cloud-toolbar .breadcrumb a { color: var(--text); text-decoration: none; white-space: nowrap; }
+.cloud-toolbar .breadcrumb a:hover { color: var(--accent-strong); }
+.cloud-toolbar .breadcrumb .sep { color: var(--text-subtle); }
+.cloud-toolbar .crumb-current { color: var(--accent-strong); font-weight: 600; white-space: nowrap; }
+
+.file-table { width: 100%; border-collapse: collapse; }
+.file-table th { text-align: left; padding: 11px 14px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-subtle); border-bottom: 1px solid var(--border); font-weight: 700; white-space: nowrap; }
+.file-table td { padding: 9px 14px; border-bottom: 1px solid var(--border-faint); font-variant-numeric: tabular-nums; }
+.file-table tbody tr { transition: background var(--motion-fast) var(--ease-standard); }
+.file-table tbody tr:hover { background: var(--surface-2); }
+.file-row { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.file-thumb { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 9px; overflow: hidden; border: 1px solid var(--border); background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; }
+.file-thumb svg { width: 100%; height: 100%; }
+.file-thumb .ic { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.file-thumb.image { color: var(--file-image); }
+.file-thumb.folder { color: var(--warning); }
+.file-thumb.video { color: var(--file-video); }
+.file-thumb.audio { color: var(--file-audio); }
+.file-thumb.archive { color: var(--file-archive); }
+.file-thumb.pdf { color: var(--file-pdf); }
+.file-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.file-meta { color: var(--text-subtle); font-size: 0.78rem; }
+.row-fav { color: var(--text-subtle); background: none; border: 0; cursor: pointer; font-size: 1rem; line-height: 1; }
+.row-fav.on { color: var(--warning); }
+
+.drop-zone {
+  display: grid; place-items: center; gap: 6px; text-align: center;
+  padding: 34px 20px;
+  border: 1.5px dashed var(--border-hover); border-radius: var(--radius-panel);
+  background: var(--surface-soft); color: var(--muted);
+  transition: border-color var(--motion-fast) var(--ease-standard), background var(--motion-fast) var(--ease-standard);
+}
+.drop-zone.drag { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.drop-zone svg { width: 30px; height: 30px; color: var(--accent-strong); fill: none; stroke: currentColor; stroke-width: 1.6; }
+.drop-zone strong { color: var(--text); font-size: 0.95rem; }
+
+.upload-list { display: grid; gap: 10px; }
+.upload-item { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); }
+.upload-item-head { display: flex; align-items: center; gap: 10px; font-size: 0.88rem; }
+.upload-item-head .name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upload-item-head .pct { margin-left: auto; color: var(--accent-strong); font-variant-numeric: tabular-nums; }
+.upload-item.done .upload-item-head .pct { color: var(--success-text); }
+.upload-track { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.upload-fill { height: 100%; width: 0%; border-radius: 999px; background: var(--accent); transition: width 200ms linear; }
+.upload-item.done .upload-fill { background: var(--success); }
+
+.preview-pop {
+  position: absolute; z-index: 40; pointer-events: none;
+  width: 260px; padding: 12px; border-radius: 14px;
+  background: var(--surface-elevated); border: 1px solid var(--border-hover);
+  box-shadow: var(--shadow-dialog); backdrop-filter: blur(12px);
+  opacity: 0; transform: translateY(6px) scale(0.98);
+  transition: opacity 120ms var(--ease-standard), transform 120ms var(--ease-standard);
+}
+.preview-pop.show { opacity: 1; transform: translateY(0) scale(1); }
+.preview-pop .ph { height: 120px; border-radius: 10px; overflow: hidden; margin-bottom: 10px; background: linear-gradient(135deg, #223, #334); }
+.preview-pop .ph svg { width: 100%; height: 100%; }
+.preview-pop .pm { font-size: 0.78rem; color: var(--muted); }
+.preview-pop .pt { font-weight: 600; font-size: 0.88rem; margin-bottom: 2px; }
+
+/* ============ Toasts ============ */
+.toasts { position: fixed; right: 20px; bottom: 20px; z-index: var(--z-toast); display: grid; gap: 10px; width: min(360px, calc(100vw - 40px)); }
+.toast {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-hover); border-radius: var(--radius-panel);
+  background: var(--surface-elevated); box-shadow: var(--shadow-dialog); backdrop-filter: blur(12px);
+  font-size: 0.88rem;
+  animation: toast-in 240ms var(--ease-standard);
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(12px); } }
+.toast .msg { flex: 1; }
+.toast .act { background: var(--accent-soft); color: var(--accent-strong); border: 0; border-radius: 8px; padding: 6px 12px; font-weight: 600; font-size: 0.82rem; cursor: pointer; }
+.toast .act:hover { background: color-mix(in oklab, var(--accent), transparent 70%); }
+.toast .x { background: none; border: 0; color: var(--text-subtle); cursor: pointer; font-size: 1rem; line-height: 1; padding: 4px; }
+.toast.done { border-color: var(--success-border); }
+
+/* ============ Tri de tableau ============ */
+.sort-head {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; padding: 0; margin: 0;
+  color: inherit; font: inherit; cursor: pointer;
+  text-transform: inherit; letter-spacing: inherit; font-weight: 700;
+}
+.sort-head:hover { color: var(--text); }
+.sort-head::after { content: ""; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--text-subtle); opacity: 0; }
+.sort-head.active { color: var(--accent-strong); }
+.sort-head.active::after { opacity: 1; }
+.sort-head[aria-sort="ascending"]::after { border-top: 0; border-bottom: 5px solid var(--accent-strong); opacity: 1; }
+.sort-head[aria-sort="descending"]::after { border-top: 5px solid var(--accent-strong); opacity: 1; }
+
+/* ============ Filtres rapides ============ */
+.quick-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-pills button {
+  min-height: 34px; padding: 0 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font-weight: 600; font-size: 0.84rem; cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.quick-pills button:hover { color: var(--text); border-color: var(--border-hover); }
+.quick-pills button.on { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--text); }
+
+/* ============ Prowlarr : stats, tabs, badges ============ */
+.summary-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.stat {
+  display: grid; gap: 6px; padding: 18px 20px;
+  border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface);
+}
+.stat strong { font-size: 1.7rem; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--text-subtle); font-size: 0.82rem; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.tab {
+  position: relative; min-height: 44px; padding: 0 16px;
+  background: none; border: 0; color: var(--muted); font-weight: 600; font-size: 0.92rem; cursor: pointer;
+}
+.tab:hover { color: var(--text); }
+.tab.on { color: var(--text); }
+.tab.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
+.badge {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 10px;
+  border-radius: 999px; font-size: 0.76rem; font-weight: 600; white-space: nowrap;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+.badge.ok { background: var(--success-soft); color: var(--success-text); }
+.badge.warn { background: var(--warning-soft); color: var(--warning-text); }
+.badge.error { background: var(--danger-soft); color: var(--danger-text); }
+.badge.disabled { background: var(--neutral-soft, rgba(148,163,184,0.14)); color: var(--muted); }
+.prowlarr-panel { display: grid; gap: 16px; }
+.prowlarr-panel .view { display: grid; gap: 16px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.data-table th { text-align: left; padding: 12px 14px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-subtle); border-bottom: 1px solid var(--border); font-weight: 700; white-space: nowrap; background: var(--surface-quiet, rgba(255,255,255,0.018)); }
+.data-table td { padding: 11px 14px; border-bottom: 1px solid var(--border-faint); vertical-align: middle; font-variant-numeric: tabular-nums; }
+.data-table tbody tr { transition: background var(--motion-fast) var(--ease-standard); }
+.data-table tbody tr:hover { background: var(--surface-2); }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table .muted { color: var(--text-subtle); font-size: 0.78rem; }
+.tag-badge { display: inline-block; padding: 2px 8px; margin: 1px 2px 1px 0; border-radius: 6px; background: var(--surface-3); color: var(--muted); font-size: 0.74rem; }
+.choice-pill {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted);
+  font-size: 0.84rem; cursor: pointer;
+}
+.choice-pill:has(input:checked) { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--text); }
+.choice-pill input { accent-color: var(--accent); }
+.search-form { display: grid; gap: 14px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
+.search-form label { display: grid; gap: 6px; font-size: 0.78rem; color: var(--text-subtle); font-weight: 600; }
+.search-form input, .search-form select {
+  width: 100%; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); color: var(--text); font-size: 0.9rem; font-weight: 400;
+}
+.search-form input:focus, .search-form select:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+.search-form fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.search-form legend { font-size: 0.78rem; color: var(--text-subtle); font-weight: 600; margin-bottom: 4px; }
+.picker-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.picker-actions .button { min-height: 34px; padding: 0 12px; font-size: 0.82rem; }
+.app-card {
+  display: grid; gap: 10px; padding: 18px 20px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface);
+  transition: transform var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), background var(--motion-base) var(--ease-standard);
+}
+.app-card:hover { transform: translateY(-2px); border-color: var(--border-hover); background: var(--surface-2); }
+.app-card-head { display: flex; align-items: center; gap: 12px; }
+.app-card-head svg { width: 22px; height: 22px; color: var(--accent-strong); }
+.app-card strong { font-size: 1rem; }
+.app-card .meta { color: var(--text-subtle); font-size: 0.8rem; display: grid; gap: 2px; }
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.split h3 { font-size: 1rem; margin-bottom: 10px; }
+.list { display: grid; gap: 8px; }
+.list-item {
+  display: grid; gap: 4px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2);
+}
+.list-item.warn { border-color: var(--warning-border); background: var(--warning-soft); }
+.list-item.error { border-color: var(--danger-border); background: color-mix(in oklab, var(--danger), transparent 88%); }
+.list-item strong { font-size: 0.88rem; }
+.list-item .sub { color: var(--text-subtle); font-size: 0.78rem; }
+.prowlarr-panel .grab-btn { min-height: 36px; padding: 0 14px; font-size: 0.82rem; }
+
+/* ============ Cloud : drag & drop ============ */
+.file-table tr[draggable="true"] { cursor: grab; }
+.file-table tr[draggable="true"]:active { cursor: grabbing; }
+.file-table tr.dragging { opacity: 0.4; }
+.file-table tr.is-selected td { background: var(--accent-soft); }
+.file-table tr.drop-target td { background: color-mix(in oklab, var(--accent), transparent 84%); }
+.file-table tr.drop-target .file-thumb { border-color: var(--accent); }
+.file-table tr.removing { opacity: 0; transform: translateX(24px); transition: opacity 260ms var(--ease-standard), transform 260ms var(--ease-standard); }
+.table-shell.is-upload-target { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.drop-path-target { position: relative; }
+.drop-path-target.drop-target { color: var(--accent-strong); }
+.drop-path-target.drop-target::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.folder-accept {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; margin-left: 8px; padding: 0 6px;
+  border-radius: 999px; background: var(--accent); color: #fff;
+  font-size: 0.72rem; font-weight: 700;
+  animation: toast-in 240ms var(--ease-standard);
+}
+.dnd-hint { display: flex; align-items: center; gap: 8px; color: var(--text-subtle); font-size: 0.82rem; }
+
+/* ============ Cloud : navigation de vues ============ */
+.cloud-view-nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.cloud-view-nav .nav-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 40px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--muted);
+  font-weight: 600; font-size: 0.86rem; cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast) var(--ease-standard), color var(--motion-fast) var(--ease-standard);
+}
+.cloud-view-nav .nav-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.cloud-view-nav .nav-btn:hover { color: var(--text); border-color: var(--border-hover); }
+.cloud-view-nav .nav-btn.on { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--text); }
+.cloud-subview { display: none; }
+.cloud-subview.on { display: block; }
+.cloud-view-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.cloud-view-head h2 { font-size: 1.3rem; }
+.token-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.78rem; color: var(--muted); }
+
+/* ============ Console (Activité / Système / Médias / Santé) ============ */
+.console-screen { display: grid; gap: 18px; }
+.console-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.console-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 18px; }
+@media (max-width: 1100px) { .console-grid { grid-template-columns: 1fr; } .console-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.console-card { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel); padding: 20px 22px; }
+.console-card h3 { font-size: 1.05rem; margin-bottom: 12px; }
+.disk-meter { margin: 8px 0 4px; }
+.disk-meter .labels { display: flex; justify-content: space-between; color: var(--text-subtle); font-size: 0.8rem; margin-bottom: 8px; }
+.disk-meter .track { height: 10px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.disk-meter .fill { height: 100%; width: 62%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-strong)); }
+.disk-meter .fill.warn { background: var(--warning); }
+.timeline { display: grid; gap: 0; border: 1px solid var(--border-faint); border-radius: 14px; padding: 0 8px; }
+.timeline .activity-item { border-top: 1px solid var(--border-quiet); }
+.timeline .activity-item:first-child { border-top: 0; }
+.media-library { display: grid; gap: 12px; }
+.media-card {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2);
+}
+.media-card .poster { width: 56px; height: 78px; border-radius: 10px; overflow: hidden; background: linear-gradient(135deg, #2a2a45, #171729); }
+.media-card .poster svg { width: 100%; height: 100%; }
+.media-card .m-copy { display: grid; gap: 3px; min-width: 0; }
+.media-card .m-copy strong { font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-card .m-copy span { color: var(--text-subtle); font-size: 0.8rem; }
+.media-card .m-state { font-size: 0.78rem; color: var(--success-text); font-weight: 600; white-space: nowrap; }
+.notice { padding: 12px 14px; border: 1px solid var(--info-border); border-radius: var(--radius-control); background: var(--info-soft); color: var(--info-text); font-size: 0.86rem; }
+.notice.warn { border-color: var(--warning-border); background: var(--warning-soft); color: var(--warning-text); }
+.notice.critical { border-color: var(--danger-border); background: var(--danger-soft); color: var(--danger-text); }
+.steps { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 0.8rem; }
+.steps .step { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.steps .step.on { border-color: var(--accent-soft); background: var(--accent-soft); color: var(--text); }
+
+/* ============ Homepage ============ */
+.hp-hero { display: grid; gap: 6px; margin-bottom: 4px; }
+.hp-hero .eyebrow { font-size: 0.78rem; }
+.hp-hero h1 { font-size: clamp(1.8rem, 2.6vw, 2.4rem); line-height: 1.1; }
+.hp-date { color: var(--muted); font-size: 0.9rem; }
+.homepage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 1200px) { .homepage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .homepage-grid { grid-template-columns: 1fr; } }
+.hp-card {
+  display: grid; gap: 12px; padding: 20px;
+  border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel);
+  transition: transform var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), background var(--motion-base) var(--ease-standard);
+}
+.hp-card:hover { transform: translateY(-2px); border-color: var(--border-hover); background: var(--surface-2); }
+.hp-card-head { display: flex; align-items: center; gap: 12px; }
+.hp-card-head .hp-icon { width: 42px; height: 42px; border-radius: 13px; border: 1px solid var(--border); background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-strong); }
+.hp-card-head .hp-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.hp-card-head strong { font-size: 1rem; }
+.hp-card-head .badge { margin-left: auto; }
+.hp-widget { display: grid; gap: 8px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
+.hp-widget .labels { display: flex; justify-content: space-between; color: var(--text-subtle); font-size: 0.8rem; margin-bottom: 6px; }
+.hp-widget .big { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.hp-widget .big small { font-size: 0.6em; color: var(--muted); font-weight: 500; }
+.hp-search { display: flex; gap: 10px; }
+.hp-search input {
+  flex: 1; min-height: 48px; padding: 0 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); color: var(--text); font-size: 0.95rem;
+}
+.hp-search input:focus { border-color: var(--accent); outline: 2px solid var(--accent-soft); }
+
+/* ============ Placeholder ============ */
+.ph-screen { display: grid; place-items: center; min-height: 60vh; text-align: center; gap: 14px; color: var(--muted); }
+.ph-screen h2 { color: var(--text); font-size: 1.6rem; }
+.ph-screen .ph-ic { width: 72px; height: 72px; border-radius: 22px; border: 1px solid var(--border); background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-strong); margin-inline: auto; }
+.ph-screen .ph-ic svg { width: 32px; height: 32px; fill: none; stroke: currentColor; stroke-width: 1.6; }
+
+/* ============ Responsive ============ */
+@media (max-width: 1200px) {
+  .metric-card { grid-column: span 6; }
+  .services-card { grid-column: span 12; }
+  .activity-card { grid-column: span 12; }
+  .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; grid-template-rows: auto auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .sidebar-footer { display: none; }
+  .metric-card { grid-column: span 12; }
+}
+@media (max-width: 640px) {
+  .filters { grid-template-columns: 1fr 1fr; }
+  .overview-actions .icon-button.accent { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; animation-iteration-count: 1 !important; }
+  .status-dot { animation: none; }
+  .skeleton::after { animation: none; }
+  .metric-card, .service-row { transform: none !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Aller au contenu</a>
+
+<div class="preview-bar">
+  <div><strong>Dashboard</strong> · Aperçu de la refonte frontend</div>
+  <span class="preview-badge">Données fictives</span>
+</div>
+
+<div class="shell">
+  <aside class="sidebar" aria-label="Navigation principale">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64">
+          <polygon points="18,14 41,14 50,30 27,30" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" opacity="0.7"/>
+          <polygon points="14,34 37,34 46,50 23,50" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+          <polygon points="27,30 41,30 37,34 23,34" fill="var(--accent)" opacity="0.15"/>
+        </svg>
+      </span>
+      <span class="brand-copy">
+        <p class="eyebrow">Centre de contrôle</p>
+        <p class="product-name">Dashboard</p>
+      </span>
+    </div>
+
+    <nav class="nav" aria-label="Navigation">
+      <a href="#" data-goto="homepage">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg></span>
+        <span>Accueil</span>
+      </a>
+      <a href="#" data-goto="overview" class="active" aria-current="page">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3.75 10.5 12 4l8.25 6.5v8.25a1.5 1.5 0 0 1-1.5 1.5h-3.75V13.5h-6v6.75H5.25a1.5 1.5 0 0 1-1.5-1.5z"/></svg></span>
+        <span>Vue d'ensemble</span>
+        <span class="nav-count" id="navAlertCount">2</span>
+      </a>
+      <a href="#" data-goto="torrents">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"/></svg></span>
+        <span>Torrents</span>
+      </a>
+      <a href="#" data-goto="cloud">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></span>
+        <span>Cloud</span>
+      </a>
+      <div class="nav-sep" role="separator"></div>
+      <a href="#" data-goto="prowlarr">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg></span>
+        <span>Prowlarr</span>
+        <span class="nav-count">2</span>
+      </a>
+      <a href="#" data-goto="console" data-console="media">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h5M8 15h8"/></svg></span>
+        <span>Médias</span>
+      </a>
+      <a href="#" data-goto="console" data-console="storage">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="5" rx="1.5"/><rect x="4" y="14" width="16" height="5" rx="1.5"/><path d="M8 7.5h.01M8 16.5h.01"/></svg></span>
+        <span>Système</span>
+      </a>
+      <a href="#" data-goto="console" data-console="health">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4.75 18.5 7v5.25c0 4.2-2.6 6.8-6.5 7.99-3.9-1.19-6.5-3.79-6.5-7.99V7z"/><path d="M9 12h6M12 9v6"/></svg></span>
+        <span>Santé</span>
+      </a>
+      <a href="#" data-goto="console" data-console="activity">
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"/></svg></span>
+        <span>Activité</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="status-row">
+        <span class="status-dot" id="sideStatusDot"></span>
+        <span id="sideStatusText">Tout fonctionne</span>
+      </div>
+      <div class="disk-ring-row">
+        <div class="disk-ring" id="diskRing" aria-label="62 % du stockage utilisé">
+          <svg viewBox="0 0 52 52" width="52" height="52">
+            <circle class="track" cx="26" cy="26" r="22" fill="none" stroke-width="5"/>
+            <circle class="fill" id="diskRingFill" cx="26" cy="26" r="22" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="138.2" stroke-dashoffset="52.5"/>
+          </svg>
+          <span class="disk-ring-text">62%</span>
+        </div>
+        <div class="disk-copy">
+          <strong>Stockage média</strong>
+          <span id="diskDetail">2,0 To utilisés · 1,2 To libres</span>
+        </div>
+      </div>
+      <div class="sidebar-foot-meta" id="sideFreshness">Dernière vérification · à l'instant</div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+
+    <!-- ================= VUE D'ENSEMBLE ================= -->
+    <section class="screen" data-screen="overview" aria-label="Vue d'ensemble">
+      <div class="demo-controls">
+        <span class="demo-tag">Démo</span>
+        <button class="button sm" id="demoSkeleton" type="button" aria-pressed="false">Simuler le chargement</button>
+        <button class="button sm" id="demoIncident" type="button" aria-pressed="false">Simuler un incident</button>
+        <button class="button sm" id="demoCounters" type="button">Rejouer les compteurs</button>
+      </div>
+
+      <div class="overview-header">
+        <div class="overview-copy">
+          <p class="eyebrow greeting" id="ovGreeting">Bonsoir</p>
+          <h1 class="overview-title" id="ovTitle">Tout fonctionne.<br>Parfaitement.</h1>
+          <p class="status-summary" id="ovSummary">Aucune alerte critique. Les services restent surveillés en direct.</p>
+          <div class="overview-badge" id="ovBadge">
+            <span class="status-dot"></span>
+            <span id="ovBadgeText">Opérationnel · vérifié à l'instant</span>
+          </div>
+        </div>
+        <div class="overview-actions">
+          <button class="icon-button" type="button" aria-label="Actualiser">
+            <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+          </button>
+          <button class="icon-button accent" type="button" aria-label="Ajouter un torrent">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="alert-strip" id="ovAlerts" hidden></div>
+
+      <div class="overview-grid">
+        <div class="metrics-grid" id="metricsGrid"></div>
+        <div class="overview-lower-grid">
+          <section class="overview-card services-card" aria-labelledby="servicesTitle">
+            <div class="card-head">
+              <div>
+                <h3 id="servicesTitle">Services</h3>
+                <p>Dernières vérifications et statuts.</p>
+              </div>
+              <a class="card-link" href="#" onclick="return false;">Tout voir</a>
+            </div>
+            <div class="services-list" id="servicesList"></div>
+          </section>
+          <section class="overview-card activity-card" aria-labelledby="activityTitle">
+            <div class="card-head">
+              <div>
+                <h3 id="activityTitle">Activité récente</h3>
+                <p>Trois événements récents au maximum.</p>
+              </div>
+              <a class="card-link" href="#" onclick="return false;">Tout voir</a>
+            </div>
+            <div class="activity-list" id="activityList"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= TORRENTS ================= -->
+    <section class="screen torrents-screen" data-screen="torrents" hidden aria-label="Torrents">
+      <div class="demo-controls">
+        <span class="demo-tag">Démo</span>
+        <button class="button sm" id="demoToast" type="button">Pause + toast « Annuler »</button>
+      </div>
+
+      <div class="page-header">
+        <div class="page-header-copy">
+          <p class="eyebrow">Téléchargements</p>
+          <h2>Torrents</h2>
+          <p class="page-subtitle" id="tSummary">8 torrents · 58,7 Mo/s en réception · 1,5 Mo/s en envoi</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="button tertiary" type="button">Effacer les filtres</button>
+          <button class="button primary" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            Ajouter un torrent
+          </button>
+        </div>
+      </div>
+
+      <div class="quick-filters" aria-label="Filtres rapides">
+        <span class="filter-chip">État : En téléchargement <button aria-label="Retirer le filtre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+        <span class="filter-chip">Catégorie : Films <button aria-label="Retirer le filtre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+        <span class="filter-chip">Tag : 4K <button aria-label="Retirer le filtre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+      </div>
+
+      <div class="quick-pills" id="quickPills" role="group" aria-label="Filtres rapides d'état">
+        <button type="button" class="on" data-quick="all" aria-pressed="true">Tous</button>
+        <button type="button" data-quick="active" aria-pressed="false">Actifs</button>
+        <button type="button" data-quick="error" aria-pressed="false">Bloqués</button>
+        <button type="button" data-quick="complete" aria-pressed="false">Terminés</button>
+        <button type="button" data-quick="paused" aria-pressed="false">En pause</button>
+      </div>
+
+      <form class="filters" id="torrentFilters" aria-label="Recherche et filtres" onsubmit="return false">
+        <label class="search-wrap">
+          <span class="sr-only">Rechercher un torrent</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg>
+          <input id="tSearch" type="search" placeholder="Nom du torrent" autocomplete="off">
+        </label>
+        <label>État<select id="tStatus"><option>Tous</option><option>En téléchargement</option><option>En partage</option><option>En pause</option></select></label>
+        <label>Catégorie<select><option>Toutes</option><option>Films</option><option>Séries</option><option>Musique</option></select></label>
+        <label>Tag<select><option>Tous</option><option>4K</option><option>REMUX</option><option>FLAC</option></select></label>
+        <label>Tracker<select><option>Tous</option><option>Public</option><option>Privé</option></select></label>
+        <label>Tri<select id="tSort">
+          <option>Priorité opérationnelle</option>
+          <option>Nom</option>
+          <option>État</option>
+          <option>Progression</option>
+          <option>Vitesse descendante</option>
+          <option>Vitesse montante</option>
+          <option>Uploadé</option>
+          <option>Ratio</option>
+          <option>Taille</option>
+          <option>ETA</option>
+          <option>Date d'ajout</option>
+        </select></label>
+        <label>Sens<select id="tDir"><option>Croissant</option><option>Décroissant</option></select></label>
+        <button class="button secondary" type="button">Réinitialiser</button>
+      </form>
+
+      <div class="toolbar-row">
+        <span class="hint" id="tCount">18 torrents affichés · recherche instantanée avec surlignage</span>
+        <div class="segmented" role="group" aria-label="Densité d'affichage">
+          <button type="button" data-density="normal" class="on" aria-pressed="true">Normal</button>
+          <button type="button" data-density="compact" aria-pressed="false">Compact</button>
+        </div>
+      </div>
+
+      <div class="bulk-bar">
+        <strong id="bulkCount">0 sélectionné</strong>
+        <button class="button sm secondary" type="button">Mettre en pause</button>
+        <button class="button sm secondary" type="button">Reprendre</button>
+        <button class="button sm secondary" type="button">Partage forcé</button>
+        <button class="button sm danger" type="button">Supprimer</button>
+      </div>
+
+      <div class="table-shell">
+        <table class="torrent-table" aria-label="Liste des torrents">
+          <thead>
+            <tr>
+              <th style="width:36px"><input type="checkbox" aria-label="Tout sélectionner" style="width:16px;height:16px"></th>
+              <th><button type="button" class="sort-head" data-sort="name">Nom</button></th>
+              <th><button type="button" class="sort-head" data-sort="state">État</button></th>
+              <th><button type="button" class="sort-head" data-sort="progress">Progression</button></th>
+              <th style="text-align:right"><button type="button" class="sort-head" data-sort="downloadSpeed">Réception</button></th>
+              <th style="text-align:right"><button type="button" class="sort-head" data-sort="uploadSpeed">Envoi</button></th>
+              <th style="text-align:right"><button type="button" class="sort-head" data-sort="uploaded">Uploadé</button></th>
+              <th style="text-align:right"><button type="button" class="sort-head" data-sort="ratio">Ratio</button></th>
+              <th style="text-align:right"><button type="button" class="sort-head" data-sort="size">Taille</button></th>
+              <th><button type="button" class="sort-head" data-sort="eta">ETA</button></th>
+              <th><button type="button" class="sort-head" data-sort="addedOn">Ajout</button></th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tBody"></tbody>
+        </table>
+      </div>
+
+      <div class="pagination" aria-label="Pagination">
+        <button class="button sm tertiary" type="button">← Précédent</button>
+        <span>Page 1 / 1</span>
+        <button class="button sm tertiary" type="button">Suivant →</button>
+      </div>
+    </section>
+
+    <!-- ================= CLOUD ================= -->
+    <section class="screen cloud-screen" data-screen="cloud" hidden aria-label="Cloud">
+      <div class="demo-controls">
+        <span class="demo-tag">Démo</span>
+        <span class="dnd-hint">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 8v8m-4-4h8"/><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+          Glissez un fichier sur un dossier (ou le fil d'Ariane) pour le déplacer.
+        </span>
+        <button class="button sm" id="demoUpload" type="button">Simuler un upload (5 fichiers)</button>
+        <button class="button sm" id="demoResetCloud" type="button">Réinitialiser la démo</button>
+      </div>
+
+      <div class="page-header">
+        <div class="page-header-copy">
+          <p class="eyebrow">Fichiers</p>
+          <h1>Cloud</h1>
+          <p class="page-subtitle">Vignettes d'images, aperçu rapide au survol et multi-upload par glisser-déposer.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="icon-button" type="button" aria-label="Synchroniser">
+            <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="cloud-toolbar">
+        <button class="button primary" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20V10m0 0 3.5 3.5M12 10l-3.5 3.5M5 5.75h14"/></svg>
+          Téléverser
+        </button>
+        <button class="button secondary" type="button">Nouveau dossier</button>
+        <button class="button secondary" type="button">Partager dossier</button>
+        <button class="button secondary" type="button" aria-pressed="false">Sélectionner</button>
+        <div class="breadcrumb" aria-label="Chemin">
+          <a href="#">mnt</a><span class="sep">/</span>
+          <a href="#">ultra-media</a><span class="sep">/</span>
+          <span class="crumb-current">films</span>
+        </div>
+      </div>
+
+      <div class="cloud-view-nav" id="cloudViewNav" role="group" aria-label="Vues cloud">
+        <button class="nav-btn" data-cview="files" type="button" title="Fichiers">
+          <svg viewBox="0 0 24 24"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>
+          Fichiers
+        </button>
+        <button class="nav-btn" data-cview="history" type="button" title="Historique">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.25"/><path d="M12 7.5V12l3 3"/></svg>
+          Historique
+        </button>
+        <button class="nav-btn" data-cview="links" type="button" title="Liens de partage">
+          <svg viewBox="0 0 24 24"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>
+          Liens
+        </button>
+        <button class="nav-btn" data-cview="stats" type="button" title="Statistiques">
+          <svg viewBox="0 0 24 24"><path d="M4 20h16M6 16l4-6 4 4 4-8"/></svg>
+          Statistiques
+        </button>
+        <button class="nav-btn" data-cview="favorites" type="button" title="Favoris">
+          <svg viewBox="0 0 24 24"><path d="M12 4.5 14.7 10l6 .6-4.6 3.9 1.4 5.9-5.5-3.1-5.5 3.1 1.4-5.9L3.3 10.6l6-.6z"/></svg>
+          Favoris
+        </button>
+      </div>
+
+      <div id="uploadDemo" hidden>
+        <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="Déposer des fichiers">
+          <svg viewBox="0 0 24 24"><path d="M12 20V10m0 0 3.5 3.5M12 10l-3.5 3.5M5 5.75h14"/></svg>
+          <div><strong>Déposer des fichiers ou cliquer</strong><br>Ajout par lots, progression par fichier</div>
+        </div>
+        <div class="upload-list" id="uploadList"></div>
+      </div>
+
+      <div class="cloud-subview on" id="cview-files">
+      <div class="table-shell" style="position:relative">
+        <table class="file-table" aria-label="Fichiers">
+          <thead>
+            <tr>
+              <th style="width:36px"><input type="checkbox" aria-label="Tout sélectionner" style="width:16px;height:16px"></th>
+              <th>Nom</th>
+              <th style="text-align:right">Taille</th>
+              <th>Modifié</th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="fBody"></tbody>
+        </table>
+        <div class="preview-pop" id="previewPop" hidden>
+          <div class="ph"><svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="pgr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a4a78"/><stop offset="1" stop-color="#242436"/></linearGradient></defs><rect width="120" height="80" fill="url(#pgr)"/><circle cx="90" cy="26" r="14" fill="none" stroke="#7c6cff" stroke-width="3" opacity="0.8"/></svg></div>
+          <div class="pt" id="popTitle"></div>
+          <div class="pm" id="popMeta"></div>
+        </div>
+      </div>
+      </div>
+
+      <div class="cloud-subview" id="cview-history" hidden>
+        <div class="cloud-view-head">
+          <h2>Historique</h2>
+          <span class="hint" style="color:var(--text-subtle);font-size:0.82rem">50 entrées récentes.</span>
+        </div>
+        <div class="table-shell">
+          <table class="file-table">
+            <thead><tr><th>Date</th><th>Fichier</th><th style="text-align:right">Taille</th><th>Action</th><th style="text-align:right">Lien</th></tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="cloud-subview" id="cview-links" hidden>
+        <div class="cloud-view-head">
+          <h2>Liens de partage</h2>
+          <span class="hint" style="color:var(--text-subtle);font-size:0.82rem">6 liens actifs · 0 révoqué.</span>
+        </div>
+        <div class="table-shell">
+          <table class="file-table">
+            <thead><tr><th>Fichier</th><th>Jeton</th><th style="text-align:right">Téléchargements</th><th>Expiration</th><th>Statut</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody id="linksBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="cloud-subview" id="cview-stats" hidden>
+        <div class="cloud-view-head">
+          <h2>Statistiques</h2>
+          <span class="hint" style="color:var(--text-subtle);font-size:0.82rem">Vue d'ensemble du service.</span>
+        </div>
+        <div class="card-grid" id="statsGrid"></div>
+      </div>
+
+      <div class="cloud-subview" id="cview-favorites" hidden>
+        <div class="cloud-view-head">
+          <h2>Favoris</h2>
+          <span class="hint" style="color:var(--text-subtle);font-size:0.82rem">Accès rapides aux dossiers.</span>
+        </div>
+        <div class="card-grid" id="favoritesGrid"></div>
+      </div>
+    </section>
+
+    <!-- ================= PROWLARR ================= -->
+    <section class="screen prowlarr-panel" data-screen="prowlarr" hidden aria-label="Prowlarr">
+      <div class="demo-controls">
+        <span class="demo-tag">Démo</span>
+        <button class="button sm" id="demoGrab" type="button">Lancer un grab (toast + badge)</button>
+      </div>
+
+      <div class="page-header">
+        <div class="page-header-copy">
+          <p class="eyebrow">Recherche et distribution</p>
+          <h1>Prowlarr</h1>
+          <p class="page-subtitle">14 indexeurs opérationnels sur 16 · dernier test il y a 6 min · 2 alertes système à examiner.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="icon-button" type="button" aria-label="Actualiser Prowlarr">
+            <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="summary-stats" aria-label="Synthèse Prowlarr">
+        <div class="stat"><strong id="pConn">OK</strong><span>Connexion</span></div>
+        <div class="stat"><strong>14</strong><span>Indexeurs actifs</span></div>
+        <div class="stat"><strong>2</strong><span>Indexeurs en erreur</span></div>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Vues Prowlarr">
+        <button class="tab on" data-ptab="pIndexers" role="tab" aria-selected="true" type="button">Indexeurs</button>
+        <button class="tab" data-ptab="pSearch" role="tab" aria-selected="false" type="button">Recherche</button>
+        <button class="tab" data-ptab="pApps" role="tab" aria-selected="false" type="button">Applications</button>
+        <button class="tab" data-ptab="pHealth" role="tab" aria-selected="false" type="button">Santé <span id="pHealthCount">(2)</span></button>
+      </div>
+
+      <div class="view" id="pIndexers">
+        <div class="panel-head" style="display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <div><h2 style="font-size:1.35rem">Indexeurs</h2><p class="page-subtitle" style="font-size:0.88rem">14 affichés sur 16.</p></div>
+          <button class="button secondary" type="button">Tester tous</button>
+        </div>
+        <form class="filters" style="position:static;grid-template-columns:repeat(2,minmax(160px,1fr)) 1fr 1fr 1fr auto" aria-label="Filtres indexeurs" onsubmit="return false">
+          <label>Recherche <input type="search" placeholder="Nom" autocomplete="off"></label>
+          <label>État<select><option>Tous</option><option>Actifs</option><option>Désactivés</option><option>En erreur</option></select></label>
+          <label>Protocole<select><option>Tous</option><option>Torznab</option><option>Newznab</option></select></label>
+          <label>Tag<select><option>Tous</option><option>Films</option><option>Séries</option></select></label>
+          <label>Tri<select><option>Nom</option><option>Priorité</option><option>État</option></select></label>
+          <button class="button secondary" type="button">Réinitialiser</button>
+        </form>
+        <div class="table-shell">
+          <table class="data-table" aria-label="Indexeurs">
+            <thead>
+              <tr>
+                <th>Nom</th><th>Protocole</th><th>État</th><th style="text-align:right">Priorité</th><th>Tags</th>
+                <th style="text-align:right">Catégories</th><th>Dernier test</th><th style="text-align:right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="indexerRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="view" id="pSearch" hidden>
+        <div class="panel-head"><div><h2 style="font-size:1.35rem">Recherche de releases</h2><p class="page-subtitle" style="font-size:0.88rem">Saisir une requête pour interroger Prowlarr.</p></div></div>
+        <form class="search-form" onsubmit="return false">
+          <label>Requête <input type="search" id="pQuery" placeholder="Ex. Dune 2160p" autocomplete="off"></label>
+          <fieldset class="category-picker">
+            <legend>Catégories</legend>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <span class="choice-pill"><input type="checkbox" checked> Films</span>
+              <span class="choice-pill"><input type="checkbox" checked> Séries</span>
+              <span class="choice-pill"><input type="checkbox"> Musique</span>
+              <span class="choice-pill"><input type="checkbox"> Logiciels</span>
+            </div>
+          </fieldset>
+          <fieldset class="indexer-picker">
+            <legend>Indexeurs</legend>
+            <div class="picker-actions">
+              <button class="button secondary" type="button">Tout sélectionner</button>
+              <button class="button secondary" type="button">Tout désélectionner</button>
+            </div>
+            <select multiple size="3" style="width:100%;min-height:110px">
+              <option selected>MonPirate — Torznab (Films)</option>
+              <option selected>SceneHub — Torznab (Films, Séries)</option>
+              <option selected>AudioTrak — Torznab (Musique)</option>
+              <option>PublicIndex — Newznab</option>
+            </select>
+          </fieldset>
+          <button class="button primary" type="submit" id="pRunSearch">Rechercher</button>
+        </form>
+        <div class="filters" style="position:static;grid-template-columns:repeat(6,minmax(0,1fr))" aria-label="Filtres résultats">
+          <label>Dans les résultats <input type="search" id="pResultSearch" placeholder="Filtrer" autocomplete="off"></label>
+          <label>Indexer<select><option>Tous</option><option>MonPirate</option><option>SceneHub</option><option>AudioTrak</option></select></label>
+          <label>Protocole<select><option>Tous</option><option>Torznab</option><option>Newznab</option></select></label>
+          <label>Catégorie <input type="search" autocomplete="off"></label>
+          <label>Taille max (Go) <input type="number" min="0" step="1"></label>
+          <label>Tri<select><option>Seeders</option><option>Taille</option><option>Âge</option><option>Indexer</option></select></label>
+        </form>
+        <div class="table-shell">
+          <table class="data-table" aria-label="Résultats de recherche">
+            <thead>
+              <tr>
+                <th>Titre</th><th>Indexer</th><th>Catégorie</th><th style="text-align:right">Taille</th><th>Âge</th>
+                <th style="text-align:right">Seed</th><th style="text-align:right">Leech</th><th>Protocole</th><th>Ratio</th>
+                <th style="text-align:right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="resultRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="view" id="pApps" hidden>
+        <div class="panel-head"><div><h2 style="font-size:1.35rem">Applications connectées</h2><p class="page-subtitle" style="font-size:0.88rem">Lecture seule.</p></div></div>
+        <div class="card-grid">
+          <div class="app-card">
+            <div class="app-card-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h5M8 15h8"/></svg>
+              <strong>Radarr</strong>
+              <span class="badge ok" style="margin-left:auto"><span class="dot"></span>Connecté</span>
+            </div>
+            <div class="meta"><span>5 indexeurs liés</span><span>Dernière synchronisation · il y a 2 min</span></div>
+          </div>
+          <div class="app-card">
+            <div class="app-card-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h5M8 15h8"/></svg>
+              <strong>Sonarr</strong>
+              <span class="badge ok" style="margin-left:auto"><span class="dot"></span>Connecté</span>
+            </div>
+            <div class="meta"><span>6 indexeurs liés</span><span>Dernière synchronisation · il y a 2 min</span></div>
+          </div>
+          <div class="app-card">
+            <div class="app-card-head">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg>
+              <strong>Jellyseerr</strong>
+              <span class="badge warn" style="margin-left:auto"><span class="dot"></span>Dégradé</span>
+            </div>
+            <div class="meta"><span>3 indexeurs liés</span><span>Dernière synchronisation · il y a 12 min</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="pHealth" hidden>
+        <div class="panel-head"><div><h2 style="font-size:1.35rem">Santé et événements</h2><p class="page-subtitle" style="font-size:0.88rem">Alertes système et historique récent.</p></div></div>
+        <div class="split">
+          <div>
+            <h3>Alertes</h3>
+            <div class="list">
+              <div class="list-item error">
+                <strong>Indexer injoignable depuis 6 min</strong>
+                <span class="sub">SceneHub · erreur de connexion, 3 tentatives échouées.</span>
+              </div>
+              <div class="list-item warn">
+                <strong>API interne ralentie</strong>
+                <span class="sub">Temps de réponse supérieur à 8 s.</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <h3>Historique récent</h3>
+            <div class="list">
+              <div class="list-item">
+                <strong>Capture envoyée vers qBittorrent</strong>
+                <span class="sub">Dune.Part.Two.2024.2160p · il y a 4 min</span>
+              </div>
+              <div class="list-item">
+                <strong>Test d'indexer réussi</strong>
+                <span class="sub">MonPirate · il y a 8 min</span>
+              </div>
+              <div class="list-item">
+                <strong>Synchronisation des applications</strong>
+                <span class="sub">Radarr, Sonarr · il y a 12 min</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= ACCUEIL (HOMEPAGE) ================= -->
+    <section class="screen homepage-screen" data-screen="homepage" aria-label="Accueil" hidden>
+      <div class="demo-controls">
+        <span class="demo-tag">Démo</span>
+        <span class="dnd-hint">Aperçu de la page d'accueil Homepage, thématisée avec le design system.</span>
+      </div>
+
+      <div class="hp-hero">
+        <p class="eyebrow">Centre de contrôle</p>
+        <h1>Bonsoir.</h1>
+        <p class="hp-date" id="hpDate">jeudi 3 août 2026 · 21:04</p>
+      </div>
+
+      <div class="hp-widget">
+        <div class="hp-search">
+          <input type="search" placeholder="Rechercher sur le web…" autocomplete="off" aria-label="Rechercher">
+          <button class="button primary" type="button">Rechercher</button>
+        </div>
+      </div>
+
+      <div class="homepage-grid">
+        <div class="hp-card">
+          <div class="hp-card-head">
+            <span class="hp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"/></svg></span>
+            <strong>qBittorrent</strong>
+            <span class="badge ok" style="margin-left:auto"><span class="dot"></span>En ligne</span>
+          </div>
+          <div class="meta" style="display:grid;gap:4px">
+            <span style="font-size:1.15rem;font-weight:700;font-variant-numeric:tabular-nums">9 actifs</span>
+            <span style="color:var(--text-subtle);font-size:0.82rem">42,3 Mo/s ↓ · 1,5 Mo/s ↑</span>
+          </div>
+        </div>
+        <div class="hp-card">
+          <div class="hp-card-head">
+            <span class="hp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg></span>
+            <strong>Prowlarr</strong>
+            <span class="badge warn" style="margin-left:auto"><span class="dot"></span>Dégradé</span>
+          </div>
+          <div class="meta" style="display:grid;gap:4px">
+            <span style="font-size:1.15rem;font-weight:700;font-variant-numeric:tabular-nums">14 / 16 indexeurs</span>
+            <span style="color:var(--text-subtle);font-size:0.82rem">2 alertes à examiner</span>
+          </div>
+        </div>
+        <div class="hp-card">
+          <div class="hp-card-head">
+            <span class="hp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h5M8 15h8"/></svg></span>
+            <strong>Jellyfin</strong>
+            <span class="badge ok" style="margin-left:auto"><span class="dot"></span>En ligne</span>
+          </div>
+          <div class="meta" style="display:grid;gap:4px">
+            <span style="font-size:1.15rem;font-weight:700">3 lectures en cours</span>
+            <span style="color:var(--text-subtle);font-size:0.82rem">Bibliothèques synchronisées</span>
+          </div>
+        </div>
+        <div class="hp-card">
+          <div class="hp-card-head">
+            <span class="hp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></span>
+            <strong>Cloud</strong>
+            <span class="badge ok" style="margin-left:auto"><span class="dot"></span>Prêt</span>
+          </div>
+          <div class="disk-meter">
+            <div class="labels"><span>2,0 To utilisés</span><span>62 %</span></div>
+            <div class="track"><div class="fill" style="width:62%"></div></div>
+            <div class="labels" style="margin-top:8px"><span>Capacité : 3,2 To</span><span>1,2 To libres</span></div>
+          </div>
+        </div>
+        <div class="hp-card">
+          <div class="hp-card-head">
+            <span class="hp-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4.75 18.5 7v5.25c0 4.2-2.6 6.8-6.5 7.99-3.9-1.19-6.5-3.79-6.5-7.99V7z"/></svg></span>
+            <strong>Montage média</strong>
+            <span class="badge ok" style="margin-left:auto"><span class="dot"></span>Actif</span>
+          </div>
+          <div class="meta" style="display:grid;gap:4px">
+            <span style="font-size:1.15rem;font-weight:700;font-variant-numeric:tabular-nums">8,1 Mo/s ↑</span>
+            <span style="color:var(--text-subtle);font-size:0.82rem">rclone · FUSE monté</span>
+          </div>
+        </div>
+        <div class="hp-widget">
+          <div class="labels"><span>Stockage média</span><span>2,0 To / 3,2 To</span></div>
+          <div class="disk-meter">
+            <div class="track"><div class="fill" style="width:62%"></div></div>
+          </div>
+          <div class="labels" style="margin-top:4px"><span>1,2 To libres · 10 248 fichiers</span><span>62 %</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CONSOLE (Activité · Système · Médias · Santé) ================= -->
+    <section class="screen console-screen" data-screen="console" aria-label="Console" hidden>
+      <div class="demo-controls">
+        <span class="demo-tag">Démo</span>
+        <span class="dnd-hint">Écrans console : Activité · Système · Médias · Santé.</span>
+      </div>
+
+      <div class="page-header">
+        <div class="page-header-copy">
+          <p class="eyebrow" id="consoleEyebrow">Observabilité</p>
+          <h1 id="consoleTitle">Santé</h1>
+          <p class="page-subtitle" id="consoleSub">Surveillance des services et du stockage.</p>
+        </div>
+        <div class="page-header-actions">
+          <button class="icon-button" type="button" aria-label="Actualiser">
+            <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Vues console">
+        <button class="tab" data-ctab="activity" role="tab" aria-selected="false" type="button">Activité</button>
+        <button class="tab" data-ctab="storage" role="tab" aria-selected="false" type="button">Système</button>
+        <button class="tab" data-ctab="media" role="tab" aria-selected="false" type="button">Médias</button>
+        <button class="tab on" data-ctab="health" role="tab" aria-selected="true" type="button">Santé</button>
+      </div>
+
+      <div class="console-summary" id="consoleSummary" aria-label="Synthèse"></div>
+      <div class="console-grid">
+        <div class="console-card" id="consoleA"></div>
+        <div class="console-card" id="consoleB"></div>
+      </div>
+    </section>
+
+    <!-- ================= PLACEHOLDER ================= -->
+    <section class="screen" data-screen="placeholder" hidden>
+      <div class="ph-screen">
+        <div class="ph-ic" id="phIcon">
+          <svg viewBox="0 0 24 24"><path d="M12 8v8m-4-4h8"/><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
+        </div>
+        <h2 id="phTitle">Écran à venir</h2>
+        <p id="phDesc">Cet écran n'est pas inclus dans l'aperçu. La refonte y appliquera le même shell, les mêmes composants et le même langage visuel.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+/* ============ Navigation entre écrans (simulée) ============ */
+const screens = document.querySelectorAll("[data-screen]");
+const navLinks = document.querySelectorAll("[data-goto]");
+let consoleRequest = null;
+function activate(name) {
+  screens.forEach(s => { s.hidden = s.dataset.screen !== name; });
+  navLinks.forEach(a => {
+    const on = a.dataset.goto === name;
+    a.classList.toggle("active", on);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  if (name === "overview") runCounters();
+  if (name === "console" && consoleRequest) {
+    setConsoleTab(consoleRequest);
+    consoleRequest = null;
+  }
+}
+navLinks.forEach(a => {
+  a.addEventListener("click", e => {
+    e.preventDefault();
+    if (a.dataset.console) consoleRequest = a.dataset.console;
+    const name = a.dataset.goto;
+    if (name === "placeholder") {
+      const label = a.dataset.name || "Écran";
+      document.getElementById("phTitle").textContent = label;
+      document.getElementById("phDesc").textContent = "Écran à venir dans l'aperçu. Même shell, mêmes composants, même langage visuel que les autres vues.";
+    }
+    activate(name);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  });
+});
+
+/* ============ Sticky filters ============ */
+const filtersEl = document.getElementById("torrentFilters");
+if ("IntersectionObserver" in window && filtersEl) {
+  const sentinel = document.createElement("div");
+  filtersEl.parentNode.insertBefore(sentinel, filtersEl);
+  new IntersectionObserver(([e]) => {
+    filtersEl.classList.toggle("is-stuck", !e.isIntersecting);
+  }, { rootMargin: "-66px 0px 0px 0px" }).observe(sentinel);
+}
+
+/* ============ Compteurs (une seule animation) ============ */
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let countersDone = false;
+function animateCount(el, to, suffix) {
+  if (reduced || countersDone) { el.textContent = to; return; }
+  const dur = 700, t0 = performance.now();
+  (function step(t) {
+    const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    const v = Math.round(to * e);
+    el.textContent = (v).toLocaleString("fr-FR") + (suffix || "");
+    if (p < 1) requestAnimationFrame(step);
+  })(t0);
+}
+function runCounters() { countersDone = true; }
+
+/* ============ Sparkline ============ */
+function spark(values) {
+  const w = 130, h = 44, pad = 3;
+  const max = Math.max(...values, 1);
+  const pts = values.map((v, i) => {
+    const x = pad + (i / (values.length - 1 || 1)) * (w - 2 * pad);
+    const y = h - pad - (v / max) * (h - 2 * pad);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  });
+  const last = pts[pts.length - 1].split(",");
+  return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+    '<polyline points="' + pts.join(" ") + '"/>' +
+    '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="3"/>' +
+    '</svg>';
+}
+
+/* ============ Vue d'ensemble : données ============ */
+const metrics = [
+  { label: "Débit global", value: "42,3", suffix: " Mo/s", meta: "Réception · cumul sur 1 h", icon: '<svg viewBox="0 0 24 24"><path d="M3 17h3l2-4 3 6 3-9 2 4h5"/></svg>', hist: [8,14,22,18,30,34,42,39,45,42] },
+  { label: "Torrents actifs", value: "9", suffix: "", meta: "3 en attente · 1 en erreur", icon: '<svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"/></svg>', hist: [4,6,5,8,7,9,9,10,8,9] },
+  { label: "Indexeurs opérationnels", value: "14", suffix: " / 16", meta: "2 à surveiller · dernier test il y a 6 min", icon: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg>', hist: [12,13,14,13,14,14,15,14,14,14] },
+];
+const metricCards = (loading) => metrics.map(m =>
+  (loading
+    ? '<div class="metric-card skeleton-block" role="status"><div class="skeleton s-line xs"></div><div class="skeleton s-line" style="width:70%"></div><div class="skeleton s-line" style="width:45%"></div></div>'
+    : '<div class="metric-card" tabindex="0">' +
+      '<div class="metric-top"><span class="metric-icon" aria-hidden="true">' + m.icon + '</span>' +
+      '<div><div class="metric-label">' + m.label + '</div><div class="metric-meta">' + m.meta + '</div></div></div>' +
+      '<div class="metric-value" data-to="' + m.value + '" data-suffix="' + m.suffix + '">' + m.value + m.suffix + '</div>' +
+      '<div class="sparkline">' + spark(m.hist) + '</div>' +
+      '</div>')
+).join("");
+
+const services = [
+  { name: "qBittorrent", detail: "Tunnel SSH · vérifié il y a 12 s", status: "Opérationnel", cls: "", icon: '<svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"/></svg>' },
+  { name: "Prowlarr", detail: "Tunnel SSH · vérifié il y a 6 min", status: "Dégradé", cls: "warn", icon: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg>' },
+  { name: "Jellyfin", detail: "Bibliothèques synchronisées · il y a 3 min", status: "Opérationnel", cls: "", icon: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h5M8 15h8"/></svg>' },
+  { name: "Montage rclone", detail: "FUSE actif · rafraîchi il y a 40 s", status: "Opérationnel", cls: "", icon: '<svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg>' },
+];
+const serviceRows = (loading) => loading
+  ? '<div class="skeleton s-line" style="height:52px"></div>'.repeat(4)
+  : services.map(s =>
+      '<div class="service-row ' + s.cls + '" tabindex="0">' +
+        '<div class="service-row-main"><span class="service-row-icon" aria-hidden="true">' + s.icon + '</span>' +
+        '<div class="service-row-copy"><strong>' + s.name + '</strong><span>' + s.detail + '</span></div></div>' +
+        '<div class="service-row-status"><span class="dot"></span>' + s.status + '</div>' +
+        '<span class="chev" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg></span>' +
+      '</div>'
+    ).join("");
+
+const activity = [
+  { icon: "success", svg: '<svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/></svg>', title: "Mise en pause automatique levée", sub: "qBittorrent · il y a 2 min" },
+  { icon: "success", svg: '<svg viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>', title: "Dune.Part.Two.2024 transféré", sub: "Automatisation médias · il y a 9 min" },
+  { icon: "warning", svg: '<svg viewBox="0 0 24 24"><path d="M12 9v4m0 3.5h.01"/><path d="M10.3 4.6 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/></svg>', title: "Prowlarr lent à répondre", sub: "Santé · il y a 6 min" },
+];
+const activityHtml = (loading) => loading
+  ? '<div class="skeleton s-line" style="height:64px"></div>'.repeat(3)
+  : activity.map(a =>
+      '<div class="activity-item">' +
+        '<span class="activity-icon ' + a.icon + '" aria-hidden="true">' + a.svg + '</span>' +
+        '<div class="activity-copy"><strong>' + a.title + '</strong><span>' + a.sub + '</span></div>' +
+      '</div>'
+    ).join("");
+
+function renderOverview(loading) {
+  document.getElementById("metricsGrid").innerHTML = metricCards(loading);
+  document.getElementById("servicesList").innerHTML = serviceRows(loading);
+  document.getElementById("activityList").innerHTML = activityHtml(loading);
+}
+function setIncident(on) {
+  const t = document.getElementById("ovTitle");
+  const s = document.getElementById("ovSummary");
+  const b = document.getElementById("ovBadge");
+  const bt = document.getElementById("ovBadgeText");
+  const dot = b.querySelector(".status-dot");
+  const alerts = document.getElementById("ovAlerts");
+  const navCount = document.getElementById("navAlertCount");
+  if (on) {
+    t.textContent = "2 services en difficulté.";
+    t.classList.add("is-warning");
+    s.textContent = "Prowlarr répond lentement et le montage rclone doit être rafraîchi. Aucun impact sur les téléchargements en cours.";
+    b.classList.add("is-warning"); bt.textContent = "Dégradé · vérifié à l'instant";
+    dot.classList.add("warn");
+    alerts.hidden = false;
+    alerts.innerHTML =
+      '<div class="alert-item critical" role="alert">' +
+        '<div class="alert-head"><span class="severity-pill critical">Critique</span><strong>Prowlarr injoignable depuis 6 min</strong><span class="time">il y a 6 min</span></div>' +
+        '<p>Cause : tunnel SSH lent. Impact : recherche et indexeurs indisponibles. <a class="card-link" href="#" onclick="return false">Ouvrir Santé →</a></p>' +
+      '</div>' +
+      '<div class="alert-item warning" role="alert">' +
+        '<div class="alert-head"><span class="severity-pill warning">Avertissement</span><strong>Montage rclone à rafraîchir</strong><span class="time">il y a 40 s</span></div>' +
+        '<p>Le cache du montage média est obsolète. <a class="card-link" href="#" onclick="return false">Rafraîchir →</a></p>' +
+      '</div>';
+    navCount.hidden = false;
+    document.getElementById("sideStatusText").textContent = "2 alertes actives";
+    document.getElementById("sideStatusDot").classList.add("warn");
+    document.getElementById("diskRingFill").classList.add("warn");
+  } else {
+    t.textContent = "Tout fonctionne.\nParfaitement.";
+    t.classList.remove("is-warning");
+    s.textContent = "Aucune alerte critique. Les services restent surveillés en direct.";
+    b.classList.remove("is-warning"); bt.textContent = "Opérationnel · vérifié à l'instant";
+    dot.classList.remove("warn");
+    alerts.hidden = true;
+    navCount.hidden = true;
+    document.getElementById("sideStatusText").textContent = "Tout fonctionne";
+    document.getElementById("sideStatusDot").classList.remove("warn");
+    document.getElementById("diskRingFill").classList.remove("warn");
+  }
+}
+
+/* ============ Toasts ============ */
+function toast(msg, opts) {
+  opts = opts || {};
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = '<span class="msg"></span>';
+  el.querySelector(".msg").textContent = msg;
+  if (opts.action) {
+    const b = document.createElement("button");
+    b.className = "act"; b.type = "button"; b.textContent = opts.action;
+    b.addEventListener("click", () => {
+      el.remove();
+      if (opts.onAction) opts.onAction();
+    });
+    el.appendChild(b);
+  }
+  const x = document.createElement("button");
+  x.className = "x"; x.type = "button"; x.setAttribute("aria-label", "Fermer"); x.textContent = "×";
+  x.addEventListener("click", () => el.remove());
+  el.appendChild(x);
+  document.getElementById("toasts").appendChild(el);
+  if (!opts.sticky) setTimeout(() => { el.classList.add("done"); }, 4200);
+  if (!opts.sticky) setTimeout(() => el.remove(), 5000);
+}
+
+/* ============ Torrents : données ============ */
+const types = {
+  video: '<svg viewBox="0 0 24 24"><path d="M6 4h9l4 4v12H6z"/><path d="M14 4v5h5"/><path d="m10.5 12 4 2.5-4 2.5z"/></svg>',
+  audio: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>',
+  archive: '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12h8m-4-4v8"/></svg>',
+};
+const torrents = [
+  { name: "Oppenheimer.2023.2160p.REMUX.BluRay.mkv", cat: "Films", tag: "4K", type: "video", st: "downloading", stLabel: "En téléchargement", prog: 64, dl: 34.2, ul: 0, ulTotal: 0.4, ratio: 0.0, size: 78.4, eta: "38 min", addedOn: "05/08" },
+  { name: "Dune.Part.Two.2024.2160p.WEB-DL.mkv", cat: "Films", tag: "4K", type: "video", st: "downloading", stLabel: "En téléchargement", prog: 87, dl: 18.4, ul: 0.12, ulTotal: 1.2, ratio: 0.12, size: 41.2, eta: "12 min", addedOn: "03/08" },
+  { name: "Mémoire.Végétale.2022.FLAC.24bit", cat: "Musique", tag: "FLAC", type: "audio", st: "seeding", stLabel: "En partage", prog: 100, dl: 0, ul: 0.24, ulTotal: 12.8, ratio: 3.84, size: 1.9, eta: "∞", addedOn: "28/07" },
+  { name: "The.Wire.S01-S05.1080p.BluRay.x264", cat: "Séries", tag: "REMUX", type: "video", st: "seeding", stLabel: "En partage", prog: 100, dl: 0, ul: 1.1, ulTotal: 248.2, ratio: 5.21, size: 128.0, eta: "∞", addedOn: "12/07" },
+  { name: "Ubuntu.24.04.1.Desktop.amd64.iso", cat: "Logiciels", tag: "", type: "archive", st: "downloading", stLabel: "En téléchargement", prog: 23, dl: 6.1, ul: 0, ulTotal: 0, ratio: 0.0, size: 5.9, eta: "9 min", addedOn: "07/08" },
+  { name: "The.Matrix.1999.4K.HDR.HEVC.mkv", cat: "Films", tag: "4K", type: "video", st: "paused", stLabel: "En pause", prog: 42, dl: 0, ul: 0, ulTotal: 31.6, ratio: 1.02, size: 52.3, eta: "—", addedOn: "01/08" },
+  { name: "Kind.of.Blue.1959.HDtracks.24-192", cat: "Musique", tag: "FLAC", type: "audio", st: "seeding", stLabel: "En partage", prog: 100, dl: 0, ul: 0.086, ulTotal: 6.4, ratio: 2.7, size: 3.2, eta: "∞", addedOn: "20/07" },
+  { name: "Archive.tv.specials.2025.2160p.mkv", cat: "Séries", tag: "REMUX", type: "video", st: "queued", stLabel: "En attente", prog: 0, dl: 0, ul: 0, ulTotal: 0, ratio: 0.0, size: 24.8, eta: "—", addedOn: "08/08" },
+];
+const fmtNum = (n, max = 1) => (n).toLocaleString("fr-FR", { maximumFractionDigits: max });
+const fmtGB = (n) => (n ? fmtNum(n) + " Go" : "—");
+const fmtSpeed = (n) => (n ? fmtNum(n) + " Mo/s" : "—");
+const fmtRatio = (n) => (n ? fmtNum(n, 2) : "—");
+
+const sortState = { key: "progress", dir: "desc" };
+let tQuery = "";
+let tQuick = "all";
+const TYPE_LABEL = { video: "Vidéo", audio: "Audio", archive: "Archive" };
+
+function rowHtml(t, nameHtml) {
+  return '<tr>' +
+    '<td><input type="checkbox" aria-label="Sélectionner ' + t.name + '" style="width:16px;height:16px"></td>' +
+    '<td><div class="torrent-name"><span class="type-ic" aria-hidden="true">' + types[t.type] + '</span><span class="name">' + nameHtml + '</span></div></td>' +
+    '<td><span class="status-badge ' + t.st + '"><span class="dot"></span>' + t.stLabel + '</span></td>' +
+    '<td><div class="progress-cell"><div class="progress-track"><div class="progress-fill' + (t.prog === 100 ? " ok" : "") + '" style="width:' + t.prog + '%"></div></div><span class="pct">' + t.prog + '%</span></div></td>' +
+    '<td style="text-align:right">' + fmtSpeed(t.dl) + '</td>' +
+    '<td style="text-align:right">' + fmtSpeed(t.ul) + '</td>' +
+    '<td style="text-align:right" title="Total téléversé">' + fmtGB(t.ulTotal) + '</td>' +
+    '<td style="text-align:right">' + fmtRatio(t.ratio) + '</td>' +
+    '<td style="text-align:right">' + fmtGB(t.size) + '</td>' +
+    '<td>' + t.eta + '</td>' +
+    '<td>' + t.addedOn + '</td>' +
+    '<td><div class="row-actions">' +
+      '<button type="button" aria-label="Reprendre"><svg viewBox="0 0 24 24"><path d="M7 4v16l12-8z"/></svg></button>' +
+      '<button type="button" aria-label="Mettre en pause"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></button>' +
+      '<button type="button" class="danger" aria-label="Supprimer"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7"/></svg></button>' +
+    '</div></td>' +
+  '</tr>';
+}
+
+function activeList() {
+  const key = sortState.key, dir = sortState.dir === "asc" ? 1 : -1;
+  return [...torrents]
+    .filter(t => {
+      if (tQuick === "active") return ["downloading", "waiting", "seeding"].includes(t.st);
+      if (tQuick === "error") return t.st === "queued" || t.st === "paused"; /* démo : simule "à surveiller" */
+      if (tQuick === "complete") return t.prog === 100;
+      if (tQuick === "paused") return t.st === "paused";
+      return true;
+    })
+    .sort((a, b) => {
+      let av = a[key], bv = b[key];
+      if (av == null || bv == null) return 0;
+      if (typeof av === "number" && typeof bv === "number") return (av - bv) * dir;
+      return String(av).localeCompare(String(bv), "fr") * dir;
+    });
+}
+
+function renderTorrents() {
+  const q = tQuery.trim().toLowerCase();
+  const list = activeList().filter(t => !q || t.name.toLowerCase().includes(q));
+  document.getElementById("tBody").innerHTML = list.map(t => {
+    let nameHtml = t.name;
+    if (q) {
+      const i = t.name.toLowerCase().indexOf(q);
+      if (i >= 0) nameHtml = t.name.slice(0, i) + "<mark>" + t.name.slice(i, i + q.length) + "</mark>" + t.name.slice(i + q.length);
+    }
+    return rowHtml(t, nameHtml);
+  }).join("");
+  document.getElementById("tCount").textContent = list.length + " torrents affichés · recherche instantanée avec surlignage";
+  updateSortHeads();
+}
+
+function updateSortHeads() {
+  document.querySelectorAll(".sort-head").forEach(b => {
+    if (b.dataset.sort === sortState.key) {
+      b.classList.add("active");
+      b.setAttribute("aria-sort", sortState.dir === "asc" ? "ascending" : "descending");
+    } else {
+      b.classList.remove("active");
+      b.removeAttribute("aria-sort");
+    }
+  });
+}
+document.querySelectorAll(".sort-head").forEach(b => {
+  b.addEventListener("click", () => {
+    const k = b.dataset.sort;
+    if (sortState.key === k) sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    else { sortState.key = k; sortState.dir = "asc"; }
+    renderTorrents();
+  });
+});
+
+/* Tri via le select (miroir des en-têtes) */
+document.getElementById("tSort").addEventListener("change", (e) => {
+  const map = {
+    "Priorité opérationnelle": "progress", "Nom": "name", "État": "state",
+    "Progression": "progress", "Vitesse descendante": "downloadSpeed",
+    "Vitesse montante": "uploadSpeed", "Uploadé": "uploaded", "Ratio": "ratio",
+    "Taille": "size", "ETA": "eta", "Date d'ajout": "addedOn",
+  };
+  sortState.key = map[e.target.value] || "progress";
+  renderTorrents();
+});
+document.getElementById("tDir").addEventListener("change", (e) => {
+  sortState.dir = e.target.value === "Croissant" ? "asc" : "desc";
+  renderTorrents();
+});
+
+/* Recherche avec surlignage */
+document.getElementById("tSearch").addEventListener("input", (e) => {
+  tQuery = e.target.value;
+  renderTorrents();
+});
+
+/* Filtres rapides */
+document.querySelectorAll("#quickPills button").forEach(b => {
+  b.addEventListener("click", () => {
+    tQuick = b.dataset.quick;
+    document.querySelectorAll("#quickPills button").forEach(x => {
+      const on = x === b;
+      x.classList.toggle("on", on);
+      x.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    renderTorrents();
+  });
+});
+
+/* Densité */
+document.querySelectorAll("[data-density]").forEach(b => {
+  b.addEventListener("click", () => {
+    const screen = document.querySelector(".torrents-screen");
+    const compact = b.dataset.density === "compact";
+    screen.classList.toggle("compact", compact);
+    document.querySelectorAll("[data-density]").forEach(x => {
+      x.classList.toggle("on", x === b);
+      x.setAttribute("aria-pressed", x === b ? "true" : "false");
+    });
+  });
+});
+
+/* ============ Cloud : données ============ */
+const fileIcons = {
+  folder: '<svg class="ic" viewBox="0 0 24 24"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>',
+  video: '<svg class="ic" viewBox="0 0 24 24"><path d="M6 4h9l4 4v12H6z"/><path d="M14 4v5h5"/><path d="m10.5 12 4 2.5-4 2.5z"/></svg>',
+  audio: '<svg class="ic" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>',
+  image: '<svg class="ic" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m5 18 5-5 3 3 3-3 4 4"/></svg>',
+  pdf: '<svg class="ic" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4"/><path d="M9.5 12v4m-2-2h3"/></svg>',
+  archive: '<svg class="ic" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8 12h8m-4-4v8"/></svg>',
+};
+const gradThumb = function (c1, c2) {
+  return '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><defs><linearGradient x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + c1 + '"/><stop offset="1" stop-color="' + c2 + '"/></linearGradient></defs><rect width="120" height="80" fill="url(#g' + c1.replace(/[^a-z0-9]/gi, "") + ')" opacity="0"/><rect width="120" height="80" fill="url(#grad' + Math.random().toString(36).slice(2, 8) + ')"/></svg>';
+};
+const files = [
+  { name: "2026-08-01_soiree", kind: "folder", size: "—", date: "Hier 22:41", thumb: "folder", grad: 0 },
+  { name: "Dune.Part.Two.2024.2160p.mkv", kind: "video", size: "41,2 Go", date: "il y a 3 jours", thumb: "video", grad: 1 },
+  { name: "Paysages.alpins.ete.jpg", kind: "image", size: "4,8 Mo", date: "il y a 5 jours", thumb: "image", grad: 2 },
+  { name: "Oppenheimer.2023.1080p.mkv", kind: "video", size: "12,6 Go", date: "la semaine dernière", thumb: "video", grad: 3 },
+  { name: "Best.of.Jazz.2025.flac", kind: "audio", size: "920 Mo", date: "la semaine dernière", thumb: "audio", grad: 4 },
+  { name: "Rapport.backup.2026-07.pdf", kind: "pdf", size: "1,2 Mo", date: "il y a 12 jours", thumb: "pdf", grad: 5 },
+  { name: "Photos.famille.2025.zip", kind: "archive", size: "8,4 Go", date: "il y a 2 semaines", thumb: "archive", grad: 6 },
+];
+const grads = [
+  ["#3b3b63", "#20203a"], ["#4a3a6b", "#262038"], ["#5b4a6e", "#2b2238"],
+  ["#3a4a6b", "#1f2838"], ["#2f5b4a", "#1d3328"], ["#6b3a45", "#3a1f26"],
+  ["#5b5b2f", "#2f3320"],
+];
+function fileRows() {
+  return files.map((f, i) =>
+    '<tr data-fname="' + f.name + '" data-fmeta="' + f.size + ' · ' + f.date + '" data-kind="' + f.kind + '">' +
+      '<td><input type="checkbox" aria-label="Sélectionner ' + f.name + '" style="width:16px;height:16px"></td>' +
+      '<td><div class="file-row">' +
+        '<span class="file-thumb ' + f.kind + '" data-thumb="1">' +
+          (f.kind === "image" || f.kind === "video"
+            ? '<svg viewBox="0 0 120 80" preserveAspectRatio="xMidYMid slice"><defs><linearGradient x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + grads[i % grads.length][0] + '"/><stop offset="1" stop-color="' + grads[i % grads.length][1] + '"/></linearGradient></defs><rect width="120" height="80" fill="url(#g' + i + ')"/><circle cx="88" cy="26" r="12" fill="none" stroke="#7c6cff" stroke-width="3" opacity="0.85"/></svg>'
+            : fileIcons[f.kind]) +
+        '</span>' +
+        '<div><div class="file-name">' + f.name + '</div><div class="file-meta">' + (f.kind === "folder" ? "Dossier" : f.size) + '</div></div>' +
+      '</div></td>' +
+      '<td style="text-align:right">' + f.size + '</td>' +
+      '<td>' + f.date + '</td>' +
+      '<td style="text-align:right"><button class="row-fav" type="button" aria-label="Ajouter aux favoris">☆</button></td>' +
+    '</tr>'
+  ).join("");
+}
+document.getElementById("fBody").innerHTML = fileRows();
+
+/* Aperçu rapide au survol + sélection + drag & drop */
+const pop = document.getElementById("previewPop");
+const popTitle = document.getElementById("popTitle");
+const popMeta = document.getElementById("popMeta");
+let popTimer = null;
+
+function bindCloudRows() {
+  document.querySelectorAll("#fBody input[type=checkbox]").forEach(cb => {
+    cb.addEventListener("change", () => cb.closest("tr").classList.toggle("is-selected", cb.checked));
+  });
+  document.querySelectorAll("#fBody tr").forEach(tr => {
+    const name = tr.dataset.fname, meta = tr.dataset.fmeta;
+    tr.addEventListener("mouseenter", () => {
+      popTimer = setTimeout(() => {
+        popTitle.textContent = name;
+        popMeta.textContent = meta;
+        const r = tr.getBoundingClientRect();
+        pop.style.left = Math.min(r.right - 280, window.innerWidth - 280 - 16) + "px";
+        pop.style.top = (r.top + r.height / 2 - 70) + "px";
+        pop.hidden = false;
+        requestAnimationFrame(() => pop.classList.add("show"));
+      }, 250);
+    });
+    tr.addEventListener("mouseleave", () => {
+      clearTimeout(popTimer);
+      pop.classList.remove("show");
+      setTimeout(() => { if (!pop.classList.contains("show")) pop.hidden = true; }, 140);
+    });
+    wireDragRow(tr);
+    wireDropRow(tr);
+  });
+}
+bindCloudRows();
+
+/* ---- Drag & drop de déplacement ---- */
+const cloudTable = document.getElementById("fBody").closest(".table-shell");
+let dragItems = [];
+
+function readDrag(e) {
+  const raw = e.dataTransfer.getData("application/x-cloud-item");
+  if (raw) { try { return JSON.parse(raw); } catch { return []; } }
+  return [];
+}
+
+function wireDragRow(tr) {
+  tr.draggable = true;
+  tr.addEventListener("dragstart", (e) => {
+    const selected = Array.from(document.querySelectorAll("#fBody input:checked")).map(cb => cb.closest("tr"));
+    const rows = (selected.length && selected.includes(tr)) ? selected : [tr];
+    dragItems = rows.map(r => ({ name: r.dataset.fname, kind: r.dataset.kind }));
+    rows.forEach(r => r.classList.add("dragging"));
+    e.dataTransfer.setData("application/x-cloud-item", JSON.stringify(dragItems));
+    e.dataTransfer.setData("text/plain", dragItems.map(i => i.name).join(", "));
+    e.dataTransfer.effectAllowed = "move";
+    if (!selected.includes(tr)) {
+      document.querySelectorAll("#fBody input:checked").forEach(cb => { cb.checked = false; cb.closest("tr").classList.remove("is-selected"); });
+    }
+  });
+  tr.addEventListener("dragend", () => {
+    dragItems = [];
+    document.querySelectorAll("#fBody tr.dragging").forEach(r => r.classList.remove("dragging"));
+  });
+}
+
+function wireDropRow(tr) {
+  tr.addEventListener("dragover", (e) => {
+    if (tr.dataset.kind !== "folder") { e.dataTransfer.dropEffect = "none"; return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    tr.classList.add("drop-target");
+  });
+  tr.addEventListener("dragleave", () => tr.classList.remove("drop-target"));
+  tr.addEventListener("drop", (e) => {
+    e.preventDefault();
+    tr.classList.remove("drop-target");
+    const items = readDrag(e);
+    if (items.length) moveItems(items, tr);
+  });
+}
+
+function removeRow(tr) {
+  tr.classList.add("removing");
+  setTimeout(() => tr.remove(), 280);
+}
+
+function moveItems(items, targetRow) {
+  const folder = targetRow.dataset.fname;
+  const names = items.map(i => i.name);
+  const conflict = names.some(n => n === "Dune.Part.Two.2024.2160p.mkv" && folder === "2026-08-01_soiree");
+  const selfFolder = items.some(i => i.kind === "folder" && i.name === folder);
+  if (conflict) {
+    toast("« " + names.join(", ") + " » : un élément portant ce nom existe déjà dans « " + folder + " »");
+    return;
+  }
+  if (selfFolder) {
+    toast("Impossible de déplacer « " + folder + " » dans lui-même");
+    return;
+  }
+  items.forEach(it => {
+    const row = Array.from(document.querySelectorAll("#fBody tr")).find(r => r.dataset.fname === it.name);
+    if (row) removeRow(row);
+  });
+  const badge = document.createElement("span");
+  badge.className = "folder-accept";
+  badge.textContent = "+" + items.length;
+  const nameEl = targetRow.querySelector(".file-name");
+  nameEl.parentNode.insertBefore(badge, nameEl.nextSibling);
+  setTimeout(() => badge.remove(), 2400);
+  toast(items.length === 1
+    ? "« " + items[0].name + " » déplacé vers « " + folder + " »"
+    : items.length + " éléments déplacés vers « " + folder + " »");
+}
+
+/* ---- Fil d'Ariane : cibles de dépôt ---- */
+document.querySelectorAll(".cloud-toolbar .breadcrumb a, .cloud-toolbar .crumb-current").forEach(el => {
+  el.classList.add("drop-path-target");
+  el.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    el.classList.add("drop-target");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drop-target"));
+  el.addEventListener("drop", (e) => {
+    e.preventDefault();
+    el.classList.remove("drop-target");
+    const items = readDrag(e);
+    if (!items.length) return;
+    items.forEach(it => {
+      const row = Array.from(document.querySelectorAll("#fBody tr")).find(r => r.dataset.fname === it.name);
+      if (row) removeRow(row);
+    });
+    toast(items.length === 1
+      ? "« " + items[0].name + " » déplacé vers /mnt/ultra-media/" + el.textContent.trim()
+      : items.length + " éléments déplacés vers /mnt/ultra-media/" + el.textContent.trim());
+  });
+});
+
+/* ---- Table entière : upload depuis le bureau ---- */
+["dragover", "dragenter"].forEach(ev => cloudTable.addEventListener(ev, (e) => {
+  if (dragItems.length) return;
+  if (e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files")) {
+    e.preventDefault();
+    cloudTable.classList.add("is-upload-target");
+    e.dataTransfer.dropEffect = "copy";
+  }
+}));
+["dragleave", "drop"].forEach(ev => cloudTable.addEventListener(ev, (e) => {
+  if (dragItems.length) return;
+  cloudTable.classList.remove("is-upload-target");
+  if (ev === "drop" && e.dataTransfer.files && e.dataTransfer.files.length) {
+    e.preventDefault();
+    toast(e.dataTransfer.files.length === 1
+      ? "« " + e.dataTransfer.files[0].name + " » ajouté à l'upload"
+      : e.dataTransfer.files.length + " fichiers ajoutés à l'upload");
+  }
+}));
+
+/* ---- Réinitialiser la démo ---- */
+document.getElementById("demoResetCloud").addEventListener("click", () => {
+  document.getElementById("fBody").innerHTML = fileRows();
+  bindCloudRows();
+  toast("Démo réinitialisée", { sticky: true });
+});
+
+/* Upload simulé */
+const uploadDemo = document.getElementById("uploadDemo");
+const uploadList = document.getElementById("uploadList");
+const uploadNames = ["IMG_4412.jpg", "IMG_4413.jpg", "Voyage.Corse.2026.zip", "Dune.Part.Two.mkv", "Notes.vacances.txt"];
+document.getElementById("demoUpload").addEventListener("click", () => {
+  uploadDemo.hidden = false;
+  uploadNames.forEach((n, i) => setTimeout(() => addUpload(n, i), i * 350));
+});
+function addUpload(name) {
+  const item = document.createElement("div");
+  item.className = "upload-item";
+  item.innerHTML = '<div class="upload-item-head"><span class="name"></span><span class="pct">0 %</span></div><div class="upload-track"><div class="upload-fill"></div></div>';
+  item.querySelector(".name").textContent = name;
+  uploadList.appendChild(item);
+  const fill = item.querySelector(".upload-fill"), pct = item.querySelector(".pct");
+  let p = 0;
+  const speed = 6 + Math.random() * 10;
+  const iv = setInterval(() => {
+    p = Math.min(100, p + speed);
+    fill.style.width = p + "%";
+    pct.textContent = Math.round(p) + " %";
+    if (p >= 100) {
+      clearInterval(iv);
+      item.classList.add("done");
+      pct.textContent = "Terminé";
+      toast(name + " téléversé");
+    }
+  }, 180);
+}
+const dropZone = document.getElementById("dropZone");
+if (dropZone) {
+  ["dragenter", "dragover"].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove("drag"); }));
+}
+
+/* ============ Prowlarr : données ============ */
+const indexers = [
+  { name: "MonPirate", proto: "Torznab", st: "ok", stLabel: "Actif", prio: 25, tags: ["Films"], cats: 12, last: "il y a 6 min" },
+  { name: "SceneHub", proto: "Torznab", st: "error", stLabel: "Erreur", prio: 50, tags: ["Séries", "Films"], cats: 8, last: "il y a 6 min" },
+  { name: "AudioTrak", proto: "Torznab", st: "ok", stLabel: "Actif", prio: 40, tags: ["Musique"], cats: 6, last: "il y a 9 min" },
+  { name: "PublicIndex", proto: "Newznab", st: "disabled", stLabel: "Désactivé", prio: 100, tags: [], cats: 0, last: "jamais" },
+  { name: "CinemaNow", proto: "Torznab", st: "ok", stLabel: "Actif", prio: 60, tags: ["Films"], cats: 10, last: "il y a 8 min" },
+  { name: "RetroTrak", proto: "Torznab", st: "ok", stLabel: "Actif", prio: 30, tags: ["Séries"], cats: 5, last: "il y a 7 min" },
+  { name: "EbookBay", proto: "Newznab", st: "error", stLabel: "Erreur", prio: 90, tags: ["Livres"], cats: 3, last: "il y a 6 min" },
+  { name: "Demos et Aperçus", proto: "Torznab", st: "ok", stLabel: "Actif", prio: 80, tags: [], cats: 4, last: "il y a 11 min" },
+];
+function renderIndexers() {
+  document.getElementById("indexerRows").innerHTML = indexers.map(i =>
+    '<tr>' +
+      '<td><div class="file-row"><span class="file-thumb folder" style="width:30px;height:30px">' +
+        '<svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg></span>' +
+        '<div><div class="file-name">' + i.name + '</div></div></div></td>' +
+      '<td>' + i.proto + '</td>' +
+      '<td><span class="badge ' + i.st + '"><span class="dot"></span>' + i.stLabel + '</span></td>' +
+      '<td style="text-align:right">' + i.prio + '</td>' +
+      '<td>' + (i.tags.length ? i.tags.map(t => '<span class="tag-badge">' + t + '</span>').join("") : "—") + '</td>' +
+      '<td style="text-align:right">' + i.cats + '</td>' +
+      '<td>' + i.last + '</td>' +
+      '<td><div class="row-actions" style="opacity:1;flex-wrap:wrap;gap:8px">' +
+        '<button type="button" class="button sm secondary ix-test" data-name="' + i.name + '">Tester</button>' +
+        '<button type="button" class="button sm ' + (i.st === "disabled" ? "secondary" : "danger") + ' ix-toggle" data-name="' + i.name + '">' + (i.st === "disabled" ? "Activer" : "Désactiver") + '</button>' +
+      '</div></td>' +
+    '</tr>'
+  ).join("");
+  document.querySelectorAll(".ix-test").forEach(b => {
+    b.addEventListener("click", () => toast("Test de « " + b.dataset.name + " » lancé", { sticky: true }));
+  });
+  document.querySelectorAll(".ix-toggle").forEach(b => {
+    b.addEventListener("click", () => toast("Indexer « " + b.dataset.name + " » modifié (démo)"));
+  });
+}
+
+const results = [
+  { title: "Dune.Part.Two.2024.2160p.WEB-DL", indexer: "MonPirate", cat: "Films", size: 41.2, age: "3 j", seed: 120, leech: 8, proto: "Torznab", freeleech: false, dl: 1, ul: 1 },
+  { title: "Dune.Part.Two.2024.2160p.REMUX", indexer: "SceneHub", cat: "Films", size: 62.1, age: "5 j", seed: 87, leech: 12, proto: "Torznab", freeleech: false, dl: 1, ul: 1 },
+  { title: "Dune.Part.Two.2024.1080p.BluRay", indexer: "AudioTrak", cat: "Films", size: 18.4, age: "1 sem", seed: 240, leech: 4, proto: "Torznab", freeleech: true, dl: 0, ul: 0 },
+  { title: "Dune.Part.Two.2024.720p.WEB.H.264", indexer: "MonPirate", cat: "Films", size: 9.7, age: "4 j", seed: 510, leech: 22, proto: "Torznab", freeleech: false, dl: 1, ul: 0.5 },
+  { title: "Dune.Part.Two.Soundtrack.FLAC", indexer: "AudioTrak", cat: "Musique", size: 0.9, age: "6 j", seed: 33, leech: 2, proto: "Torznab", freeleech: false, dl: 1, ul: 1 },
+];
+const fmtSize = (n) => (n >= 1 ? fmtNum(n) + " Go" : fmtNum(n * 1024) + " Mo");
+let resultQuery = "";
+function renderResults() {
+  const q = resultQuery.trim().toLowerCase();
+  const list = results.filter(r => !q || r.title.toLowerCase().includes(q));
+  document.getElementById("resultRows").innerHTML = list.map((r, i) => {
+    let title = r.title;
+    if (q) {
+      const m = r.title.toLowerCase().indexOf(q);
+      if (m >= 0) title = r.title.slice(0, m) + "<mark>" + r.title.slice(m, m + q.length) + "</mark>" + r.title.slice(m + q.length);
+    }
+    return '<tr>' +
+      '<td><div class="file-name" style="max-width:380px">' + title + '</div></td>' +
+      '<td>' + r.indexer + '</td>' +
+      '<td>' + r.cat + '</td>' +
+      '<td style="text-align:right">' + fmtSize(r.size) + '</td>' +
+      '<td>' + r.age + '</td>' +
+      '<td style="text-align:right;color:var(--success-text)">' + r.seed + '</td>' +
+      '<td style="text-align:right">' + r.leech + '</td>' +
+      '<td>' + r.proto + '</td>' +
+      '<td>' + (r.freeleech ? '<span class="badge ok">Freeleech</span>' : "DL " + r.dl + " / UL " + r.ul) + '</td>' +
+      '<td style="text-align:right"><button class="button primary grab-btn" data-title="' + r.title + '">Envoyer vers qBittorrent</button></td>' +
+    '</tr>';
+  }).join("");
+  document.querySelectorAll(".grab-btn").forEach(b => {
+    b.addEventListener("click", function () {
+      this.textContent = "Envoyé ✓";
+      this.disabled = true;
+      toast("Capture de « " + this.dataset.title + " » envoyée vers qBittorrent");
+    });
+  });
+}
+document.getElementById("pResultSearch").addEventListener("input", (e) => {
+  resultQuery = e.target.value;
+  renderResults();
+});
+document.getElementById("pRunSearch").addEventListener("click", () => {
+  const q = document.getElementById("pQuery").value.trim();
+  if (!q) { toast("Saisir une requête pour rechercher"); return; }
+  toast("Recherche « " + q + " » lancée — " + results.length + " résultats (démo)");
+});
+document.getElementById("demoGrab").addEventListener("click", () => {
+  const b = document.querySelector(".grab-btn");
+  if (b) {
+    b.textContent = "Envoyé ✓";
+    b.disabled = true;
+  }
+  toast("Capture de « Dune.Part.Two.2024.2160p » envoyée vers qBittorrent");
+});
+
+/* Tabs Prowlarr */
+document.querySelectorAll("[data-ptab]").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll("[data-ptab]").forEach(t => {
+      const on = t === tab;
+      t.classList.toggle("on", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.setAttribute("tabindex", on ? "0" : "-1");
+    });
+    document.querySelectorAll(".prowlarr-panel .view").forEach(v => { v.hidden = v.id !== tab.dataset.ptab; });
+  });
+});
+
+/* ============ Boutons de démo ============ */
+document.getElementById("demoSkeleton").addEventListener("click", function () {
+  const on = !(this.getAttribute("aria-pressed") === "true");
+  this.setAttribute("aria-pressed", on);
+  renderOverview(on);
+  if (on) this.textContent = "Afficher les données";
+  else this.textContent = "Simuler le chargement";
+});
+let incidentOn = false;
+document.getElementById("demoIncident").addEventListener("click", function () {
+  incidentOn = !incidentOn;
+  this.setAttribute("aria-pressed", incidentOn);
+  setIncident(incidentOn);
+});
+document.getElementById("demoCounters").addEventListener("click", () => {
+  document.querySelectorAll("[data-to]").forEach(el => animateCount(el, parseFloat(el.dataset.to), el.dataset.suffix));
+});
+document.getElementById("demoToast").addEventListener("click", () => {
+  toast("Dune.Part.Two.2024 mis en pause", {
+    action: "Annuler",
+    onAction: () => toast("Pause annulée", { sticky: true })
+  });
+  toast("Suppression programmée (démo)", {
+    action: "Annuler",
+    onAction: () => toast("Suppression annulée", { sticky: true })
+  });
+});
+
+/* ============ Cloud : vues secondaires ============ */
+const cloudSubviews = { files: "#cview-files", history: "#cview-history", links: "#cview-links", stats: "#cview-stats", favorites: "#cview-favorites" };
+function setCloudView(key) {
+  Object.entries(cloudSubviews).forEach(([k, sel]) => { document.querySelector(sel).hidden = k !== key; });
+  document.querySelectorAll("#cloudViewNav .nav-btn").forEach(b => {
+    const on = b.dataset.cview === key;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+document.querySelectorAll("#cloudViewNav .nav-btn").forEach(b => {
+  b.addEventListener("click", () => setCloudView(b.dataset.cview));
+});
+
+const historyRows = [
+  { date: "Il y a 4 min", file: "Dune.Part.Two.2024.2160p.mkv", size: "41,2 Go", action: "Upload", link: "" },
+  { date: "Il y a 12 min", file: "2026-08-01_soiree/IMG_4412.jpg", size: "4,8 Mo", action: "Upload", link: "" },
+  { date: "Hier", file: "Rapport.backup.2026-07.pdf", size: "1,2 Mo", action: "Téléchargement", link: "dXj3Kp9q2L" },
+  { date: "Il y a 2 jours", file: "Photos.famille.2025.zip", size: "8,4 Go", action: "Upload", link: "" },
+];
+function renderHistory() {
+  document.getElementById("historyBody").innerHTML = historyRows.map(r =>
+    '<tr><td>' + r.date + '</td><td><div class="file-name" style="max-width:320px">' + r.file + '</div></td><td style="text-align:right">' + r.size + '</td><td><span class="badge ok">' + r.action + '</span></td><td style="text-align:right">' + (r.link ? '<span class="token-mono">' + r.link + '</span>' : "—") + '</td></tr>'
+  ).join("");
+}
+
+const linksRows = [
+  { file: "Dune.Part.Two.2024.2160p.mkv", token: "dXj3Kp9q2L", dl: 12, exp: "Dans 5 jours", st: "ok", stLabel: "Actif" },
+  { file: "2026-08-01_soiree/", token: "mZ8sQw2rT", dl: 4, exp: "Dans 2 jours", st: "ok", stLabel: "Actif" },
+  { file: "Photos.famille.2025.zip", token: "bF5vNn1kP", dl: 31, exp: "Dans 12 jours", st: "ok", stLabel: "Actif" },
+];
+function renderLinks() {
+  document.getElementById("linksBody").innerHTML = linksRows.map(r =>
+    '<tr><td><div class="file-name" style="max-width:260px">' + r.file + '</div></td><td><span class="token-mono">' + r.token + '</span></td><td style="text-align:right">' + r.dl + '</td><td>' + r.exp + '</td><td><span class="badge ' + r.st + '"><span class="dot"></span>' + r.stLabel + '</span></td><td style="text-align:right"><button class="button sm secondary" type="button">Copier</button></td></tr>'
+  ).join("");
+}
+
+const cloudStats = [
+  { label: "Liens actifs", value: "6" },
+  { label: "Téléchargements", value: "47" },
+  { label: "Favoris", value: "4" },
+  { label: "Entrées d'historique", value: "128" },
+  { label: "Espace utilisé", value: "2,0 To" },
+  { label: "Espace libre", value: "1,2 To" },
+];
+function renderStats() {
+  document.getElementById("statsGrid").innerHTML = cloudStats.map(s =>
+    '<div class="stat" style="border-radius:var(--radius-card)"><strong>' + s.value + '</strong><span>' + s.label + '</span></div>'
+  ).join("");
+}
+
+const favorites = [
+  { name: "2026-08-01_soiree", detail: "Dossier · modifié hier" },
+  { name: "Films", detail: "Dossier · 214 éléments" },
+  { name: "Musique", detail: "Dossier · 1 402 éléments" },
+];
+function renderFavorites() {
+  document.getElementById("favoritesGrid").innerHTML = favorites.map(f =>
+    '<div class="app-card"><div class="app-card-head"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg><strong>' + f.name + '</strong></div><div class="meta"><span>' + f.detail + '</span></div></div>'
+  ).join("");
+}
+
+/* ============ Console (Activité · Système · Médias · Santé) ============ */
+const CONSOLE = {
+  activity: {
+    eyebrow: "Journal", title: "Activité", sub: "Événements récents et activité de transfert.",
+    summary: [["7", "Aujourd'hui"], ["42", "Sur 7 jours"], ["0", "Alertes"], ["1,5 Mo/s", "Envoi moyen"]],
+    a: '<h3>Activité récente</h3><div class="timeline">' + [
+      { ic: "success", t: "Dune.Part.Two.2024 transféré", s: "Automatisation médias · il y a 9 min" },
+      { ic: "success", t: "Mise en pause automatique levée", s: "qBittorrent · il y a 22 min" },
+      { ic: "warning", t: "Prowlarr lent à répondre", s: "Santé · il y a 6 min" },
+      { ic: "success", t: "Synchronisation des applications", s: "Radarr, Sonarr · il y a 1 h" },
+    ].map(i => '<div class="activity-item"><span class="activity-icon ' + i.ic + '"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17.25v1.5A2.25 2.25 0 0 0 7.25 21h9.5A2.25 2.25 0 0 0 19 18.75v-1.5"/></svg></span><div class="activity-copy"><strong>' + i.t + '</strong><span>' + i.s + '</span></div></div>').join("") + '</div>',
+    b: '<h3>Volume transféré (24 h)</h3><div style="display:grid;gap:14px">' +
+      '<div class="disk-meter"><div class="labels"><span>Téléchargé</span><span>312 Go</span></div><div class="track"><div class="fill" style="width:70%"></div></div></div>' +
+      '<div class="disk-meter"><div class="labels"><span>Téléversé</span><span>48 Go</span></div><div class="track"><div class="fill" style="width:24%"></div></div></div>' +
+      '<div class="notice">Aucune alerte critique. Surveillance en direct.</div>' +
+    '</div>',
+  },
+  storage: {
+    eyebrow: "Stockage", title: "Système", sub: "Disque, montage média et statistiques rclone.",
+    summary: [["62 %", "Disque utilisé"], ["1,2 To", "Libres"], ["8,1 Mo/s", "Vitesse rclone"], ["0", "Erreurs"]],
+    a: '<h3>Espace disque</h3>' +
+      '<div class="disk-meter"><div class="labels"><span>2,0 To utilisés</span><span>3,2 To au total</span></div><div class="track"><div class="fill" style="width:62%"></div></div></div>' +
+      '<p style="color:var(--text-subtle);font-size:0.85rem;margin-top:14px">Montage /mnt/ultra-media · FUSE actif · rafraîchi il y a 40 s.</p>',
+    b: '<h3>Transferts en cours</h3><div class="list">' +
+      '<div class="list-item"><strong>Dune.Part.Two.2024.2160p.mkv</strong><span class="sub">Réception · 18,4 Mo/s</span></div>' +
+      '<div class="list-item"><strong>The.Wire.S01-S05</strong><span class="sub">Envoi · 1,1 Mo/s</span></div>' +
+      '<div class="list-item"><strong>Photos.famille.2025.zip</strong><span class="sub">En attente</span></div>' +
+    '</div>',
+  },
+  media: {
+    eyebrow: "Bibliothèques", title: "Médias", sub: "Contenus récents et état des bibliothèques.",
+    summary: [["3", "En lecture"], ["6", "Bibliothèques"], ["214", "Films"], ["1 402", "Pistes audio"]],
+    a: '<h3>Contenus récents</h3><div class="media-library">' + [
+      { t: "Dune : Part Two (2024)", s: "2160p · HDR · 2 h 46", st: "En cours · 42 min" },
+      { t: "Oppenheimer (2023)", s: "1080p · HEVC", st: "Terminé" },
+      { t: "Kind of Blue — Miles Davis", s: "24-192 · FLAC", st: "En cours · 12 min" },
+    ].map(m => '<div class="media-card"><div class="poster"><svg viewBox="0 0 56 78" preserveAspectRatio="xMidYMid slice"><rect width="56" height="78" fill="#22223a"/><circle cx="28" cy="30" r="11" fill="none" stroke="#7c6cff" stroke-width="3" opacity="0.8"/></svg></div><div class="m-copy"><strong>' + m.t + '</strong><span>' + m.s + '</span></div><span class="m-state">' + m.st + '</span></div>').join("") + '</div>',
+    b: '<h3>Automatisation médias</h3><div class="steps" style="margin-bottom:14px"><span class="step on">Téléchargement</span><span class="step on">Transfert</span><span class="step on">Jellyfin</span><span class="step">rclone</span></div>' +
+      '<div class="notice" style="margin-bottom:10px">Prochain scan Jellyfin dans 4 min.</div>' +
+      '<div class="list"><div class="list-item"><strong>3 transferts automatiques</strong><span class="sub">Dernier il y a 9 min</span></div></div>',
+  },
+  health: {
+    eyebrow: "Observabilité", title: "Santé", sub: "Surveillance des services et du stockage.",
+    summary: [["Dégradé", "État global"], ["2", "Alertes"], ["4/4", "Services surveillés"], ["il y a 12 s", "Dernière vérification"]],
+    a: '<h3>Alertes</h3><div class="list">' +
+      '<div class="list-item error"><strong>Prowlarr injoignable depuis 6 min</strong><span class="sub">Tunnel SSH lent · impact sur la recherche</span></div>' +
+      '<div class="list-item warn"><strong>Montage rclone à rafraîchir</strong><span class="sub">Cache du montage obsolète</span></div>' +
+    '</div>',
+    b: '<h3>Services</h3><div class="services-list">' +
+      '<div class="service-row"><div class="service-row-main"><span class="service-row-icon"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/></svg></span><div class="service-row-copy"><strong>qBittorrent</strong><span>vérifié il y a 12 s</span></div></div><div class="service-row-status"><span class="dot"></span>Opérationnel</div></div>' +
+      '<div class="service-row warn"><div class="service-row-main"><span class="service-row-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg></span><div class="service-row-copy"><strong>Prowlarr</strong><span>vérifié il y a 6 min</span></div></div><div class="service-row-status"><span class="dot"></span>Dégradé</div></div>' +
+      '<div class="service-row"><div class="service-row-main"><span class="service-row-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 12h5M8 15h8"/></svg></span><div class="service-row-copy"><strong>Jellyfin</strong><span>vérifié il y a 3 min</span></div></div><div class="service-row-status"><span class="dot"></span>Opérationnel</div></div>' +
+      '<div class="service-row"><div class="service-row-main"><span class="service-row-icon"><svg viewBox="0 0 24 24"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></span><div class="service-row-copy"><strong>Montage rclone</strong><span>vérifié il y a 40 s</span></div></div><div class="service-row-status"><span class="dot"></span>Opérationnel</div></div>' +
+    '</div>',
+  },
+};
+function setConsoleTab(key) {
+  const c = CONSOLE[key] || CONSOLE.health;
+  document.getElementById("consoleEyebrow").textContent = c.eyebrow;
+  document.getElementById("consoleTitle").textContent = c.title;
+  document.getElementById("consoleSub").textContent = c.sub;
+  document.getElementById("consoleSummary").innerHTML = c.summary.map(([v, l]) => '<div class="stat"><strong>' + v + '</strong><span>' + l + '</span></div>').join("");
+  document.getElementById("consoleA").innerHTML = c.a;
+  document.getElementById("consoleB").innerHTML = c.b;
+  document.querySelectorAll("[data-ctab]").forEach(b => {
+    const on = b.dataset.ctab === key;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+}
+document.querySelectorAll("[data-ctab]").forEach(b => {
+  b.addEventListener("click", () => setConsoleTab(b.dataset.ctab));
+});
+
+/* ============ Init ============ */
+renderOverview(false);
+setIncident(false);
+renderTorrents();
+renderIndexers();
+renderResults();
+setCloudView("files");
+renderHistory();
+renderLinks();
+renderStats();
+renderFavorites();
+setConsoleTab("health");
+</script>
+</body>
+</html>

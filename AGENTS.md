@@ -289,6 +289,7 @@ curl -I http://127.0.0.1:3130/healthz
 | GET | `/api/files/download` | Téléchargement fichier (query: path) |
 | POST | `/api/files/mkdir` | Créer un dossier |
 | POST | `/api/files/rename` | Renommer fichier/dossier |
+| POST | `/api/files/move` | Déplacer fichier/dossier vers un autre dossier (form: path, name, dest) |
 | POST | `/api/files/delete` | Supprimer fichier/dossier |
 | POST | `/api/files/refresh` | Invalider le cache |
 | GET | `/healthz` | Liveness |

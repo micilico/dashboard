@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import posixpath
 import re
 import shutil
 import time
@@ -195,6 +196,83 @@ def rename_item(relative_path: str, old_name: str, new_name: str) -> dict:
         'old_name': old_name,
         'new_name': new_name,
         'path': os.path.relpath(new_path, MOUNT_PATH),
+    }
+
+
+def _rewrite_paths_after_move(old_rel: str, new_rel: str) -> None:
+    """Keep favorites and share links pointing at the moved tree."""
+    if old_rel == new_rel:
+        return
+    old_match = old_rel if old_rel.endswith('/') else old_rel + '/'
+    new_match = new_rel if new_rel.endswith('/') else new_rel + '/'
+    try:
+        from .models import get_db
+        with get_db() as db:
+            for table in ("favorites", "share_links"):
+                db.execute(
+                    f"""UPDATE {table}
+                        SET path = CASE
+                            WHEN path = ? THEN ?
+                            ELSE ? || substr(path, ?)
+                        END
+                        WHERE path = ? OR (length(path) > ? AND substr(path, 1, ?) = ?)""",
+                    (old_rel, new_rel, new_match, len(old_match) + 1, old_rel, len(old_match), len(old_match), old_match),
+                )
+    except Exception:
+        logger.warning('Could not rewrite stored paths after move', exc_info=True)
+
+
+def _rel(path: str, base: str) -> str:
+    """Relative path normalized to forward slashes (used in URLs and storage)."""
+    return os.path.relpath(path, base).replace(os.sep, "/")
+
+
+def _mount_real() -> str:
+    return os.path.realpath(MOUNT_PATH)
+
+
+def move_item(source_path: str, name: str, dest_path: str) -> dict:
+    """Move a file or directory to another folder within the mount."""
+    source_dir = resolve_path_within(MOUNT_PATH, source_path, must_exist=True)
+    if not os.path.isdir(source_dir):
+        raise ValueError('Dossier source introuvable')
+    dest_dir = resolve_path_within(MOUNT_PATH, dest_path, must_exist=True)
+    if not os.path.isdir(dest_dir):
+        raise ValueError('Dossier destination introuvable')
+
+    src = resolve_path_within(MOUNT_PATH, posixpath.join(source_path, name), must_exist=True)
+    dest = resolve_path_within(MOUNT_PATH, posixpath.join(dest_path, name), must_exist=False)
+
+    src_real = os.path.realpath(src)
+    src_parent_real = os.path.realpath(source_dir)
+    dest_real = os.path.realpath(dest_dir)
+
+    if dest_real == src_parent_real:
+        raise ValueError('Deja au meme emplacement')
+    if os.path.isdir(src) and (dest_real == src_real or dest_real.startswith(src_real + os.sep)):
+        raise ValueError('Deplacement impossible dans lui-meme')
+    if os.path.exists(dest):
+        raise ValueError('Un element portant ce nom existe deja ici')
+
+    mount_real = _mount_real()
+    old_rel = _rel(src_real, mount_real)
+    shutil.move(src, dest)
+    clear_scandir_cache()
+    new_rel = _rel(os.path.realpath(dest), mount_real)
+    _rewrite_paths_after_move(old_rel, new_rel)
+
+    try:
+        from .models import add_history_entry
+        size_bytes = os.path.getsize(dest) if os.path.isfile(dest) else 0
+        add_history_entry(name, size_bytes, new_rel, action="move")
+    except Exception:
+        pass
+
+    return {
+        'success': True,
+        'name': name,
+        'from_path': old_rel,
+        'to_path': new_rel,
     }
 
 

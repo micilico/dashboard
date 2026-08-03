@@ -440,4 +440,100 @@ suite('Caddy share-link access', () => {
   });
 });
 
+suite('Drag & drop (move) logic', () => {
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+
+  function dropLabel(destPath) {
+    return destPath ? destPath.split("/").filter(Boolean).pop() : "Racine";
+  }
+
+  test('drop label resolves root to Racine and keeps the last segment', () => {
+    assert.strictEqual(dropLabel(""), "Racine");
+    assert.strictEqual(dropLabel("films"), "films");
+    assert.strictEqual(dropLabel("a/b/c"), "c");
+  });
+
+  test('drag payload carries path, name and is_dir', () => {
+    const f = { path: "docs/report.txt", name: "report.txt", is_dir: false };
+    const selected = new Set();
+    const items = selected.has(f.path) ? [] : [f];
+    assert.deepEqual(
+      items.map(i => ({ path: i.path, name: i.name, is_dir: Boolean(i.is_dir) })),
+      [{ path: "docs/report.txt", name: "report.txt", is_dir: false }],
+    );
+  });
+
+  test('drag payload includes every selected item when dragging a selected row', () => {
+    const rows = [
+      { path: "a.txt", name: "a.txt", is_dir: false },
+      { path: "b.txt", name: "b.txt", is_dir: false },
+    ];
+    const selectedPaths = ["a.txt", "b.txt"];
+    const selectedItems = new Map(rows.map(r => [r.path, r]));
+    const items = selectedPaths.includes(rows[0].path)
+      ? selectedPaths.map(p => selectedItems.get(p))
+      : [rows[0]];
+    assert.deepEqual(items.map(i => i.name), ["a.txt", "b.txt"]);
+  });
+
+  test('move source dir and name are derived from the item path', () => {
+    const it = { path: "docs/sub/file.txt", name: "file.txt", is_dir: false };
+    const srcDir = it.path.split("/").slice(0, -1).join("/");
+    const name = it.path.split("/").pop();
+    assert.strictEqual(srcDir, "docs/sub");
+    assert.strictEqual(name, "file.txt");
+  });
+
+  test('moveItemsTo posts to /files/move with path, name and dest', async () => {
+    let payload = null;
+    const api = async (url, opts) => {
+      payload = { url, body: Object.fromEntries(opts.body.entries()) };
+      return { success: true };
+    };
+    const au = (p) => `/cloud-panel/api${p}`;
+    const items = [{ path: "docs/file.txt", name: "file.txt", is_dir: false }];
+    let moved = 0;
+    for (const it of items) {
+      const fd = new FormData();
+      fd.append("path", it.path.split("/").slice(0, -1).join("/"));
+      fd.append("name", it.path.split("/").pop());
+      fd.append("dest", "archive");
+      await api(au("/files/move"), { method: "POST", body: fd });
+      moved++;
+    }
+    assert.strictEqual(moved, 1);
+    assert.strictEqual(payload.url, "/cloud-panel/api/files/move");
+    assert.deepEqual(payload.body, { path: "docs", name: "file.txt", dest: "archive" });
+  });
+
+  test('rows are draggable and folders expose drop targets calling the move API', () => {
+    assert.ok(appSource.includes("tr.draggable = true"));
+    assert.ok(appSource.includes('dataTransfer.effectAllowed = "move"'));
+    assert.ok(appSource.includes("moveItemsTo(f.path, items)"));
+    assert.ok(appSource.includes('au("/files/move")'));
+    assert.ok(appSource.includes("classList.add(\"drop-target\")"));
+  });
+
+  test('breadcrumb crumbs and root/parent nav act as move drop targets', () => {
+    assert.ok(appSource.includes("function makeDropTarget"));
+    assert.ok(appSource.includes('makeDropTarget(rl, "")'));
+    assert.ok(appSource.includes('data-nav="root"'));
+    assert.ok(appSource.includes('data-nav="parent"'));
+  });
+
+  test('whole files view accepts desktop upload drops', () => {
+    assert.ok(appSource.includes("function wireFilesViewUpload"));
+    assert.ok(appSource.includes("view.classList.add(\"upload-target\")"));
+    assert.ok(appSource.includes("startUpload(e.dataTransfer.files)"));
+  });
+
+  test('dragged names are never written via innerHTML', () => {
+    assert.ok(!appSource.includes("innerHTML = `<" ) || !/innerHTML\s*=\s*`[^`]*\$\{name\}/.test(appSource));
+    assert.ok(!appSource.includes("innerHTML = `<" ) || !/innerHTML\s*=\s*`[^`]*\$\{items\[/.test(appSource));
+  });
+});
+
 console.log('\nTous les tests passes.');

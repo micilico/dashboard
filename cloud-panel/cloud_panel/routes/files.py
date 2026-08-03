@@ -16,6 +16,7 @@ from ..storage import (
     download_file,
     create_directory,
     rename_item,
+    move_item,
     delete_item,
     clear_scandir_cache,
 )
@@ -119,6 +120,30 @@ async def rename(
         raise HTTPException(
             status_code=403,
             detail=error_detail("path_error", "Renommage impossible à cet emplacement.", "Vérifier le chemin"),
+        )
+
+
+@router.post("/files/move")
+async def move(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(""),
+    name: str = Form(...),
+    dest: str = Form(""),
+):
+    """Move a file or directory to another folder."""
+    try:
+        result = move_item(path, name, dest)
+        return result
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Déplacement impossible à cet emplacement.", "Vérifier le chemin et la destination"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("move_error", "Déplacement impossible.", "Réessayer"),
         )
 
 

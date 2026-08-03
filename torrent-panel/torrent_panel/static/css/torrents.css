@@ -1,5 +1,5 @@
 .torrents-panel {
-  overflow: hidden;
+  overflow: clip;
 }
 
 .page-header-panel {
@@ -269,3 +269,72 @@ tr { min-height: 56px; }
 tr:hover { background: var(--row-hover); }
 .sort-arrow { vertical-align: middle; margin-left: 3px; }
 .sort-head:hover { color: var(--text); }
+
+/* ── Surlignage de recherche ── */
+.name-button mark.search-hit {
+  background: color-mix(in oklab, var(--accent), transparent 45%);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* ── Densité compacte ── */
+@media (min-width: 1561px) {
+  .torrents-panel.compact .torrent-table th,
+  .torrents-panel.compact .torrent-table td {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .torrents-panel.compact .torrent-table td {
+    font-size: 0.84rem;
+  }
+  .torrents-panel.compact .torrent-table .name-button {
+    min-height: 34px;
+  }
+  .torrents-panel.compact .progress-track {
+    height: 4px;
+  }
+}
+
+/* ── Barre de filtres sticky ── */
+.torrents-panel .filters {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  transition: box-shadow var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard);
+}
+.torrents-panel .filters.is-stuck {
+  box-shadow: var(--shadow-dialog);
+  border-color: var(--border-hover);
+}
+
+/* ── Toast avec action (Annuler) ── */
+.toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.toast .toast-action {
+  margin-left: 12px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 0.84rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toast .toast-action:hover {
+  background: color-mix(in oklab, var(--accent), transparent 70%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .torrents-panel .filters {
+    transition: none;
+    box-shadow: none;
+  }
+}

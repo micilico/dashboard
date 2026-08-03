@@ -464,3 +464,28 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
 @media (min-width: 1440px) {
   .file-table th, .file-table td { padding: var(--space-12) var(--space-16); }
 }
+
+/* ── Drag & drop (déplacer) ── */
+.file-table tr[draggable="true"] { cursor: grab; }
+.file-table tr[draggable="true"]:active { cursor: grabbing; }
+.file-table tr.dragging { opacity: .45; }
+.file-table tr.dragging * { pointer-events: none; }
+.file-table tr.drop-target td { background: var(--accent-soft); }
+.file-table tr.drop-target .file-name-cell .file-icon { color: var(--accent-strong); }
+#filesView.upload-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -10px;
+  border-radius: var(--radius-card);
+}
+.drop-crumb { position: relative; }
+.drop-crumb.drop-active { color: var(--accent-strong); }
+.drop-crumb.drop-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}

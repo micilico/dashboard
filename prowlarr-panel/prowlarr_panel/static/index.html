@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Prowlarr · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260731-nav-p0-3">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260803-refonte">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -77,6 +77,16 @@
           <div class="status-pill" id="refreshStatus" aria-live="polite">
             <span>Dernière mise a jour</span>
             <time id="lastCheck" datetime=""></time>
+          </div>
+          <div class="sidebar-disk-ring" id="shellDiskRing" hidden>
+            <svg viewBox="0 0 44 44" aria-hidden="true">
+              <circle class="ring-track" cx="22" cy="22" r="18"></circle>
+              <circle class="ring-fill" id="shellDiskFill" cx="22" cy="22" r="18"></circle>
+            </svg>
+            <div class="disk-ring-copy">
+              <span class="disk-ring-value" id="shellDiskText"></span>
+              <span class="disk-ring-sub" id="shellDiskSub"></span>
+            </div>
           </div>
         </div>
       </header>
@@ -262,7 +272,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=20260731-nav-p0-3"></script>
-    <script src="./static/dist/app.min.js?v=20260731-nav-p0-3" defer></script>
+    <script src="./config.js?v=20260803-refonte"></script>
+    <script src="./static/dist/app.min.js?v=20260803-refonte" defer></script>
   </body>
 </html>

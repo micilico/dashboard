@@ -48,10 +48,49 @@ function dashboardState({ type = "empty", title = "", message = "", compact = fa
   });
 }
 
+const DASHBOARD_RING_CIRCUMFERENCE = 113.1;
+
+function dashboardFormatBytes(value) {
+  const n = Number(value) || 0;
+  if (n <= 0) return "0 o";
+  const units = ["o", "Ko", "Mo", "Go", "To", "Po"];
+  let i = 0;
+  let size = n;
+  while (size >= 1024 && i < units.length - 1) {
+    size /= 1024;
+    i += 1;
+  }
+  return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function updateDashboardDiskRing({ percent = 0, usedLabel = "", totalLabel = "", usedBytes = 0, totalBytes = 0 } = {}) {
+  const ring = document.getElementById("shellDiskRing");
+  const fill = document.getElementById("shellDiskFill");
+  const text = document.getElementById("shellDiskText");
+  const sub = document.getElementById("shellDiskSub");
+  if (!ring || !fill) return;
+  const pct = Math.min(100, Math.max(0, Number(percent) || 0));
+  const used = usedLabel || (usedBytes ? dashboardFormatBytes(usedBytes) : "");
+  const total = totalLabel || (totalBytes ? dashboardFormatBytes(totalBytes) : "");
+  fill.style.strokeDashoffset = String(DASHBOARD_RING_CIRCUMFERENCE * (1 - pct / 100));
+  fill.style.stroke = pct > 90 ? "var(--danger)" : pct > 75 ? "var(--warning)" : "var(--success)";
+  if (text) text.textContent = `${pct} %`;
+  if (sub) sub.textContent = used && total ? `${used} · ${total}` : "Stockage";
+  ring.hidden = false;
+}
+
+function hideDashboardDiskRing() {
+  const ring = document.getElementById("shellDiskRing");
+  if (ring) ring.hidden = true;
+}
+
 if (typeof window !== "undefined") {
   window.DashboardDOM = Object.freeze({
     element: dashboardElement,
     button: dashboardButton,
     state: dashboardState,
+    updateDiskRing: updateDashboardDiskRing,
+    hideDiskRing: hideDashboardDiskRing,
+    formatBytes: dashboardFormatBytes,
   });
 }

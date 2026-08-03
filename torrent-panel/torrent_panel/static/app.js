@@ -10,6 +10,7 @@ const DEFAULT_PREFS = {
   direction: "asc",
   autoRefresh: true,
   refreshIntervalMs: 6000,
+  density: "normal",
   lastCategory: "",
   lastTags: "",
 };
@@ -61,6 +62,7 @@ const state = {
   lastFocus: null,
   refreshTimer: null,
   refreshPromise: null,
+  undoToastTimer: null,
   lastSignature: "",
   lastUpdatedAt: null,
   globalActionCount: 0,
@@ -111,6 +113,7 @@ const els = {
   refreshButton: document.querySelector("#refreshButton"),
   openAddPanelButton: document.querySelector("#openAddPanelButton"),
   addTorrentButton: document.querySelector("#addTorrentButton"),
+  densityToggle: document.querySelector("#densityToggle"),
   autoRefreshToggle: document.querySelector("#autoRefreshToggle"),
   refreshInterval: document.querySelector("#refreshInterval"),
   searchInput: document.querySelector("#searchInput"),
@@ -207,6 +210,7 @@ const SORT_LABELS = {
   progress: "Progression",
   downloadSpeed: "Vitesse descendante",
   uploadSpeed: "Vitesse montante",
+  uploaded: "Total téléversé",
   ratio: "Ratio",
   size: "Taille",
   eta: "ETA",
@@ -328,6 +332,35 @@ function clearError() {
 }
 
 const showToast = createToast(() => els.toast);
+
+function showUndoToast(message, actionLabel, onUndo, duration = 6000) {
+  const el = els.toast;
+  if (!el) return;
+  el.replaceChildren(document.createTextNode(message));
+  const undo = document.createElement("button");
+  undo.type = "button";
+  undo.className = "toast-action";
+  undo.textContent = actionLabel;
+  undo.addEventListener("click", () => {
+    clearTimeout(state.undoToastTimer);
+    el.hidden = true;
+    onUndo?.();
+  });
+  el.append(undo);
+  el.hidden = false;
+  clearTimeout(state.undoToastTimer);
+  state.undoToastTimer = window.setTimeout(() => { el.hidden = true; }, duration);
+}
+
+function formatFreshness(date) {
+  if (!date) return "";
+  const s = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (s < 10) return "à l'instant";
+  if (s < 60) return `il y a ${s} s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `il y a ${m} min`;
+  return date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
 const showError = (error) => showErrorMessage(els.alert, error, { messageElement: els.alertText });
 
 function route(path = "/") {
@@ -617,6 +650,16 @@ function renderControls() {
   );
   els.sortSelect.value = state.prefs.sort;
   if (els.sortDirectionSelect) els.sortDirectionSelect.value = state.prefs.direction;
+  if (els.densityToggle) {
+    const compact = state.prefs.density === "compact";
+    const panel = document.querySelector(".torrents-panel");
+    if (panel) {
+      if (compact) panel.classList.add("compact");
+      else panel.classList.remove("compact");
+    }
+    els.densityToggle.setAttribute("aria-pressed", String(compact));
+    els.densityToggle.textContent = compact ? "Vue normale" : "Vue compacte";
+  }
   renderQuickFilters();
   renderFilterNotice();
   renderFollowNotice();
@@ -790,7 +833,17 @@ function renderRow(torrent) {
   nameButton.type = "button";
   nameButton.className = "name-button";
   nameButton.title = torrent.name;
-  nameButton.textContent = torrent.name;
+  const searchQuery = String(state.prefs.search || "").trim().toLowerCase();
+  if (searchQuery && String(torrent.name || "").toLowerCase().includes(searchQuery)) {
+    const idx = String(torrent.name).toLowerCase().indexOf(searchQuery);
+    nameButton.append(
+      document.createTextNode(String(torrent.name).slice(0, idx)),
+      Object.assign(document.createElement("mark"), { className: "search-hit", textContent: String(torrent.name).slice(idx, idx + searchQuery.length) }),
+      document.createTextNode(String(torrent.name).slice(idx + searchQuery.length)),
+    );
+  } else {
+    nameButton.textContent = torrent.name;
+  }
   nameButton.addEventListener("click", (event) => openDetails(torrent.hash, event.currentTarget));
   nameTd.append(nameButton);
 
@@ -805,6 +858,7 @@ function renderRow(torrent) {
 
   const downTd = textCell("Téléchargement", formatSpeed(torrent.downloadSpeed), "mono");
   const upTd = textCell("Envoi", formatSpeed(torrent.uploadSpeed), "mono");
+  const uploadedTd = textCell("Uploadé", formatBytes(torrent.uploaded), "mono");
   const ratioTd = textCell("Ratio", formatRatio(torrent.ratio), "mono");
   const sizeTd = textCell("Taille", formatBytes(torrent.size), "mono");
   const etaTd = textCell("ETA", formatEta(torrent.eta), "mono");
@@ -831,7 +885,7 @@ function renderRow(torrent) {
   inline.textContent = busyText || state.rowErrors.get(hash) || "";
   actionTd.append(actions, inline);
 
-  tr.append(selectTd, nameTd, stateTd, progressTd, downTd, upTd, ratioTd, sizeTd, etaTd, addedTd, actionTd);
+  tr.append(selectTd, nameTd, stateTd, progressTd, downTd, upTd, uploadedTd, ratioTd, sizeTd, etaTd, addedTd, actionTd);
   return tr;
 }
 
@@ -1399,6 +1453,12 @@ async function loadTorrents({ silent = false, force = false } = {}) {
           : { enabled: false, entries: [], notification: null },
       };
       state.storage = storagePayload && typeof storagePayload === "object" ? storagePayload : { disk: {}, rclone: {} };
+      const disk = state.storage.disk || {};
+      if (Number(disk.usedBytes) > 0) {
+        window.DashboardDOM?.updateDiskRing({ percent: disk.usedPercent, usedBytes: disk.usedBytes, totalBytes: disk.totalBytes });
+      } else {
+        window.DashboardDOM?.hideDiskRing();
+      }
       state.activity = activityPayload && typeof activityPayload === "object" ? activityPayload : { summary: {}, timeline: [] };
       state.trackerStats = trackerStatsPayload?.stats && typeof trackerStatsPayload.stats === "object"
         ? trackerStatsPayload.stats
@@ -1420,11 +1480,11 @@ async function loadTorrents({ silent = false, force = false } = {}) {
       }, 0);
       const lastCheck = els.lastCheck;
       if (lastCheck) {
-        lastCheck.textContent = state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" });
+        lastCheck.textContent = formatFreshness(state.lastUpdatedAt);
         lastCheck.setAttribute("datetime", state.lastUpdatedAt.toISOString());
       }
       if (!lastCheck) {
-        els.refreshStatus.textContent = `À jour ${state.lastUpdatedAt.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "medium" })}`;
+        els.refreshStatus.textContent = `À jour ${formatFreshness(state.lastUpdatedAt)}`;
       }
     } catch (error) {
       state.backendStatus = "unavailable";
@@ -1432,7 +1492,7 @@ async function loadTorrents({ silent = false, force = false } = {}) {
       showError(error);
       const lastCheck = els.lastCheck;
       if (lastCheck && state.lastUpdatedAt) {
-        lastCheck.textContent = state.lastUpdatedAt.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+        lastCheck.textContent = formatFreshness(state.lastUpdatedAt);
       } else if (!state.lastUpdatedAt) {
         els.refreshStatus.textContent = "Erreur";
       }
@@ -1478,15 +1538,21 @@ async function runTorrentAction(hashes, action, options = {}) {
       method: "POST",
       body: JSON.stringify({ hashes, ...options }),
     });
-    showToast(
-      action === "pause"
-        ? "Torrent mis en pause."
-        : action === "resume"
+    if (action === "pause") {
+      showUndoToast(
+        hashes.length > 1 ? `${hashes.length} torrents mis en pause.` : "Torrent mis en pause.",
+        "Annuler",
+        () => runTorrentAction(hashes, "resume"),
+      );
+    } else {
+      showToast(
+        action === "resume"
           ? "Torrent repris."
           : action === "force-start"
             ? (options.enabled ? "Partage forcé activé." : "Partage forcé désactivé.")
             : "Torrent supprimé.",
-    );
+      );
+    }
     hashes.forEach((hash) => state.selected.delete(hash));
     await loadTorrents({ silent: true, force: true });
   } catch (error) {
@@ -2025,6 +2091,33 @@ function bindEvents() {
   });
 }
 
+if (els.densityToggle) {
+  els.densityToggle.addEventListener("click", () => {
+    const panel = document.querySelector(".torrents-panel");
+    const compact = panel ? !panel.classList.contains("compact") : true;
+    if (panel) {
+      if (compact) panel.classList.add("compact");
+      else panel.classList.remove("compact");
+    }
+    els.densityToggle.setAttribute("aria-pressed", String(compact));
+    els.densityToggle.textContent = compact ? "Vue normale" : "Vue compacte";
+    state.prefs.density = compact ? "compact" : "normal";
+    savePrefs();
+  });
+}
+
+// Barre de filtres sticky
+(function wireStickyFilters() {
+  const filters = document.querySelector(".torrents-panel .filters");
+  if (!filters || !("IntersectionObserver" in window)) return;
+  const sentinel = document.createElement("div");
+  sentinel.setAttribute("aria-hidden", "true");
+  filters.parentNode.insertBefore(sentinel, filters);
+  new IntersectionObserver(([entry]) => {
+    filters.classList.toggle("is-stuck", !entry.isIntersecting);
+  }, { rootMargin: "-56px 0px 0px 0px" }).observe(sentinel);
+})();
+
 async function init() {
   configureLinks();
   bindEvents();
@@ -2051,4 +2144,4 @@ async function init() {
 
 init();
 
-globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, state };
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, formatFreshness, showUndoToast, state };

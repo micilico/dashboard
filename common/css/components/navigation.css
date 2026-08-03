@@ -360,6 +360,58 @@
   pointer-events: none;
 }
 
+/* ── Anneau de disque dans le footer de la sidebar ── */
+.sidebar-disk-ring {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  min-width: 0;
+}
+.sidebar-disk-ring svg {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  transform: rotate(-90deg);
+}
+.sidebar-disk-ring .ring-track {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 5;
+}
+.sidebar-disk-ring .ring-fill {
+  fill: none;
+  stroke: var(--success);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 113.1;
+  transition: stroke-dashoffset var(--motion-base) var(--ease-standard), stroke var(--motion-base) var(--ease-standard);
+}
+.disk-ring-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.disk-ring-value {
+  font-size: .85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.1;
+}
+.disk-ring-sub {
+  font-size: .72rem;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-disk-ring .ring-fill { transition: none; }
+}
+
 @media (max-width: 1439px) and (min-width: 768px) {
   .shell {
     width: 100%;
@@ -423,11 +475,15 @@
   }
 
   .nav-more > summary {
-    min-height: 72px;
-    padding: 6px 3px;
-    grid-template-columns: 1fr;
-    justify-items: center;
-    row-gap: 3px;
+    display: none;
+  }
+
+  .sidebar-disk-ring .disk-ring-copy {
+    display: none;
+  }
+  .sidebar-disk-ring svg {
+    width: 40px;
+    height: 40px;
   }
 
   .sidebar-health {

@@ -261,6 +261,11 @@ async function renderStorage() {
   const payload = await api(`${state.apiPrefix}/storage`, { cache: "no-store" });
   const disk = payload.disk || {};
   const rclone = payload.rclone || {};
+  if (Number(disk.usedBytes) > 0) {
+    window.DashboardDOM?.updateDiskRing({ percent: disk.usedPercent, usedBytes: disk.usedBytes, totalBytes: disk.totalBytes });
+  } else {
+    window.DashboardDOM?.hideDiskRing();
+  }
   els.summaryGrid.replaceChildren(
     card("Capacité totale", formatBytes(disk.totalBytes || 0)),
     card("Utilisé", formatBytes(disk.usedBytes || 0), `${disk.usedPercent || 0} %`),

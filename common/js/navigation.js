@@ -72,17 +72,52 @@ function configureMoreNavigation() {
   });
 }
 
+const DASHBOARD_PREFETCHED = new Set();
+
+function dashboardPrefetch(href) {
+  if (!href || !/^https?:/.test(href) || DASHBOARD_PREFETCHED.has(href)) return;
+  DASHBOARD_PREFETCHED.add(href);
+  try {
+    const link = document.createElement("link");
+    link.rel = "prefetch";
+    link.href = href;
+    document.head.appendChild(link);
+  } catch {
+    /* prefetch is best-effort */
+  }
+}
+
+function configurePrefetchOnHover() {
+  if (document.body?.dataset?.dashboardPrefetchBound === "true") return;
+  if (!document.body) return;
+  document.body.dataset.dashboardPrefetchBound = "true";
+  document.addEventListener("mouseover", (event) => {
+    const link = event.target && typeof event.target.closest === "function"
+      ? event.target.closest(".nav a[data-shell-nav]")
+      : null;
+    if (link && link.href && link.getAttribute("aria-current") !== "page") {
+      dashboardPrefetch(link.href);
+    }
+  }, { passive: true });
+}
+
 if (typeof window !== "undefined") {
   window.DashboardNavigation = {
     configure: configureDashboardNavigation,
     configureMore: configureMoreNavigation,
+    prefetch: dashboardPrefetch,
+    configurePrefetch: configurePrefetchOnHover,
     href: dashboardNavHref,
     normalizePrefix: normalizeDashboardPrefix,
     prefixes: dashboardPrefixConfig,
   };
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", configureMoreNavigation, { once: true });
+    document.addEventListener("DOMContentLoaded", () => {
+      configureMoreNavigation();
+      configurePrefetchOnHover();
+    }, { once: true });
   } else {
     configureMoreNavigation();
+    configurePrefetchOnHover();
   }
 }

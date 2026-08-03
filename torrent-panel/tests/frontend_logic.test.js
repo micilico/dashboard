@@ -105,6 +105,8 @@ assert.equal(overviewHtml.includes("storageVisualization"), false);
 assert.match(overviewHtml, /id="overviewMetrics"[\s\S]+class="overview-lower-grid"/);
 assert.match(overviewHtml, /class="selection-toolbar"[\s\S]+id="selectVisible"[\s\S]+class="torrent-table"/);
 assert.match(overviewHtml, /data-sort="addedOn"/);
+assert.match(overviewHtml, /data-sort="uploaded"/);
+assert.match(overviewHtml, /id="densityToggle"/);
 assert.match(overviewHtml, /id="sortDirectionSelect"/);
 assert.match(overviewHtml, /id="tr4kerTrackerInput"/);
 assert.equal(source.includes("renderStorageCard"), false);
@@ -113,6 +115,18 @@ assert.equal(source.includes("Operationnel"), false);
 assert.equal(source.includes("form.innerHTML"), false);
 assert.equal(source.includes("row.innerHTML"), false);
 assert.equal(consoleSource.includes("innerHTML"), false);
+
+// Refonte : Uploadé, densité, surlignage, undo toast, fraîcheur
+assert.ok(source.includes('uploaded: "Total téléversé"'), "SORT_LABELS must expose uploaded");
+assert.ok(source.includes("function showUndoToast"), "undo toast helper required");
+assert.ok(source.includes("function formatFreshness"), "freshness helper required");
+assert.ok(source.includes('className: "search-hit"'), "search highlight must be marked");
+assert.ok(source.includes("showUndoToast("), "pause must offer an undo action");
+const torrentsCss = fs.readFileSync("torrent-panel/torrent_panel/static/css/torrents.css", "utf8");
+assert.ok(torrentsCss.includes(".filters.is-stuck"), "sticky filter bar needs a stuck state");
+assert.ok(torrentsCss.includes(".torrents-panel.compact"), "compact density styles required");
+assert.ok(torrentsCss.includes(".toast-action"), "undo toast button styles required");
+assert.ok(torrentsCss.includes("mark.search-hit"), "search highlight styles required");
 assert.match(consoleSource, /function panel\(title, subtitle, bodyChildren/);
 assert.match(consoleSource, /systemState\(\{ type: "empty"/);
 assert.match(consoleSource, /className: "table-wrap table-scroll"/);
@@ -130,7 +144,7 @@ assert.match(overviewCss, /\.metric-card\.unavailable/);
 vm.runInNewContext(
   `${commonApiSource}
 ${source}
-globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, state, els };`,
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, formatFreshness, showUndoToast, state, els };`,
   context,
 );
 
@@ -144,6 +158,10 @@ assert.equal(api.formatEta(3660), "1 h 01");
 assert.equal(api.stateMeta({ state: "stalledDL", progress: 0.4 }).group, "error");
 assert.equal(api.stateMeta({ state: "metaDL", progress: 0.1 }).text, "Métadonnées");
 assert.equal(api.stateMeta({ state: "queuedUP", progress: 1 }).text, "En attente de partage");
+assert.equal(api.formatFreshness(null), "");
+assert.equal(api.formatFreshness(new Date(Date.now() - 15000)), "il y a 15 s");
+assert.equal(api.formatFreshness(new Date(Date.now() - 5000)), "à l'instant");
+assert.equal(typeof api.showUndoToast, "function");
 
 api.state.torrents = [
   { hash: "a", name: "Ubuntu ISO", state: "downloading", downloadSpeed: 200, progress: 0.3, tags: "linux", category: "Images", addedOn: 20 },

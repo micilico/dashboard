@@ -303,6 +303,183 @@ class TestRenameItem:
         os.remove(tmp_path / ".._new.txt")
 
 
+class TestMoveItem:
+    def test_move_file_to_subdir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "move.txt").write_text("data")
+        result = move_item("", "move.txt", "sub")
+        assert result["success"]
+        assert result["to_path"] == "sub/move.txt"
+        assert (tmp_path / "sub" / "move.txt").exists()
+        assert not (tmp_path / "move.txt").exists()
+
+    def test_move_dir_to_other_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "dir").mkdir()
+        (tmp_path / "dir" / "inner.txt").write_text("data")
+        (tmp_path / "dst").mkdir()
+        result = move_item("", "dir", "dst")
+        assert result["success"]
+        assert (tmp_path / "dst" / "dir" / "inner.txt").exists()
+        assert not (tmp_path / "dir").exists()
+
+    def test_move_same_location_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "a.txt").write_text("data")
+        with pytest.raises(ValueError, match="meme emplacement"):
+            move_item("", "a.txt", "")
+
+    def test_move_nonexistent_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        with pytest.raises(ValueError, match="introuvable|Chemin hors"):
+            move_item("", "nope.txt", "")
+
+    def test_move_dir_into_itself_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "d").mkdir()
+        with pytest.raises(ValueError, match="lui-meme"):
+            move_item("", "d", "d")
+
+    def test_move_dir_into_descendant_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "d").mkdir()
+        (tmp_path / "d" / "sub").mkdir()
+        with pytest.raises(ValueError, match="lui-meme"):
+            move_item("", "d", "d/sub")
+
+    def test_move_conflict_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "a.txt").write_text("x")
+        (tmp_path / "sub" / "a.txt").write_text("y")
+        with pytest.raises(ValueError, match="existe deja"):
+            move_item("", "a.txt", "sub")
+
+    def test_move_traversal_name_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import move_item
+
+        (tmp_path / "sub").mkdir()
+        outside = tmp_path.parent / f"outside_{secrets.token_hex(4)}.txt"
+        outside.write_text("secret")
+        with pytest.raises(ValueError, match="Chemin hors|introuvable"):
+            move_item("", "../" + outside.name, "sub")
+        assert outside.exists(), "file outside the mount must not be moved"
+
+    def test_move_rewrite_ignores_similar_prefixes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.storage
+        import cloud_panel.models
+        importlib.reload(cloud_panel.storage)
+        importlib.reload(cloud_panel.models)
+        from cloud_panel.storage import move_item
+        from cloud_panel.models import add_favorite, get_favorites, _get_conn
+        _get_conn()
+
+        (tmp_path / "report_1").mkdir()
+        (tmp_path / "report_1" / "child.txt").write_text("data")
+        (tmp_path / "reportX").mkdir()
+        (tmp_path / "reportX" / "child.txt").write_text("data")
+        (tmp_path / "arch").mkdir()
+        add_favorite("report_1", "report_1", is_dir=True)
+        add_favorite("report_1/child.txt", "child", is_dir=False)
+        add_favorite("reportX", "reportX", is_dir=True)
+
+        move_item("", "report_1", "arch")
+        fav_paths = {f["path"] for f in get_favorites()}
+        assert "arch/report_1" in fav_paths
+        assert "arch/report_1/child.txt" in fav_paths
+        assert "reportX" in fav_paths, "favorite with a similar prefix must not be rewritten"
+
+    def test_move_rewrites_favorites_and_share_links(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.storage
+        import cloud_panel.models
+        importlib.reload(cloud_panel.storage)
+        importlib.reload(cloud_panel.models)
+        from cloud_panel.storage import move_item
+        from cloud_panel.models import add_favorite, create_share_link, get_favorites, get_share_link, _get_conn
+        _get_conn()
+
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "report.txt").write_text("data")
+        (tmp_path / "archive").mkdir()
+        add_favorite("docs", "docs", is_dir=True)
+        add_favorite("docs/report.txt", "report.txt", is_dir=False)
+        tok = "tok_" + secrets.token_hex(4)
+        create_share_link(path="docs/report.txt", filename="report.txt", is_dir=False, size_bytes=4, token=tok, password_hash=None, expiry_days=7)
+
+        result = move_item("", "docs", "archive")
+        assert result["success"]
+        fav_paths = {f["path"] for f in get_favorites()}
+        assert "archive/docs" in fav_paths
+        assert "archive/docs/report.txt" in fav_paths
+        assert get_share_link(tok)["path"] == "archive/docs/report.txt"
+
+    def test_move_records_history(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.storage
+        import cloud_panel.models
+        importlib.reload(cloud_panel.storage)
+        importlib.reload(cloud_panel.models)
+        from cloud_panel.storage import move_item
+        from cloud_panel.models import get_history, _get_conn
+        _get_conn()
+
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "f.txt").write_text("data")
+        move_item("", "f.txt", "sub")
+        moves = [h for h in get_history() if h["action"] == "move"]
+        assert moves
+        assert moves[0]["filename"] == "f.txt"
+        assert moves[0]["path"].endswith("sub/f.txt")
+
+
 class TestDeleteItem:
     def test_delete_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))

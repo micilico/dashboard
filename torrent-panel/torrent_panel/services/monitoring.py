@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 from typing import Any
 
 import httpx
@@ -464,9 +465,14 @@ async def storage_snapshot(app: FastAPI) -> dict[str, Any]:
     generated_at = now_iso()
     disk: dict[str, Any]
     try:
-        stats = os.statvfs(MONITOR_DISK_PATH)
-        total_bytes = stats.f_frsize * stats.f_blocks
-        free_bytes = stats.f_frsize * stats.f_bavail
+        if hasattr(os, "statvfs"):
+            stats = os.statvfs(MONITOR_DISK_PATH)
+            total_bytes = stats.f_frsize * stats.f_blocks
+            free_bytes = stats.f_frsize * stats.f_bavail
+        else:
+            usage = shutil.disk_usage(MONITOR_DISK_PATH)
+            total_bytes = usage.total
+            free_bytes = usage.free
         used_bytes = max(0, total_bytes - free_bytes)
         used_percent = (used_bytes / total_bytes * 100) if total_bytes else 0.0
         status = "critical" if (100 - used_percent) <= MONITOR_DISK_CRITICAL_PERCENT else "warning" if (100 - used_percent) <= MONITOR_DISK_WARNING_PERCENT else "normal"

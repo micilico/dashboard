@@ -207,6 +207,16 @@ def _status(config: dict[str, object]) -> str:
             <span>{config["meta_label"]}</span>
             <time{time_id}{datetime_attr}>{value}</time>
           </div>
+          <div class="sidebar-disk-ring" id="shellDiskRing" hidden>
+            <svg viewBox="0 0 44 44" aria-hidden="true">
+              <circle class="ring-track" cx="22" cy="22" r="18"></circle>
+              <circle class="ring-fill" id="shellDiskFill" cx="22" cy="22" r="18"></circle>
+            </svg>
+            <div class="disk-ring-copy">
+              <span class="disk-ring-value" id="shellDiskText"></span>
+              <span class="disk-ring-sub" id="shellDiskSub"></span>
+            </div>
+          </div>
         </div>"""
 
 
