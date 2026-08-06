@@ -480,13 +480,13 @@ function smoothPath(xyPoints) {
   return d;
 }
 
-function seriesLineChart(daily, series, { height = 200, width = 480, tickEvery = 5 } = {}) {
+function seriesLineChart(daily, series, { height = 220, width = 480, tickEvery = 5 } = {}) {
   const points = daily.slice(-30);
   if (!points.length) return null;
-  const padTop = 16;
-  const padBottom = 28;
-  const padLeft = 46;
-  const padRight = 10;
+  const padTop = 20;
+  const padBottom = 30;
+  const padLeft = 54;
+  const padRight = 12;
   const plotWidth = width - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
   const stepX = plotWidth / Math.max(1, points.length - 1);
@@ -503,6 +503,9 @@ function seriesLineChart(daily, series, { height = 200, width = 480, tickEvery =
     role: "img",
     "aria-label": series.map((s) => s.label).join(" / "),
   });
+  const description = svgEl("desc");
+  description.textContent = `${series.map((s) => s.label).join(" et ")} sur les ${points.length} derniers jours.`;
+  svg.append(description);
 
   const defs = svgEl("defs");
   series.forEach((s, index) => {
@@ -515,17 +518,15 @@ function seriesLineChart(daily, series, { height = 200, width = 480, tickEvery =
   });
   svg.append(defs);
 
-  const gridValues = [0.25, 0.5, 0.75, 1];
+  const gridValues = [0, 0.25, 0.5, 0.75, 1];
   gridValues.forEach((fraction) => {
     const gridValue = maxValue * fraction;
     const gridY = yFor(gridValue);
-    svg.append(svgEl("line", { x1: padLeft, x2: width - padRight, y1: gridY, y2: gridY, class: "chart-grid-line" }));
-    const label = svgEl("text", { x: 4, y: gridY + 3, class: "chart-y-label" });
+    svg.append(svgEl("line", { x1: padLeft, x2: width - padRight, y1: gridY, y2: gridY, class: fraction === 0 ? "chart-axis-line" : "chart-grid-line" }));
+    const label = svgEl("text", { x: padLeft - 10, y: gridY + 3, class: "chart-y-label", "text-anchor": "end" });
     label.textContent = series[0].format ? series[0].format(gridValue) : String(Math.round(gridValue));
     svg.append(label);
   });
-  svg.append(svgEl("line", { x1: padLeft, x2: width - padRight, y1: yFor(0), y2: yFor(0), class: "chart-axis-line" }));
-
   const dotsByIndex = Array.from({ length: points.length }, () => []);
   series.forEach((s, index) => {
     const className = s.className ? ` ${s.className}` : "";
@@ -539,7 +540,7 @@ function seriesLineChart(daily, series, { height = 200, width = 480, tickEvery =
       const dot = svgEl("circle", {
         cx: xFor(i),
         cy: yFor(Number(item[s.key]) || 0),
-        r: 2,
+        r: 1.75,
         class: `chart-line-dot${className}`,
         "data-index": String(i),
       });

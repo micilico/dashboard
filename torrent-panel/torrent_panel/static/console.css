@@ -162,8 +162,8 @@
 .chart-box {
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--surface-1);
-  padding: 14px 14px 10px;
+  background: linear-gradient(145deg, var(--surface-1), color-mix(in srgb, var(--surface-1) 82%, var(--accent) 18%));
+  padding: 16px 14px 10px;
   overflow: hidden;
   position: relative;
 }
@@ -172,24 +172,28 @@
   display: block;
   width: 100%;
   height: auto;
+  overflow: visible;
 }
 
 .chart-lines .chart-grid-line {
   stroke: var(--border);
   stroke-width: 1;
   stroke-dasharray: 2 4;
-  opacity: 0.6;
+  opacity: 0.42;
+  shape-rendering: crispEdges;
 }
 
 .chart-lines .chart-axis-line {
-  stroke: var(--border);
-  stroke-width: 1;
-  opacity: 0.8;
+  stroke: var(--text-muted);
+  stroke-width: 1.15;
+  opacity: 0.55;
+  shape-rendering: crispEdges;
 }
 
 .chart-lines .chart-y-label {
   fill: var(--text-muted);
-  font-size: 9px;
+  font-size: 9.5px;
+  letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -201,8 +205,8 @@
 
 .chart-guide {
   stroke: var(--text-muted);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
+  stroke-width: 1.25;
+  stroke-dasharray: 2 4;
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -221,13 +225,16 @@
 
 .chart-area {
   pointer-events: none;
+  opacity: 0.82;
 }
 
 .chart-line-path {
   fill: none;
-  stroke-width: 2.25;
+  stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
 }
 
 .chart-line-path.series-a {
@@ -239,10 +246,11 @@
 }
 
 .chart-line-dot {
-  fill: var(--surface-1);
+  fill: var(--surface-2);
   stroke: var(--accent);
-  stroke-width: 1.75;
-  transition: r 120ms ease;
+  stroke-width: 1.5;
+  opacity: 0.58;
+  transition: r 120ms ease, opacity 120ms ease, stroke-width 120ms ease;
 }
 
 .chart-line-dot.series-b {
@@ -250,8 +258,9 @@
 }
 
 .chart-line-dot.is-active {
-  fill: var(--surface-1);
-  stroke-width: 2.25;
+  fill: var(--surface-2);
+  stroke-width: 2.5;
+  opacity: 1;
   r: 4.25;
 }
 
@@ -261,7 +270,7 @@
 
 .chart-tick {
   fill: var(--text-muted);
-  font-size: 10px;
+  font-size: 9.5px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -301,7 +310,7 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface-2) 94%, var(--accent) 6%);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
   font-size: 0.8125rem;
   line-height: 1.55;
