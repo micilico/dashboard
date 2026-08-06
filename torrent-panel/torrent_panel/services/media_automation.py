@@ -229,9 +229,13 @@ class MediaAutomationManager:
         while True:
             try:
                 torrents = await self._qbit.torrents()
-                self.observe_torrents(torrents, allow_enqueue=True)
+                completed = self.observe_torrents(torrents, allow_enqueue=True)
+                if completed:
+                    logger.info("Media automation: %d torrent(s) terminé(s) mis en file.", len(completed))
             except QbitError as exc:
                 logger.warning("Media automation poll failed: %s", exc.code)
+            except Exception:
+                logger.exception("Media automation poll crashed")
             await asyncio.sleep(self._config.poll_seconds)
 
     async def _worker_loop(self) -> None:
@@ -239,7 +243,10 @@ class MediaAutomationManager:
             await self._wake_event.wait()
             self._wake_event.clear()
             await asyncio.sleep(self._config.debounce_seconds)
-            await self.process_pending_batch()
+            try:
+                await self.process_pending_batch()
+            except Exception:
+                logger.exception("Media automation worker crashed")
 
     async def process_pending_batch(self) -> list[dict[str, Any]]:
         async with self._lock:
@@ -250,6 +257,7 @@ class MediaAutomationManager:
             batch_torrents = [self._pending_torrents.pop(item) for item in hashes if item in self._pending_torrents]
             entries = [self._create_history_entry(torrent) for torrent in batch_torrents]
             refresh_dirs = self._refresh_dirs_for_torrents(batch_torrents)
+            logger.info("Media automation: workflow lancé pour %d torrent(s), refresh dirs=%s", len(entries), refresh_dirs or ["(racine)"])
             await self._run_full_workflow(entries, refresh_dirs)
             self._save_state()
             return entries
@@ -334,13 +342,16 @@ class MediaAutomationManager:
         for attempt in range(1, self._config.max_rclone_retries + 1):
             try:
                 await self.refresh_rclone(dirs=refresh_dirs)
+                logger.info("Media automation: refresh rclone réussi (essai %d).", attempt)
                 for entry in entries:
                     self._mark_step(entry, "rclone", "success", "Actualisation rclone effectuée.", attempts=attempt)
                     self._update_entry_state(entry, "mount_wait", "Attente du montage")
                 return True
             except MediaAutomationError as exc:
                 last_error = exc.public_message
+                logger.warning("Media automation: refresh rclone refusé (essai %d): %s", attempt, last_error)
                 await asyncio.sleep(min(20, attempt * 2))
+        logger.warning("Media automation: refresh rclone échoué après %d essai(s).", self._config.max_rclone_retries)
         for entry in entries:
             self._mark_step(entry, "rclone", "failed", last_error, attempts=self._config.max_rclone_retries)
             self._mark_step(entry, "mount", "skipped", "Montage non vérifié.")

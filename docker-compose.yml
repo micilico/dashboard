@@ -46,6 +46,7 @@ services:
       TORRENT_PANEL_AUTOMATION_RULES_STATE_PATH: /app/data/automation-rules.json
     volumes:
       - torrent-panel-data:/app/data
+      - /mnt/ultra-media:/mnt/ultra-media:ro
     tmpfs:
       - /tmp:size=64m,mode=1777
     logging:

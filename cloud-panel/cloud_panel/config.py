@@ -20,6 +20,9 @@ TRUSTED_PROXY_IPS = {
 }
 UPLOAD_CHUNK_SIZE = int(os.getenv("CLOUD_PANEL_UPLOAD_CHUNK_SIZE", str(1024 * 1024)))
 SCANDIR_CACHE_TTL = int(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_TTL", "10"))
+ULTRA_API_URL = os.getenv("CLOUD_PANEL_ULTRA_API_URL", "").rstrip("/")
+ULTRA_API_TOKEN = os.getenv("CLOUD_PANEL_ULTRA_API_TOKEN", "")
+ULTRA_API_CACHE_TTL = float(os.getenv("CLOUD_PANEL_ULTRA_API_CACHE_TTL", "60"))
 
 DATA_DIR = Path(os.getenv("CLOUD_PANEL_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))
 DB_PATH = DATA_DIR / "cloud_panel.db"

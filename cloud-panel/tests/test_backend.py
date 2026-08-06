@@ -21,6 +21,7 @@ if str(_cloud_panel_parent) not in sys.path:
 from cloud_panel.security import resolve_path_within, validate_public_id
 from cloud_panel.storage import format_size, clear_scandir_cache, get_cached_scandir
 from cloud_panel.storage import sanitize_filename, list_directory
+from cloud_panel.storage import _parse_ultra_quota
 
 
 class TestSecurity:
@@ -871,3 +872,70 @@ class TestEdgeCases:
         from cloud_panel.storage import format_size
         result = format_size(1125899906842624)
         assert "PB" in result
+
+
+class TestUltraQuota:
+    def test_parse_ultra_quota_valid(self):
+        total, used, free = _parse_ultra_quota(
+            {
+                "service_stats_info": {
+                    "free_storage_bytes": 9664750157824,
+                    "total_storage_unit": "G",
+                    "total_storage_value": 11176,
+                    "used_storage_value": 2175,
+                }
+            }
+        )
+        assert total == 11176 * 1024**3
+        assert free == 9664750157824
+        assert used == total - free
+
+    def test_parse_ultra_quota_handles_binary_units(self):
+        total, _used, free = _parse_ultra_quota(
+            {
+                "service_stats_info": {
+                    "free_storage_bytes": 1024**3,
+                    "total_storage_unit": "TiB",
+                    "total_storage_value": 2,
+                    "used_storage_value": 1,
+                }
+            }
+        )
+        assert total == 2 * 1024**4
+        assert free == 1024**3
+
+    def test_parse_ultra_quota_returns_none_on_invalid_payload(self):
+        assert _parse_ultra_quota({}) is None
+        assert _parse_ultra_quota({"service_stats_info": {}}) is None
+        assert _parse_ultra_quota({"service_stats_info": {"total_storage_value": 10}}) is None
+        assert (
+            _parse_ultra_quota(
+                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": "abc"}}
+            )
+            is None
+        )
+        assert (
+            _parse_ultra_quota(
+                {
+                    "service_stats_info": {
+                        "total_storage_value": 10,
+                        "free_storage_bytes": 1,
+                        "total_storage_unit": "X",
+                    }
+                }
+            )
+            is None
+        )
+        assert (
+            _parse_ultra_quota(
+                {
+                    "service_stats_info": {
+                        "total_storage_value": 10,
+                        "free_storage_bytes": 20000000000,
+                        "total_storage_unit": "G",
+                    }
+                }
+            )
+            is None
+        )
+        assert _parse_ultra_quota([]) is None

@@ -34,6 +34,8 @@ from ..config import (
     SSH_PROWLARR_HOST,
     SSH_PROWLARR_PORT,
     STORAGE_PUBLIC_PREFIX,
+    ULTRA_API_TOKEN,
+    ULTRA_API_URL,
 )
 from ..qbittorrent import QbitError
 from .media_automation import now_iso
@@ -461,44 +463,100 @@ async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
     }
 
 
+def _parse_ultra_quota(payload: dict[str, Any]) -> tuple[int, int, int] | None:
+    info = payload.get("service_stats_info") if isinstance(payload, dict) else None
+    if not isinstance(info, dict):
+        return None
+    total_value = info.get("total_storage_value")
+    free_bytes = info.get("free_storage_bytes")
+    if total_value is None or free_bytes is None:
+        return None
+    try:
+        total_value = int(total_value)
+        free_bytes = int(free_bytes)
+    except (TypeError, ValueError):
+        return None
+    unit = str(info.get("total_storage_unit") or "G").strip().upper()
+    unit = unit.replace("B", "").replace("I", "").strip()
+    multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}.get(unit)
+    if multiplier is None:
+        return None
+    total_bytes = total_value * multiplier
+    if total_bytes <= 0 or free_bytes < 0 or free_bytes > total_bytes:
+        return None
+    used_bytes = max(0, total_bytes - free_bytes)
+    return total_bytes, used_bytes, free_bytes
+
+
+def _disk_snapshot(total_bytes: int, free_bytes: int, source: str) -> dict[str, Any]:
+    used_bytes = max(0, total_bytes - free_bytes)
+    used_percent = (used_bytes / total_bytes * 100) if total_bytes else 0.0
+    free_percent = 100 - used_percent
+    status = (
+        "critical" if free_percent <= MONITOR_DISK_CRITICAL_PERCENT
+        else "warning" if free_percent <= MONITOR_DISK_WARNING_PERCENT
+        else "normal"
+    )
+    return {
+        "path": MONITOR_DISK_PATH,
+        "mounted": True,
+        "status": status,
+        "totalBytes": total_bytes,
+        "usedBytes": used_bytes,
+        "freeBytes": free_bytes,
+        "usedPercent": round(used_percent, 1),
+        "freePercent": round(free_percent, 1),
+        "estimateToFull": None,
+        "source": source,
+    }
+
+
+async def _fetch_ultra_quota() -> tuple[int, int, int] | None:
+    if not ULTRA_API_URL or not ULTRA_API_TOKEN:
+        return None
+    try:
+        headers = {"Authorization": f"Bearer {ULTRA_API_TOKEN}"}
+        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
+            response = await client.get(f"{ULTRA_API_URL}/get_diskquota", headers=headers)
+        parsed = response.json() if response.status_code == 200 else {}
+        if not isinstance(parsed, dict):
+            return None
+        return _parse_ultra_quota(parsed)
+    except (httpx.HTTPError, ValueError, OSError):
+        return None
+
+
 async def storage_snapshot(app: FastAPI) -> dict[str, Any]:
     generated_at = now_iso()
     disk: dict[str, Any]
-    try:
-        if hasattr(os, "statvfs"):
-            stats = os.statvfs(MONITOR_DISK_PATH)
-            total_bytes = stats.f_frsize * stats.f_blocks
-            free_bytes = stats.f_frsize * stats.f_bavail
-        else:
-            usage = shutil.disk_usage(MONITOR_DISK_PATH)
-            total_bytes = usage.total
-            free_bytes = usage.free
-        used_bytes = max(0, total_bytes - free_bytes)
-        used_percent = (used_bytes / total_bytes * 100) if total_bytes else 0.0
-        status = "critical" if (100 - used_percent) <= MONITOR_DISK_CRITICAL_PERCENT else "warning" if (100 - used_percent) <= MONITOR_DISK_WARNING_PERCENT else "normal"
-        disk = {
-            "path": MONITOR_DISK_PATH,
-            "mounted": True,
-            "status": status,
-            "totalBytes": total_bytes,
-            "usedBytes": used_bytes,
-            "freeBytes": free_bytes,
-            "usedPercent": round(used_percent, 1),
-            "freePercent": round(100 - used_percent, 1),
-            "estimateToFull": None,
-        }
-    except OSError:
-        disk = {
-            "path": MONITOR_DISK_PATH,
-            "mounted": False,
-            "status": "critical",
-            "totalBytes": 0,
-            "usedBytes": 0,
-            "freeBytes": 0,
-            "usedPercent": 0.0,
-            "freePercent": 0.0,
-            "estimateToFull": None,
-        }
+    quota = await _fetch_ultra_quota()
+    if quota is not None:
+        total_bytes, _used_bytes, free_bytes = quota
+        disk = _disk_snapshot(total_bytes, free_bytes, "ultra-api")
+    else:
+        try:
+            if hasattr(os, "statvfs"):
+                stats = os.statvfs(MONITOR_DISK_PATH)
+                total_bytes = stats.f_frsize * stats.f_blocks
+                free_bytes = stats.f_frsize * stats.f_bavail
+            else:
+                usage = shutil.disk_usage(MONITOR_DISK_PATH)
+                total_bytes = usage.total
+                free_bytes = usage.free
+            disk = _disk_snapshot(total_bytes, free_bytes, "local")
+        except OSError:
+            disk = {
+                "path": MONITOR_DISK_PATH,
+                "mounted": False,
+                "status": "critical",
+                "totalBytes": 0,
+                "usedBytes": 0,
+                "freeBytes": 0,
+                "usedPercent": 0.0,
+                "freePercent": 0.0,
+                "estimateToFull": None,
+                "source": "local",
+            }
 
     rclone_stats: dict[str, Any] = {}
     rclone_error = ""

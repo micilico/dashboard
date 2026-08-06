@@ -22,6 +22,7 @@ from torrent_panel.main import (  # noqa: E402
 )
 from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
+from torrent_panel.services.monitoring import _parse_ultra_quota  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
 
 
@@ -602,6 +603,56 @@ class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         self.assertEqual(dirs, ["films/Movie"])
+
+
+class StorageQuotaTests(unittest.TestCase):
+    def test_parse_ultra_quota_valid(self):
+        payload = {
+            "service_stats_info": {
+                "free_storage_bytes": 9664750157824,
+                "total_storage_unit": "G",
+                "total_storage_value": 11176,
+                "used_storage_value": 2175,
+            }
+        }
+        total, used, free = _parse_ultra_quota(payload)
+        self.assertEqual(total, 11176 * 1024**3)
+        self.assertEqual(free, 9664750157824)
+        self.assertEqual(used, total - free)
+
+    def test_parse_ultra_quota_handles_binary_units(self):
+        payload = {
+            "service_stats_info": {
+                "free_storage_bytes": 1024**3,
+                "total_storage_unit": "TiB",
+                "total_storage_value": 2,
+                "used_storage_value": 1,
+            }
+        }
+        total, _used, free = _parse_ultra_quota(payload)
+        self.assertEqual(total, 2 * 1024**4)
+        self.assertEqual(free, 1024**3)
+
+    def test_parse_ultra_quota_returns_none_on_invalid_payload(self):
+        self.assertIsNone(_parse_ultra_quota({}))
+        self.assertIsNone(_parse_ultra_quota({"service_stats_info": {}}))
+        self.assertIsNone(_parse_ultra_quota({"service_stats_info": {"total_storage_value": 10}}))
+        self.assertIsNone(
+            _parse_ultra_quota(
+                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": "abc"}}
+            )
+        )
+        self.assertIsNone(
+            _parse_ultra_quota(
+                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": 1, "total_storage_unit": "X"}}
+            )
+        )
+        self.assertIsNone(
+            _parse_ultra_quota(
+                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": 20000000000, "total_storage_unit": "G"}}
+            )
+        )
+        self.assertIsNone(_parse_ultra_quota([]))
 
 
 if __name__ == "__main__":

@@ -7,14 +7,84 @@ import re
 import shutil
 import time
 
+import httpx
 from fastapi import UploadFile
 
-from .config import MOUNT_PATH, SCANDIR_CACHE_TTL, UPLOAD_CHUNK_SIZE
+from .config import MOUNT_PATH, SCANDIR_CACHE_TTL, ULTRA_API_CACHE_TTL, ULTRA_API_TOKEN, ULTRA_API_URL, UPLOAD_CHUNK_SIZE
 from .security import resolve_path_within
 
 logger = logging.getLogger(__name__)
 
 _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
+_disk_cache: tuple[float, dict[str, str | float]] | None = None
+
+
+def _parse_ultra_quota(payload: dict) -> tuple[int, int, int] | None:
+    """Parse the ultra.cc quota payload into (total, used, free) bytes."""
+    info = payload.get("service_stats_info") if isinstance(payload, dict) else None
+    if not isinstance(info, dict):
+        return None
+    total_value = info.get("total_storage_value")
+    free_bytes = info.get("free_storage_bytes")
+    if total_value is None or free_bytes is None:
+        return None
+    try:
+        total_value = int(total_value)
+        free_bytes = int(free_bytes)
+    except (TypeError, ValueError):
+        return None
+    unit = str(info.get("total_storage_unit") or "G").strip().upper()
+    unit = unit.replace("B", "").replace("I", "").strip()
+    multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}.get(unit)
+    if multiplier is None:
+        return None
+    total_bytes = total_value * multiplier
+    if total_bytes <= 0 or free_bytes < 0 or free_bytes > total_bytes:
+        return None
+    return total_bytes, max(0, total_bytes - free_bytes), free_bytes
+
+
+def get_disk_usage() -> dict[str, str | float]:
+    """Disk usage for the sidebar. Prefers the ultra.cc quota API (user quota),
+    falls back to local mount stats. Cached for ULTRA_API_CACHE_TTL seconds."""
+    global _disk_cache
+    now = time.time()
+    if _disk_cache and now - _disk_cache[0] < ULTRA_API_CACHE_TTL:
+        return _disk_cache[1]
+    total_bytes = 0
+    used_bytes = 0
+    if ULTRA_API_URL and ULTRA_API_TOKEN:
+        try:
+            with httpx.Client(timeout=httpx.Timeout(5)) as client:
+                response = client.get(
+                    f"{ULTRA_API_URL}/get_diskquota",
+                    headers={"Authorization": f"Bearer {ULTRA_API_TOKEN}"},
+                )
+            parsed = response.json() if response.status_code == 200 else {}
+            totals = _parse_ultra_quota(parsed)
+            if totals is not None:
+                total_bytes, used_bytes, _free = totals
+        except (httpx.HTTPError, ValueError):
+            total_bytes = 0
+            used_bytes = 0
+    if total_bytes <= 0:
+        try:
+            usage = shutil.disk_usage(MOUNT_PATH)
+            total_bytes = usage.total
+            used_bytes = usage.used
+        except OSError:
+            total_bytes = 0
+            used_bytes = 0
+    if total_bytes <= 0:
+        result: dict[str, str | float] = {"disk_used": "N/A", "disk_total": "N/A", "disk_percent": 0}
+    else:
+        result = {
+            "disk_used": format_size(used_bytes),
+            "disk_total": format_size(total_bytes),
+            "disk_percent": round(used_bytes / total_bytes * 100, 1),
+        }
+    _disk_cache = (now, result)
+    return result
 
 
 def get_cached_scandir(path: str, ttl: int = SCANDIR_CACHE_TTL) -> list[dict]:
@@ -73,14 +143,10 @@ def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, se
         all_items = [item for item in all_items if query in item['name'].casefold()]
     total = len(all_items)
     items = all_items[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
-    try:
-        usage = shutil.disk_usage(MOUNT_PATH)
-        disk_used = format_size(usage.used)
-        disk_total = format_size(usage.total)
-        disk_percent = round(usage.used / usage.total * 100, 1)
-    except Exception:
-        disk_used = disk_total = 'N/A'
-        disk_percent = 0
+    usage = get_disk_usage()
+    disk_used = usage["disk_used"]
+    disk_total = usage["disk_total"]
+    disk_percent = usage["disk_percent"]
     return {
         'items': items,
         'total': total,
