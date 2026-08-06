@@ -317,7 +317,7 @@ curl -I http://127.0.0.1:3130/healthz
 | `QBITTORRENT_URL` | URL qBittorrent (tunnel) |
 | `QBITTORRENT_USERNAME/PASSWORD` | Authentification backend uniquement |
 | `TORRENT_PANEL_MEDIA_AUTOMATION_ENABLED` | Automatisation médias |
-| `TORRENT_PANEL_RCLONE_REFRESH_MODE` | `auto` = rclone rc puis fallback systemd |
+| `TORRENT_PANEL_RCLONE_REFRESH_MODE` | `rc` = vfs/refresh via l'API rc locale (non destructif) ; `systemd` = restart explicite (opt-in) |
 | `TORRENT_PANEL_JELLYFIN_LIBRARY_MAP` | Mapping catégories → IDs Jellyfin |
 | `TORRENT_PANEL_JELLYFIN_API_URL/API_KEY` | Backend uniquement |
 

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import tempfile
 import sys
 import unittest
@@ -458,7 +459,7 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
-    def build_manager(self):
+    def build_manager(self, mount_path=None):
         temp_dir = Path(tempfile.mkdtemp())
         qbit = FakeQbit()
         manager = MediaAutomationManager(
@@ -473,7 +474,7 @@ class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
                 max_jellyfin_retries=1,
                 history_limit=10,
                 state_path=temp_dir / "state.json",
-                mount_path=str(temp_dir),
+                mount_path=mount_path or str(temp_dir),
                 rclone_refresh_mode="rc",
                 rclone_rc_refresh_url="http://127.0.0.1:5572/vfs/refresh",
                 rclone_rc_refresh_dir="",
@@ -503,13 +504,14 @@ class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(completed_again, [])
 
     async def test_groups_multiple_completions_into_single_batch(self):
-        _qbit, manager = self.build_manager()
+        mount = str(Path(tempfile.mkdtemp()))
+        _qbit, manager = self.build_manager(mount_path=mount)
         calls = []
 
-        async def fake_refresh():
-            calls.append("rclone")
+        async def fake_refresh(**kwargs):
+            calls.append(("rclone", kwargs.get("dirs")))
 
-        async def fake_mount():
+        async def fake_mount(**kwargs):
             calls.append("mount")
 
         async def fake_scan(library_ids):
@@ -519,33 +521,36 @@ class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
         manager.refresh_rclone = fake_refresh
         manager.wait_for_mount = fake_mount
         manager.trigger_jellyfin_scan = fake_scan
+        movie_path = os.path.join(mount, "films", "Movie")
+        series_path = os.path.join(mount, "series", "Series")
         manager.observe_torrents(
             [
-                {"hash": VALID_HASH, "name": "Movie", "progress": 0.2, "completionOn": 0, "category": "films"},
-                {"hash": "b" * 40, "name": "Series", "progress": 0.2, "completionOn": 0, "category": "series"},
+                {"hash": VALID_HASH, "name": "Movie", "progress": 0.2, "completionOn": 0, "category": "films", "savePath": movie_path},
+                {"hash": "b" * 40, "name": "Series", "progress": 0.2, "completionOn": 0, "category": "series", "savePath": series_path},
             ],
             allow_enqueue=False,
         )
         manager.observe_torrents(
             [
-                {"hash": VALID_HASH, "name": "Movie", "progress": 1, "completionOn": 10, "category": "films"},
-                {"hash": "b" * 40, "name": "Series", "progress": 1, "completionOn": 11, "category": "series"},
+                {"hash": VALID_HASH, "name": "Movie", "progress": 1, "completionOn": 10, "category": "films", "savePath": movie_path},
+                {"hash": "b" * 40, "name": "Series", "progress": 1, "completionOn": 11, "category": "series", "savePath": series_path},
             ],
             allow_enqueue=True,
         )
         entries = await manager.process_pending_batch()
         self.assertEqual(len(entries), 2)
-        self.assertEqual(calls[0], "rclone")
+        self.assertEqual(calls[0][0], "rclone")
+        self.assertEqual(calls[0][1], ["films/Movie", "series/Series"])
         self.assertEqual(calls[1], "mount")
         self.assertEqual(calls[2], ("jellyfin", ("lib-films", "lib-series")))
 
     async def test_retry_jellyfin_only_after_partial_failure(self):
         _qbit, manager = self.build_manager()
 
-        async def fake_refresh():
+        async def fake_refresh(**kwargs):
             return None
 
-        async def fake_mount():
+        async def fake_mount(**kwargs):
             return None
 
         attempts = {"count": 0}
@@ -566,6 +571,37 @@ class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entries[0]["state"], "partial_failure")
         retried = await manager.retry(entries[0]["id"], "jellyfin")
         self.assertEqual(retried["state"], "completed")
+
+    async def test_refresh_rclone_rc_mode_never_restarts_systemd(self):
+        _qbit, manager = self.build_manager()
+        calls = []
+
+        async def fake_rc(**kwargs):
+            calls.append(("rc", kwargs))
+
+        async def fail_if_systemd(**kwargs):
+            calls.append("systemd")
+            raise AssertionError("systemd restart must not be triggered in rc mode")
+
+        manager._refresh_rclone_rc = fake_rc
+        manager._refresh_rclone_systemd = fail_if_systemd
+        manager._config = MediaAutomationConfig(
+            **{**manager._config.__dict__, "rclone_refresh_mode": "rc"},
+        )
+        await manager.refresh_rclone(dirs=["films/Movie"], async_run=True)
+        self.assertEqual(calls, [("rc", {"dirs": ["films/Movie"], "recursive": True, "async_run": True})])
+
+    async def test_refresh_dirs_ignores_paths_outside_mount(self):
+        _qbit, manager = self.build_manager(mount_path="/mnt/ultra-media")
+        dirs = manager._refresh_dirs_for_torrents(
+            [
+                {"hash": "a" * 40, "name": "Movie", "savePath": "/mnt/ultra-media/films/Movie"},
+                {"hash": "b" * 40, "name": "Outside", "savePath": "/home/media/Outside"},
+                {"hash": "c" * 40, "name": "Root", "savePath": "/mnt/ultra-media"},
+                {"hash": "d" * 40, "name": "Empty", "savePath": ""},
+            ]
+        )
+        self.assertEqual(dirs, ["films/Movie"])
 
 
 if __name__ == "__main__":

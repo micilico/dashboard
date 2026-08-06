@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import posixpath
 import re
 import secrets
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from ..config import (
     PUBLIC_PREFIX,
     RCLONE_RC_REFRESH_DIR,
     RCLONE_RC_REFRESH_URL,
+    RCLONE_RC_TIMEOUT_SECONDS,
     RCLONE_REFRESH_MODE,
     RCLONE_SYSTEMD_RESTART_CMD,
 )
@@ -85,6 +87,7 @@ class MediaAutomationConfig:
     jellyfin_api_key: str
     jellyfin_library_map: dict[str, str]
     jellyfin_global_fallback: bool
+    rclone_rc_timeout_seconds: float = 20.0
 
 
 def build_media_automation_config() -> MediaAutomationConfig:
@@ -102,6 +105,7 @@ def build_media_automation_config() -> MediaAutomationConfig:
         rclone_refresh_mode=RCLONE_REFRESH_MODE,
         rclone_rc_refresh_url=RCLONE_RC_REFRESH_URL,
         rclone_rc_refresh_dir=RCLONE_RC_REFRESH_DIR,
+        rclone_rc_timeout_seconds=max(1.0, RCLONE_RC_TIMEOUT_SECONDS),
         rclone_systemd_unit=os.getenv("TORRENT_PANEL_RCLONE_SYSTEMD_UNIT", ""),
         rclone_systemd_restart_cmd=RCLONE_SYSTEMD_RESTART_CMD,
         jellyfin_api_url=JELLYFIN_API_URL.rstrip("/"),
@@ -245,7 +249,8 @@ class MediaAutomationManager:
             self._pending_hashes.clear()
             batch_torrents = [self._pending_torrents.pop(item) for item in hashes if item in self._pending_torrents]
             entries = [self._create_history_entry(torrent) for torrent in batch_torrents]
-            await self._run_full_workflow(entries)
+            refresh_dirs = self._refresh_dirs_for_torrents(batch_torrents)
+            await self._run_full_workflow(entries, refresh_dirs)
             self._save_state()
             return entries
 
@@ -290,14 +295,31 @@ class MediaAutomationManager:
     def _library_for_category(self, category: str) -> str:
         return self._config.jellyfin_library_map.get(category.strip().lower(), "")
 
-    async def _run_full_workflow(self, entries: list[dict[str, Any]]) -> None:
+    def _refresh_dirs_for_torrents(self, torrents: list[dict[str, Any]]) -> list[str]:
+        mount_path = posixpath.normpath(str(self._config.mount_path).replace(os.sep, "/"))
+        dirs: list[str] = []
+        for torrent in torrents:
+            save_path = str(torrent.get("savePath") or torrent.get("save_path") or "").strip()
+            if not save_path:
+                continue
+            normalized = posixpath.normpath(save_path.replace(os.sep, "/"))
+            try:
+                relative = posixpath.relpath(normalized, mount_path)
+            except ValueError:
+                continue
+            if relative == "." or relative.startswith("../") or posixpath.isabs(relative):
+                continue
+            dirs.append(relative)
+        return sorted(set(dirs))
+
+    async def _run_full_workflow(self, entries: list[dict[str, Any]], refresh_dirs: list[str] | None = None) -> None:
         if not entries:
             return
         for entry in entries:
             self._update_entry_state(entry, "rclone_refresh", "Actualisation rclone")
             entry["retry"] = {"full": False, "jellyfin": False}
         self._set_notification("Téléchargement terminé — actualisation des médias…", entry_id=entries[0]["id"])
-        rclone_ok = await self._attempt_rclone(entries)
+        rclone_ok = await self._attempt_rclone(entries, refresh_dirs)
         if not rclone_ok:
             return
         mount_ok = await self._attempt_mount(entries)
@@ -307,11 +329,11 @@ class MediaAutomationManager:
             await asyncio.sleep(self._config.jellyfin_delay_seconds)
         await self._attempt_jellyfin(entries)
 
-    async def _attempt_rclone(self, entries: list[dict[str, Any]]) -> bool:
+    async def _attempt_rclone(self, entries: list[dict[str, Any]], refresh_dirs: list[str] | None = None) -> bool:
         last_error = "Actualisation rclone impossible."
         for attempt in range(1, self._config.max_rclone_retries + 1):
             try:
-                await self.refresh_rclone()
+                await self.refresh_rclone(dirs=refresh_dirs)
                 for entry in entries:
                     self._mark_step(entry, "rclone", "success", "Actualisation rclone effectuée.", attempts=attempt)
                     self._update_entry_state(entry, "mount_wait", "Attente du montage")
@@ -383,35 +405,50 @@ class MediaAutomationManager:
         self._set_notification("Actualisation impossible — intervention requise", "warning", entry_id=entries[0]["id"])
         return False
 
-    async def refresh_rclone(self) -> None:
+    async def refresh_rclone(
+        self,
+        dirs: list[str] | None = None,
+        *,
+        recursive: bool = True,
+        async_run: bool = False,
+    ) -> None:
         mode = self._config.rclone_refresh_mode
         if mode not in {"auto", "rc", "systemd"}:
             raise MediaAutomationError("Mode de rafraîchissement rclone invalide.")
         if mode in {"auto", "rc"}:
-            try:
-                await self._refresh_rclone_rc()
-                return
-            except MediaAutomationError:
-                if mode == "rc":
-                    raise
-        if mode in {"auto", "systemd"}:
-            await self._refresh_rclone_systemd()
+            await self._refresh_rclone_rc(dirs=dirs, recursive=recursive, async_run=async_run)
             return
-        raise MediaAutomationError("Aucune méthode rclone disponible.")
+        if async_run:
+            raise MediaAutomationError("Le mode systemd ne supporte pas le refresh asynchrone.")
+        await self._refresh_rclone_systemd()
+        return
 
-    async def _refresh_rclone_rc(self) -> None:
+    async def _refresh_rclone_rc(
+        self,
+        dirs: list[str] | None = None,
+        *,
+        recursive: bool = True,
+        async_run: bool = False,
+    ) -> None:
         if not self._config.rclone_rc_refresh_url:
             raise MediaAutomationError("Endpoint RC rclone non configuré.")
         params: dict[str, str] = {}
-        if self._config.rclone_rc_refresh_dir:
-            params["dir"] = self._config.rclone_rc_refresh_dir
+        refresh_dirs = [directory for directory in (dirs or []) if directory.strip()] or (
+            [self._config.rclone_rc_refresh_dir] if self._config.rclone_rc_refresh_dir else []
+        )
+        for index, directory in enumerate(refresh_dirs[:8]):
+            params["dir" if index == 0 else f"dir{index + 1}"] = directory
+        if recursive:
+            params["recursive"] = "true"
+        if async_run:
+            params["_async"] = "true"
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self._config.rclone_rc_timeout_seconds)) as client:
                 response = await client.post(self._config.rclone_rc_refresh_url, params=params)
         except httpx.HTTPError as exc:
-            raise MediaAutomationError("Endpoint RC rclone inaccessible.") from exc
+            raise MediaAutomationError("Endpoint RC rclone inaccessible — montage non modifié.") from exc
         if response.status_code >= 400:
-            raise MediaAutomationError(f"Rclone RC a refusé l'actualisation ({response.status_code}).")
+            raise MediaAutomationError(f"Rclone RC a refusé l'actualisation ({response.status_code}) — montage non modifié.")
 
     async def _refresh_rclone_systemd(self) -> None:
         raw_cmd = self._config.rclone_systemd_restart_cmd.strip()
@@ -541,10 +578,10 @@ class MediaAutomationManager:
     async def manual_action(self, action: str) -> dict[str, str]:
         async with self._lock:
             if action == "rclone-refresh":
-                await self.refresh_rclone()
+                await self.refresh_rclone(async_run=True)
                 self._set_notification("Actualisation rclone lancée manuellement.")
                 self._save_state()
-                return {"status": "ok", "message": "Actualisation rclone lancée."}
+                return {"status": "ok", "message": "Actualisation rclone lancée — montage non démonté."}
             if action == "jellyfin-refresh":
                 await self.trigger_jellyfin_scan([])
                 self._set_notification("Scan Jellyfin lancé manuellement.")
