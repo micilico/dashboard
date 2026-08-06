@@ -36,6 +36,7 @@ SCANDIR_CACHE_TTL = int(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_TTL", "10"))
 ULTRA_API_URL = os.getenv("CLOUD_PANEL_ULTRA_API_URL", "").strip().rstrip("/")
 ULTRA_API_URL = _strip_ultra_suffix(ULTRA_API_URL)
 ULTRA_API_TOKEN = os.getenv("CLOUD_PANEL_ULTRA_API_TOKEN", "")
+ULTRA_API_TIMEOUT_SECONDS = float(os.getenv("CLOUD_PANEL_ULTRA_API_TIMEOUT_SECONDS", "5"))
 ULTRA_API_CACHE_TTL = float(os.getenv("CLOUD_PANEL_ULTRA_API_CACHE_TTL", "60"))
 
 DATA_DIR = Path(os.getenv("CLOUD_PANEL_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))

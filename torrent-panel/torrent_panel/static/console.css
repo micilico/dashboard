@@ -165,6 +165,7 @@
   background: var(--surface-1);
   padding: 12px;
   overflow-x: auto;
+  position: relative;
 }
 
 .chart {
@@ -173,22 +174,82 @@
   height: auto;
 }
 
-.chart-bars .bar-a {
-  fill: var(--accent);
+.chart-lines .chart-hit {
+  fill: transparent;
+  pointer-events: all;
+  cursor: crosshair;
 }
 
-.chart-bars .bar-b {
-  fill: var(--success);
+.chart-guide {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chart-guide.is-visible {
+  opacity: 0.55;
 }
 
 .chart-line-path {
-  stroke: var(--accent);
-  stroke-width: 2;
   fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-line-path.series-a {
+  stroke: var(--accent);
+}
+
+.chart-line-path.series-b {
+  stroke: var(--success);
 }
 
 .chart-line-dot {
-  fill: var(--accent);
+  fill: var(--surface-2);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.chart-line-dot.series-b {
+  stroke: var(--success);
+}
+
+.chart-line-dot.is-active {
+  fill: var(--text);
+}
+
+.chart-tick {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: 240px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-tooltip strong {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 2px;
+}
+
+.chart-tooltip[hidden] {
+  display: none;
 }
 
 .chart-legend {
@@ -239,5 +300,11 @@
 @media (max-width: 767px) {
   .ratio-threshold-form {
     flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-guide {
+    transition: none;
   }
 }

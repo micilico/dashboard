@@ -231,6 +231,74 @@ class TestFolderSize:
         assert get_folder_size_fn("", "docs")["size_bytes"] == 15
 
 
+class TestFolderSizes:
+    def _reload(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import get_folder_sizes as fn
+        return fn
+
+    def test_batch_multiple(self, tmp_path, monkeypatch):
+        get_folder_sizes_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "a.txt").write_bytes(b"a" * 100)
+        (tmp_path / "media").mkdir()
+        (tmp_path / "media" / "nested").mkdir()
+        (tmp_path / "media" / "nested" / "b.txt").write_bytes(b"b" * 250)
+        result = get_folder_sizes_fn(["docs", "media"])
+        assert result["total"] == 2
+        assert result["failed"] == 0
+        by_path = {item["path"]: item for item in result["items"]}
+        assert by_path["docs"]["size_bytes"] == 100
+        assert by_path["media"]["size_bytes"] == 250
+
+    def test_batch_invalid_path_skipped(self, tmp_path, monkeypatch):
+        get_folder_sizes_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "a.txt").write_bytes(b"a" * 10)
+        result = get_folder_sizes_fn(["docs", "nope"])
+        assert result["total"] == 2
+        assert result["failed"] == 1
+        assert [item["path"] for item in result["items"]] == ["docs"]
+
+    def test_batch_file_path_skipped(self, tmp_path, monkeypatch):
+        get_folder_sizes_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "file.txt").write_bytes(b"f" * 5)
+        result = get_folder_sizes_fn(["docs", "file.txt"])
+        assert result["failed"] == 1
+        assert [item["path"] for item in result["items"]] == ["docs"]
+
+    def test_batch_matches_single(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import get_folder_size, get_folder_sizes
+
+        (tmp_path / "a" / "b").mkdir(parents=True)
+        (tmp_path / "a" / "b" / "c.txt").write_bytes(b"c" * 40)
+        batch = get_folder_sizes(["a/b"])
+        single = get_folder_size("a", "b")
+        assert batch["items"][0]["size_bytes"] == single["size_bytes"]
+        assert batch["items"][0]["path"] == single["path"]
+
+    def test_batch_empty(self, tmp_path, monkeypatch):
+        get_folder_sizes_fn = self._reload(monkeypatch, tmp_path)
+        result = get_folder_sizes_fn([])
+        assert result == {"items": [], "total": 0, "failed": 0}
+
+    def test_batch_blank_entries_ignored(self, tmp_path, monkeypatch):
+        get_folder_sizes_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        result = get_folder_sizes_fn(["", "docs", "  "])
+        assert result["total"] == 3
+        assert result["failed"] == 0
+        assert [item["path"] for item in result["items"]] == ["docs"]
+
+
 class TestListDirectory:
     def test_list_root(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
@@ -281,6 +349,61 @@ class TestListDirectory:
         assert "disk_used" in result
         assert "disk_total" in result
         assert "disk_percent" in result
+
+
+class TestDiskUsageQuota:
+    """get_disk_usage must only report the slot quota, never the server disk."""
+
+    def _reload(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        return cloud_panel.storage
+
+    def test_quota_ok_reports_slot(self, tmp_path, monkeypatch):
+        storage = self._reload(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "cloud_panel.storage._fetch_ultra_quota_sync",
+            lambda: (932 * 1024**3, 835 * 1024**3, 104152956928),
+        )
+        storage._disk_cache = None
+        result = storage.get_disk_usage()
+        assert result["available"] is True
+        assert "N/A" not in result["disk_total"]
+        assert "N/A" not in result["disk_used"]
+
+    def test_quota_failure_is_na_not_server(self, tmp_path, monkeypatch):
+        storage = self._reload(monkeypatch, tmp_path)
+        monkeypatch.setattr("cloud_panel.storage._fetch_ultra_quota_sync", lambda: None)
+        storage._disk_cache = None
+
+        def fail_disk_usage(*args, **kwargs):
+            raise AssertionError("server disk_usage must never be called for quota panels")
+
+        monkeypatch.setattr("cloud_panel.storage.shutil.disk_usage", fail_disk_usage)
+        result = storage.get_disk_usage()
+        assert result["available"] is False
+        assert result["disk_used"] == "N/A"
+        assert result["disk_total"] == "N/A"
+        assert result["disk_percent"] == 0
+
+    def test_not_configured_is_na(self, tmp_path, monkeypatch):
+        storage = self._reload(monkeypatch, tmp_path)
+        monkeypatch.setattr("cloud_panel.storage.ULTRA_API_URL", "")
+        monkeypatch.setattr("cloud_panel.storage.ULTRA_API_TOKEN", "")
+        storage._disk_cache = None
+        result = storage.get_disk_usage()
+        assert result["available"] is False
+        assert result["disk_used"] == "N/A"
+
+    def test_list_directory_exposes_available(self, tmp_path, monkeypatch):
+        storage = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "a.txt").write_text("x")
+        monkeypatch.setattr("cloud_panel.storage._fetch_ultra_quota_sync", lambda: None)
+        storage._disk_cache = None
+        result = storage.list_directory("")
+        assert result["disk_available"] is False
 
 
 class TestCreateDirectory:

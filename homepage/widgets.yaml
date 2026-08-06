@@ -12,7 +12,6 @@
 
 - resources:
     label: Stockage média
-    disk: /mnt/ultra-media
     expanded: true
     diskUnits: bytes
     refresh: 10000

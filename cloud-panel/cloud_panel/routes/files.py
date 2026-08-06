@@ -20,6 +20,7 @@ from ..storage import (
     delete_item,
     clear_scandir_cache,
     get_folder_size,
+    get_folder_sizes,
 )
 from ..services.media import apply_organization_plan, build_organization_plan
 from .csrf_guard import require_action_guard, set_csrf_cookie
@@ -248,6 +249,28 @@ async def folder_size(
         raise HTTPException(
             status_code=500,
             detail=error_detail("size_error", "Calcul de la taille impossible.", "Réessayer"),
+        )
+
+
+@router.post("/files/sizes")
+async def folder_sizes(
+    request: Request,
+    _=Depends(require_action_guard),
+    paths: str = Form(...),
+):
+    """Compute the recursive size of several folders in one batch."""
+    file_list = [p.strip() for p in paths.split("\n") if p.strip()]
+    if not file_list:
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail("no_folders", "Aucun dossier sélectionné.", "Sélectionner des dossiers"),
+        )
+    try:
+        return get_folder_sizes(file_list)
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("size_error", "Calcul des tailles impossible.", "Réessayer"),
         )
 
 

@@ -115,6 +115,11 @@ assert.equal(source.includes("Operationnel"), false);
 assert.equal(source.includes("form.innerHTML"), false);
 assert.equal(source.includes("row.innerHTML"), false);
 assert.equal(consoleSource.includes("innerHTML"), false);
+assert.match(consoleSource, /function seriesLineChart/);
+assert.equal(consoleSource.includes("function barChart"), false);
+assert.equal(consoleSource.includes("function lineChart"), false);
+assert.match(consoleSource, /chart-guide/);
+assert.match(consoleSource, /chart-tooltip/);
 
 // Refonte : Uploadé, densité, surlignage, undo toast, fraîcheur
 assert.ok(source.includes('uploaded: "Total téléversé"'), "SORT_LABELS must expose uploaded");

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import shutil
 from typing import Any
 
 import httpx
@@ -34,6 +32,7 @@ from ..config import (
     SSH_PROWLARR_HOST,
     SSH_PROWLARR_PORT,
     STORAGE_PUBLIC_PREFIX,
+    ULTRA_API_TIMEOUT_SECONDS,
     ULTRA_API_TOKEN,
     ULTRA_API_URL,
 )
@@ -534,6 +533,7 @@ def _disk_snapshot(total_bytes: int, free_bytes: int, source: str) -> dict[str, 
     return {
         "path": MONITOR_DISK_PATH,
         "mounted": True,
+        "available": True,
         "status": status,
         "totalBytes": total_bytes,
         "usedBytes": used_bytes,
@@ -545,6 +545,24 @@ def _disk_snapshot(total_bytes: int, free_bytes: int, source: str) -> dict[str, 
     }
 
 
+def _disk_unavailable(quota_error: str | None) -> dict[str, Any]:
+    """Disk payload when the slot quota is not available. Never uses server-wide sizes."""
+    return {
+        "path": MONITOR_DISK_PATH,
+        "mounted": False,
+        "available": False,
+        "status": "critical",
+        "totalBytes": 0,
+        "usedBytes": 0,
+        "freeBytes": 0,
+        "usedPercent": 0.0,
+        "freePercent": 0.0,
+        "estimateToFull": None,
+        "source": "unavailable",
+        "quotaError": quota_error,
+    }
+
+
 async def _fetch_ultra_quota() -> tuple[tuple[int, int, int] | None, str | None]:
     if not ULTRA_API_URL or not ULTRA_API_TOKEN:
         return None, "not_configured"
@@ -552,7 +570,7 @@ async def _fetch_ultra_quota() -> tuple[tuple[int, int, int] | None, str | None]
     for path in _ULTRA_PATHS:
         try:
             headers = {"Authorization": f"Bearer {ULTRA_API_TOKEN}"}
-            async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS)) as client:
                 response = await client.get(f"{ULTRA_API_URL}{path}", headers=headers)
         except httpx.TimeoutException:
             return None, "timeout"
@@ -578,36 +596,12 @@ async def _fetch_ultra_quota() -> tuple[tuple[int, int, int] | None, str | None]
 
 async def storage_snapshot(app: FastAPI) -> dict[str, Any]:
     generated_at = now_iso()
-    disk: dict[str, Any]
     quota, quota_error = await _fetch_ultra_quota()
     if quota is not None:
         total_bytes, _used_bytes, free_bytes = quota
         disk = _disk_snapshot(total_bytes, free_bytes, "ultra-api")
     else:
-        try:
-            if hasattr(os, "statvfs"):
-                stats = os.statvfs(MONITOR_DISK_PATH)
-                total_bytes = stats.f_frsize * stats.f_blocks
-                free_bytes = stats.f_frsize * stats.f_bavail
-            else:
-                usage = shutil.disk_usage(MONITOR_DISK_PATH)
-                total_bytes = usage.total
-                free_bytes = usage.free
-            disk = _disk_snapshot(total_bytes, free_bytes, "local")
-        except OSError:
-            disk = {
-                "path": MONITOR_DISK_PATH,
-                "mounted": False,
-                "status": "critical",
-                "totalBytes": 0,
-                "usedBytes": 0,
-                "freeBytes": 0,
-                "usedPercent": 0.0,
-                "freePercent": 0.0,
-                "estimateToFull": None,
-                "source": "local",
-            }
-        disk["quotaError"] = quota_error
+        disk = _disk_unavailable(quota_error)
 
     rclone_stats: dict[str, Any] = {}
     rclone_error = ""

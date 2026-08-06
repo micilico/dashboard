@@ -25,7 +25,13 @@ from torrent_panel.main import (  # noqa: E402
 from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
 from torrent_panel.routes import dashboard as dashboard_routes  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
-from torrent_panel.services.monitoring import _fetch_ultra_quota, _parse_ultra_quota  # noqa: E402
+from torrent_panel.services.monitoring import (
+    _disk_snapshot,
+    _disk_unavailable,
+    _fetch_ultra_quota,
+    _parse_ultra_quota,
+    storage_snapshot,
+)  # noqa: E402
 from torrent_panel.services.ratio_monitor import MAX_THRESHOLD, MIN_THRESHOLD, RatioMonitor, RatioThresholdError  # noqa: E402
 from torrent_panel.services.stats import StatsStore  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
@@ -917,6 +923,108 @@ class UltraQuotaFetchTests(unittest.IsolatedAsyncioTestCase):
         quota, error = await self._fetch_with("", "")
         self.assertIsNone(quota)
         self.assertEqual(error, "not_configured")
+
+
+class StorageSnapshotQuotaTests(unittest.IsolatedAsyncioTestCase):
+    """storage_snapshot must only ever report the slot quota, never the server disk."""
+
+    def _patch_rclone(self):
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {}
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def post(self, url, json=None):
+                return FakeResponse()
+
+        return mock.patch("torrent_panel.services.monitoring.httpx.AsyncClient", FakeAsyncClient)
+
+    async def test_quota_ok_reports_ultra_api(self):
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "torrent_panel.services.monitoring._fetch_ultra_quota",
+                    mock.AsyncMock(return_value=((932 * 1024**3, 835 * 1024**3, 104152956928), None)),
+                )
+            )
+            stack.enter_context(self._patch_rclone())
+            result = await storage_snapshot(mock.Mock())
+        disk = result["disk"]
+        self.assertEqual(disk["source"], "ultra-api")
+        self.assertTrue(disk["available"])
+        self.assertEqual(disk["totalBytes"], 932 * 1024**3)
+        self.assertEqual(disk["usedBytes"], 835 * 1024**3)
+
+    async def test_quota_failure_is_unavailable_not_server(self):
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "torrent_panel.services.monitoring._fetch_ultra_quota",
+                    mock.AsyncMock(return_value=(None, "timeout")),
+                )
+            )
+            stack.enter_context(self._patch_rclone())
+            result = await storage_snapshot(mock.Mock())
+        disk = result["disk"]
+        self.assertFalse(disk["available"])
+        self.assertEqual(disk["source"], "unavailable")
+        self.assertEqual(disk["totalBytes"], 0)
+        self.assertEqual(disk["usedBytes"], 0)
+        self.assertEqual(disk["quotaError"], "timeout")
+
+    async def test_quota_not_configured_is_unavailable(self):
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "torrent_panel.services.monitoring._fetch_ultra_quota",
+                    mock.AsyncMock(return_value=(None, "not_configured")),
+                )
+            )
+            stack.enter_context(self._patch_rclone())
+            result = await storage_snapshot(mock.Mock())
+        disk = result["disk"]
+        self.assertFalse(disk["available"])
+        self.assertEqual(disk["source"], "unavailable")
+        self.assertEqual(disk["quotaError"], "not_configured")
+        self.assertEqual(disk["totalBytes"], 0)
+
+    async def test_quota_failure_never_calls_disk_usage(self):
+        with ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "torrent_panel.services.monitoring._fetch_ultra_quota",
+                    mock.AsyncMock(return_value=(None, "http_500")),
+                )
+            )
+            stack.enter_context(self._patch_rclone())
+            result = await storage_snapshot(mock.Mock())
+        self.assertEqual(result["disk"]["source"], "unavailable")
+        self.assertEqual(result["disk"]["totalBytes"], 0)
+        self.assertEqual(result["disk"]["usedBytes"], 0)
+        self.assertFalse(result["disk"]["available"])
+
+    def test_disk_unavailable_payload(self):
+        payload = _disk_unavailable("connection")
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["source"], "unavailable")
+        self.assertEqual(payload["totalBytes"], 0)
+        self.assertEqual(payload["quotaError"], "connection")
+
+    def test_disk_snapshot_available_flag(self):
+        payload = _disk_snapshot(1000, 400, "ultra-api")
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["source"], "ultra-api")
 
 
 if __name__ == "__main__":

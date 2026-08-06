@@ -636,4 +636,74 @@ suite('Folder size on demand', () => {
   });
 });
 
+suite('Bulk folder sizes', () => {
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+  const html = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "index.html"),
+    "utf8",
+  );
+
+  function rememberFolderSize(f, d, map) {
+    f.size = d.size;
+    f.size_bytes = d.size_bytes;
+    map.set(f.path, { size: d.size, size_bytes: d.size_bytes });
+  }
+
+  function mergeKnownSizes(items, map) {
+    items.forEach(f => {
+      if (!f.is_dir) return;
+      const s = map.get(f.path);
+      if (s) { f.size = s.size; f.size_bytes = s.size_bytes; }
+    });
+  }
+
+  function buildPathsPayload(dirs) {
+    return dirs.map(f => f.path).join("\n");
+  }
+
+  test('toolbar exposes a "Calculer les tailles" button', () => {
+    assert.ok(html.includes('id="btnCalcSizes"'));
+    assert.ok(html.includes("Calculer les tailles"));
+  });
+
+  test('known sizes are restored on listing load so sorting works', () => {
+    const items = [
+      { name: "A", path: "A", is_dir: true, size_bytes: 0 },
+      { name: "B", path: "B", is_dir: true, size_bytes: 0 },
+      { name: "c.txt", path: "c.txt", is_dir: false },
+    ];
+    const map = new Map([["A", { size: "1.5 Go", size_bytes: 1610612736 }]]);
+    mergeKnownSizes(items, map);
+    assert.strictEqual(items[0].size_bytes, 1610612736);
+    assert.strictEqual(items[1].size_bytes, 0);
+    assert.ok(!items[2].hasOwnProperty("size_bytes") || !items[2].size);
+  });
+
+  test('batch payload joins visible folder paths with newlines', () => {
+    const dirs = [
+      { path: "Films" },
+      { path: "Series/Show" },
+    ];
+    assert.strictEqual(buildPathsPayload(dirs), "Films\nSeries/Show");
+  });
+
+  test('batch result updates the remembered sizes map', () => {
+    const map = new Map();
+    const f = { path: "Films", size_bytes: 0 };
+    rememberFolderSize(f, { size: "2.0 Go", size_bytes: 2147483648 }, map);
+    assert.strictEqual(f.size_bytes, 2147483648);
+    assert.deepEqual(map.get("Films"), { size: "2.0 Go", size_bytes: 2147483648 });
+  });
+
+  test('bulk sizes post to the /files/sizes endpoint', () => {
+    assert.ok(appSource.includes('au("/files/sizes")'));
+    assert.ok(appSource.includes("function calcAllFolderSizes"));
+    assert.ok(appSource.includes('$("btnCalcSizes").addEventListener("click", calcAllFolderSizes)'));
+    assert.ok(appSource.includes("folderSizes: new Map()"));
+  });
+});
+
 console.log('\nTous les tests passes.');

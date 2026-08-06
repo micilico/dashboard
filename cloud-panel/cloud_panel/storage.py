@@ -10,7 +10,7 @@ import time
 import httpx
 from fastapi import UploadFile
 
-from .config import MOUNT_PATH, SCANDIR_CACHE_TTL, ULTRA_API_CACHE_TTL, ULTRA_API_TOKEN, ULTRA_API_URL, UPLOAD_CHUNK_SIZE
+from .config import MOUNT_PATH, SCANDIR_CACHE_TTL, ULTRA_API_CACHE_TTL, ULTRA_API_TIMEOUT_SECONDS, ULTRA_API_TOKEN, ULTRA_API_URL, UPLOAD_CHUNK_SIZE
 from .security import resolve_path_within
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ def _fetch_ultra_quota_sync() -> tuple[int, int, int] | None:
         return None
     for path in _ULTRA_PATHS:
         try:
-            with httpx.Client(timeout=httpx.Timeout(5)) as client:
+            with httpx.Client(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS)) as client:
                 response = client.get(
                     f"{ULTRA_API_URL}{path}",
                     headers={"Authorization": f"Bearer {ULTRA_API_TOKEN}"},
@@ -100,33 +100,29 @@ def _fetch_ultra_quota_sync() -> tuple[int, int, int] | None:
     return None
 
 
-def get_disk_usage() -> dict[str, str | float]:
-    """Disk usage for the sidebar. Prefers the ultra.cc quota API (user quota),
-    falls back to local mount stats. Cached for ULTRA_API_CACHE_TTL seconds."""
+def get_disk_usage() -> dict[str, str | float | bool]:
+    """Disk usage for the sidebar. Uses the ultra.cc quota API (user quota only).
+    When the quota is unavailable, returns N/A instead of falling back to the
+    server-wide mount stats. Cached for ULTRA_API_CACHE_TTL seconds."""
     global _disk_cache
     now = time.time()
     if _disk_cache and now - _disk_cache[0] < ULTRA_API_CACHE_TTL:
         return _disk_cache[1]
-    total_bytes = 0
-    used_bytes = 0
     totals = _fetch_ultra_quota_sync()
     if totals is not None:
         total_bytes, used_bytes, _free = totals
-    if total_bytes <= 0:
-        try:
-            usage = shutil.disk_usage(MOUNT_PATH)
-            total_bytes = usage.total
-            used_bytes = usage.used
-        except OSError:
-            total_bytes = 0
-            used_bytes = 0
-    if total_bytes <= 0:
-        result: dict[str, str | float] = {"disk_used": "N/A", "disk_total": "N/A", "disk_percent": 0}
-    else:
-        result = {
+        result: dict[str, str | float | bool] = {
             "disk_used": format_size(used_bytes),
             "disk_total": format_size(total_bytes),
             "disk_percent": round(used_bytes / total_bytes * 100, 1),
+            "available": True,
+        }
+    else:
+        result = {
+            "disk_used": "N/A",
+            "disk_total": "N/A",
+            "disk_percent": 0,
+            "available": False,
         }
     _disk_cache = (now, result)
     return result
@@ -216,6 +212,35 @@ def get_folder_size(relative_path: str, name: str) -> dict:
     }
 
 
+def get_folder_sizes(paths: list[str]) -> dict:
+    """Compute the recursive size of several folders in one batch.
+
+    Invalid or non-directory paths are counted in ``failed`` instead of
+    raising, so a single request can compute all visible folders safely.
+    """
+    items: list[dict] = []
+    failed = 0
+    for raw_rel in paths:
+        rel = raw_rel.strip() if isinstance(raw_rel, str) else raw_rel
+        if not rel:
+            continue
+        try:
+            target = resolve_path_within(MOUNT_PATH, rel, must_exist=True)
+            if not os.path.isdir(target):
+                failed += 1
+                continue
+            size_bytes = _folder_size_cached(os.path.realpath(target))
+            items.append({
+                'path': os.path.relpath(target, MOUNT_PATH),
+                'name': rel.replace("/", os.sep).rsplit(os.sep, 1)[-1],
+                'size': format_size(size_bytes),
+                'size_bytes': size_bytes,
+            })
+        except ValueError:
+            failed += 1
+    return {'items': items, 'total': len(paths), 'failed': failed}
+
+
 def format_size(size_bytes: int) -> str:
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if size_bytes < 1024.0:
@@ -246,6 +271,7 @@ def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, se
         'disk_used': disk_used,
         'disk_total': disk_total,
         'disk_percent': disk_percent,
+        'disk_available': usage.get("available", True),
     }
 
 
