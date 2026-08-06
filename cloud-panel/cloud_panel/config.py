@@ -4,6 +4,15 @@ import os
 from pathlib import Path
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+def _strip_ultra_suffix(url: str) -> str:
+    """Accept base URL or a full endpoint URL (e.g. .../ultra-api/get-diskquota)."""
+    for suffix in ("/get-diskquota", "/get_diskquota", "/get-traffic", "/total-stats"):
+        if url.endswith(suffix):
+            url = url[: -len(suffix)]
+            break
+    return url.rstrip("/")
 PUBLIC_PREFIX = os.getenv("CLOUD_PANEL_PUBLIC_PREFIX", "/cloud-panel").rstrip("/")
 MOUNT_PATH = os.getenv("CLOUD_PANEL_MOUNT_PATH", "/mnt/ultra-media")
 CSRF_COOKIE = "cloud_panel_csrf"
@@ -20,7 +29,8 @@ TRUSTED_PROXY_IPS = {
 }
 UPLOAD_CHUNK_SIZE = int(os.getenv("CLOUD_PANEL_UPLOAD_CHUNK_SIZE", str(1024 * 1024)))
 SCANDIR_CACHE_TTL = int(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_TTL", "10"))
-ULTRA_API_URL = os.getenv("CLOUD_PANEL_ULTRA_API_URL", "").rstrip("/")
+ULTRA_API_URL = os.getenv("CLOUD_PANEL_ULTRA_API_URL", "").strip().rstrip("/")
+ULTRA_API_URL = _strip_ultra_suffix(ULTRA_API_URL)
 ULTRA_API_TOKEN = os.getenv("CLOUD_PANEL_ULTRA_API_TOKEN", "")
 ULTRA_API_CACHE_TTL = float(os.getenv("CLOUD_PANEL_ULTRA_API_CACHE_TTL", "60"))
 

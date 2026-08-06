@@ -686,6 +686,93 @@ $("headerSyncButton")?.addEventListener("click", () => {
   $("btnSync").click();
 });
 
+// ── Organize series ──
+$("btnOrganizeSeries").addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  const msg = qs("#organizeMessage", $("organizeDialog"));
+  msg.textContent = "";
+  setButtonBusy(btn, true);
+  try {
+    const fd = new FormData();
+    fd.append("path", S.path);
+    const d = await api(au("/files/organize-series/preview"), { method: "POST", body: fd });
+    renderOrganizePreview(d);
+    openDialog($("organizeDialog"), btn);
+  } catch (e) {
+    msg.textContent = e.message;
+  } finally {
+    setButtonBusy(btn, false);
+  }
+});
+
+function renderOrganizePreview(d) {
+  const groups = d.series || [];
+  const total = Number(d.total) || 0;
+  const summary = $("organizeSummary");
+  const list = $("organizeGroups");
+  const confirmBtn = $("confirmOrganizeBtn");
+  list.replaceChildren();
+  if (!groups.length) {
+    summary.textContent = "Aucune saison détectée dans ce dossier.";
+    confirmBtn.disabled = true;
+    return;
+  }
+  summary.textContent = `${groups.length} série${groups.length > 1 ? "s" : ""} · ${total} élément${total > 1 ? "s" : ""} à ranger`;
+  confirmBtn.disabled = false;
+  groups.forEach(g => {
+    const item = document.createElement("div");
+    item.className = "organize-group";
+    item.setAttribute("role", "listitem");
+    const head = document.createElement("div");
+    head.className = "organize-group-head";
+    const name = document.createElement("span");
+    name.className = "organize-group-name";
+    name.textContent = g.name;
+    name.title = g.name;
+    const badge = document.createElement("span");
+    badge.className = "organize-group-badge";
+    badge.textContent = g.folder_exists ? "fusion" : "création";
+    head.append(name, badge);
+    const items = document.createElement("ul");
+    items.className = "organize-group-items";
+    (g.items || []).forEach(entry => {
+      const li = document.createElement("li");
+      const ic = document.createElement("span");
+      ic.className = `file-icon ${entry.is_dir ? "folder" : fileIcon(entry.name, false)}`;
+      ic.innerHTML = fileIconSVG(fileIcon(entry.name, entry.is_dir));
+      const txt = document.createElement("span");
+      txt.textContent = entry.name;
+      txt.title = entry.name;
+      li.append(ic, txt);
+      items.append(li);
+    });
+    item.append(head, items);
+    list.append(item);
+  });
+}
+
+$("organizeForm").addEventListener("submit", (e) => { e.preventDefault(); $("confirmOrganizeBtn").click(); });
+$("cancelOrganizeBtn").addEventListener("click", () => $("organizeDialog").close());
+$("confirmOrganizeBtn").addEventListener("click", async () => {
+  const btn = $("confirmOrganizeBtn");
+  setButtonBusy(btn, true);
+  try {
+    const fd = new FormData();
+    fd.append("path", S.path);
+    const r = await api(au("/files/organize-series/apply"), { method: "POST", body: fd });
+    $("organizeDialog").close();
+    const sc = Number(r.series_count) || 0;
+    const m = Number(r.moved) || 0;
+    toast(`${m} élément${m > 1 ? "s" : ""} rangé${m > 1 ? "s" : ""} dans ${sc} série${sc > 1 ? "s" : ""}.`);
+    if (r.errors && r.errors.length) toast(`Non déplacé${r.errors.length > 1 ? "s" : ""} : ${r.errors.slice(0, 2).join(" · ")}`);
+    loadFiles();
+  } catch (e) {
+    qs("#organizeMessage", $("organizeDialog")).textContent = e.message;
+  } finally {
+    setButtonBusy(btn, false);
+  }
+});
+
 // Sidebar nav
 qsa("[data-nav]").forEach(b => b.addEventListener("click", () => {
   const v = b.dataset.nav;
@@ -751,7 +838,7 @@ function switchView(v) {
 
 // ── Keyboard ──
 document.addEventListener("keydown", (e) => {
-  if ($("uploadDialog").open || $("mkdirDialog").open || $("renameDialog").open || $("deleteDialog").open || $("shareDialog").open || $("previewDialog").open) {
+  if ($("uploadDialog").open || $("mkdirDialog").open || $("renameDialog").open || $("deleteDialog").open || $("shareDialog").open || $("previewDialog").open || $("organizeDialog").open) {
     if (e.key === "Escape") { e.preventDefault(); document.querySelector("dialog[open]")?.close(); }
     return;
   }

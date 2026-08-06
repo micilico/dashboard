@@ -3,7 +3,9 @@ import os
 import tempfile
 import sys
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -22,7 +24,7 @@ from torrent_panel.main import (  # noqa: E402
 )
 from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
-from torrent_panel.services.monitoring import _parse_ultra_quota  # noqa: E402
+from torrent_panel.services.monitoring import _fetch_ultra_quota, _parse_ultra_quota  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
 
 
@@ -633,6 +635,35 @@ class StorageQuotaTests(unittest.TestCase):
         self.assertEqual(total, 2 * 1024**4)
         self.assertEqual(free, 1024**3)
 
+    def test_parse_ultra_quota_storage_info_key(self):
+        payload = {
+            "Storage Info": {
+                "free_storage_bytes": 104152956928,
+                "total_storage_unit": "G",
+                "total_storage_value": 932,
+                "used_storage_unit": "G",
+                "used_storage_value": 835,
+            }
+        }
+        total, used, free = _parse_ultra_quota(payload)
+        self.assertEqual(total, 932 * 1024**3)
+        self.assertEqual(free, 104152956928)
+        self.assertEqual(used, total - free)
+
+    def test_parse_ultra_quota_derives_free_from_used(self):
+        payload = {
+            "Storage Info": {
+                "total_storage_unit": "G",
+                "total_storage_value": 10,
+                "used_storage_unit": "G",
+                "used_storage_value": 4,
+            }
+        }
+        total, used, free = _parse_ultra_quota(payload)
+        self.assertEqual(total, 10 * 1024**3)
+        self.assertEqual(free, 6 * 1024**3)
+        self.assertEqual(used, 4 * 1024**3)
+
     def test_parse_ultra_quota_returns_none_on_invalid_payload(self):
         self.assertIsNone(_parse_ultra_quota({}))
         self.assertIsNone(_parse_ultra_quota({"service_stats_info": {}}))
@@ -653,6 +684,104 @@ class StorageQuotaTests(unittest.TestCase):
             )
         )
         self.assertIsNone(_parse_ultra_quota([]))
+
+
+class UltraUrlNormalizationTests(unittest.TestCase):
+    def test_strip_suffix_from_full_endpoint(self):
+        from torrent_panel.config import _strip_ultra_suffix
+
+        self.assertEqual(
+            _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get-diskquota"),
+            "https://user.host.usbx.me/ultra-api",
+        )
+        self.assertEqual(
+            _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get_diskquota"),
+            "https://user.host.usbx.me/ultra-api",
+        )
+        self.assertEqual(
+            _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/"),
+            "https://user.host.usbx.me/ultra-api",
+        )
+        self.assertEqual(_strip_ultra_suffix("https://user.host.usbx.me/ultra-api"), "https://user.host.usbx.me/ultra-api")
+        self.assertEqual(_strip_ultra_suffix(""), "")
+
+
+class UltraQuotaFetchTests(unittest.IsolatedAsyncioTestCase):
+    class FakeResponse:
+        def __init__(self, payload=None, status_code=200):
+            self._payload = payload if payload is not None else {}
+            self.status_code = status_code
+
+        def json(self):
+            return self._payload
+
+    def _make_client(self, responses):
+        requests = []
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def get(self, url, headers=None):
+                requests.append(url)
+                return responses.get(url, UltraQuotaFetchTests.FakeResponse())
+
+        return FakeAsyncClient, requests
+
+    async def _fetch_with(self, url, token, client=None):
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch("torrent_panel.services.monitoring.ULTRA_API_URL", url))
+            stack.enter_context(mock.patch("torrent_panel.services.monitoring.ULTRA_API_TOKEN", token))
+            if client is not None:
+                stack.enter_context(mock.patch("torrent_panel.services.monitoring.httpx.AsyncClient", client))
+            return await _fetch_ultra_quota()
+
+    async def test_fetch_prefers_hyphen_path(self):
+        responses = {
+            "https://slot/ultra-api/get-diskquota": self.FakeResponse(
+                {"Storage Info": {"free_storage_bytes": 104152956928, "total_storage_unit": "G", "total_storage_value": 932, "used_storage_unit": "G", "used_storage_value": 835}}
+            )
+        }
+        client, requests = self._make_client(responses)
+        quota, error = await self._fetch_with("https://slot/ultra-api", "token", client)
+        self.assertIsNone(error)
+        self.assertEqual(quota, (932 * 1024**3, 835 * 1024**3, 104152956928))
+        self.assertEqual(requests, ["https://slot/ultra-api/get-diskquota"])
+
+    async def test_fetch_falls_back_to_underscore_path(self):
+        responses = {
+            "https://slot/ultra-api/get-diskquota": self.FakeResponse(),
+            "https://slot/ultra-api/get_diskquota": self.FakeResponse(
+                {"Storage Info": {"free_storage_bytes": 10, "total_storage_unit": "G", "total_storage_value": 1}}
+            ),
+        }
+        client, requests = self._make_client(responses)
+        quota, error = await self._fetch_with("https://slot/ultra-api", "token", client)
+        self.assertIsNone(error)
+        self.assertEqual(quota, (1024**3, 1024**3 - 10, 10))
+        self.assertEqual(requests, ["https://slot/ultra-api/get-diskquota", "https://slot/ultra-api/get_diskquota"])
+
+    async def test_fetch_reports_http_error(self):
+        responses = {
+            "https://slot/ultra-api/get-diskquota": self.FakeResponse(status_code=404),
+            "https://slot/ultra-api/get_diskquota": self.FakeResponse(status_code=404),
+        }
+        client, requests = self._make_client(responses)
+        quota, error = await self._fetch_with("https://slot/ultra-api", "token", client)
+        self.assertIsNone(quota)
+        self.assertEqual(error, "http_404")
+        self.assertEqual(len(requests), 2)
+
+    async def test_fetch_not_configured(self):
+        quota, error = await self._fetch_with("", "")
+        self.assertIsNone(quota)
+        self.assertEqual(error, "not_configured")
 
 
 if __name__ == "__main__":

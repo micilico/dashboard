@@ -6,6 +6,15 @@ from pathlib import Path
 
 STATIC_DIR = Path(__file__).parent / "static"
 HASH_RE = re.compile(r"^[A-Fa-f0-9]{40}([A-Fa-f0-9]{24})?$")
+
+
+def _strip_ultra_suffix(url: str) -> str:
+    """Accept base URL or a full endpoint URL (e.g. .../ultra-api/get-diskquota)."""
+    for suffix in ("/get-diskquota", "/get_diskquota", "/get-traffic", "/total-stats"):
+        if url.endswith(suffix):
+            url = url[: -len(suffix)]
+            break
+    return url.rstrip("/")
 PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_PUBLIC_PREFIX", "/torrent-panel").rstrip("/")
 ACTIVITY_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_ACTIVITY_PUBLIC_PREFIX", "/activity").rstrip("/")
 STORAGE_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")
@@ -36,7 +45,8 @@ MONITOR_HTTP_TIMEOUT_SECONDS = float(os.getenv("TORRENT_PANEL_MONITOR_HTTP_TIMEO
 MONITOR_DISK_PATH = os.getenv("TORRENT_PANEL_MONITOR_DISK_PATH", "/mnt/ultra-media")
 MONITOR_DISK_WARNING_PERCENT = float(os.getenv("TORRENT_PANEL_MONITOR_DISK_WARNING_PERCENT", "10"))
 MONITOR_DISK_CRITICAL_PERCENT = float(os.getenv("TORRENT_PANEL_MONITOR_DISK_CRITICAL_PERCENT", "5"))
-ULTRA_API_URL = os.getenv("TORRENT_PANEL_ULTRA_API_URL", "").rstrip("/")
+ULTRA_API_URL = os.getenv("TORRENT_PANEL_ULTRA_API_URL", "").strip().rstrip("/")
+ULTRA_API_URL = _strip_ultra_suffix(ULTRA_API_URL)
 ULTRA_API_TOKEN = os.getenv("TORRENT_PANEL_ULTRA_API_TOKEN", "")
 HOMEPAGE_STATUS_URL = os.getenv("TORRENT_PANEL_HOMEPAGE_STATUS_URL", "http://127.0.0.1:3001/")
 PROWLARR_PANEL_READY_URL = os.getenv(

@@ -536,4 +536,50 @@ suite('Drag & drop (move) logic', () => {
   });
 });
 
+suite('Organize series feature', () => {
+  const html = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "index.html"),
+    "utf8",
+  );
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+
+  test('toolbar exposes a "Grouper les séries" button', () => {
+    assert.ok(html.includes('id="btnOrganizeSeries"'));
+    assert.ok(html.includes("Grouper les séries"));
+  });
+
+  test('organize dialog is present with summary, list and confirm/cancel', () => {
+    assert.ok(html.includes('id="organizeDialog"'));
+    assert.ok(html.includes('id="organizeSummary"'));
+    assert.ok(html.includes('id="organizeGroups"'));
+    assert.ok(html.includes('id="confirmOrganizeBtn"'));
+    assert.ok(html.includes('id="cancelOrganizeBtn"'));
+  });
+
+  test('preview and apply call the series endpoints', () => {
+    assert.ok(appSource.includes('au("/files/organize-series/preview")'));
+    assert.ok(appSource.includes('au("/files/organize-series/apply")'));
+  });
+
+  test('preview renders series names safely with textContent', () => {
+    assert.ok(appSource.includes("name.textContent = g.name"));
+    assert.ok(appSource.includes("txt.textContent = entry.name"));
+    assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{g\.name\}/.test(appSource));
+    assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{entry\.name\}/.test(appSource));
+  });
+
+  test('confirmation is disabled when nothing to organize', () => {
+    assert.ok(appSource.includes('confirmBtn.disabled = true'));
+    assert.ok(appSource.includes("Aucune saison détectée dans ce dossier."));
+  });
+
+  test('apply result shows a summary toast and reloads the listing', () => {
+    assert.ok(appSource.includes("r.series_count"));
+    assert.ok(appSource.includes("loadFiles();"));
+  });
+});
+
 console.log('\nTous les tests passes.');

@@ -874,6 +874,109 @@ class TestEdgeCases:
         assert "PB" in result
 
 
+class TestSeriesOrganizer:
+    @staticmethod
+    def _reload(monkeypatch, tmp_path):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        import cloud_panel.services.series
+        importlib.reload(cloud_panel.services.series)
+
+    def test_extract_series_name_patterns(self):
+        from cloud_panel.services.series import extract_series_name
+        assert extract_series_name("Breaking.Bad.S01") == "Breaking.Bad"
+        assert extract_series_name("Breaking.Bad.S01E01.1080p.WEB-DL") == "Breaking.Bad"
+        assert extract_series_name("Breaking.Bad.Season.1") == "Breaking.Bad"
+        assert extract_series_name("The Office - Saison 2") == "The Office"
+        assert extract_series_name("Show.S01E03.mkv") == "Show"
+        assert extract_series_name("Show S01E01") == "Show"
+        assert extract_series_name("breaking.bad.s05") == "breaking.bad"
+
+    def test_extract_series_name_no_match(self):
+        from cloud_panel.services.series import extract_series_name
+        assert extract_series_name("Movie.2020.1080p") is None
+        assert extract_series_name("recap.txt") is None
+        assert extract_series_name("Show.posters") is None
+        assert extract_series_name("S01E01.mkv") is None
+        assert extract_series_name("") is None
+
+    def test_plan_groups_seasons_without_moving(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.series import build_series_plan
+
+        (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S02").mkdir()
+        (tmp_path / "Other.Show.S01E01.mkv").write_text("data")
+        (tmp_path / "Movie.2020.1080p").mkdir()
+        (tmp_path / "recap.txt").write_text("x")
+
+        plan = build_series_plan("")
+        assert [g["name"] for g in plan["series"]] == ["Other.Show", "Show"]
+        by_name = {g["name"]: g for g in plan["series"]}
+        assert sorted(i["name"] for i in by_name["Show"]["items"]) == ["Show.S01", "Show.S02"]
+        assert by_name["Show"]["items"][0]["is_dir"] is True
+        assert plan["total"] == 3
+        assert (tmp_path / "Show.S01").is_dir(), "preview must not move anything"
+        assert (tmp_path / "recap.txt").exists()
+
+    def test_apply_moves_seasons_into_series_folder(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.series import apply_series_plan
+        from cloud_panel.models import _get_conn, get_history
+        _get_conn()
+
+        (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S02").mkdir()
+        (tmp_path / "Show.S02" / "ep.mkv").write_text("data")
+
+        result = apply_series_plan("")
+        assert result["success"]
+        assert result["moved"] == 2
+        assert result["created"] == ["Show"]
+        assert (tmp_path / "Show" / "Show.S01").is_dir()
+        assert (tmp_path / "Show" / "Show.S02" / "ep.mkv").exists()
+        assert not (tmp_path / "Show.S01").exists()
+        moves = [h for h in get_history() if h["action"] == "move"]
+        assert len(moves) >= 2
+
+    def test_apply_merges_into_existing_series_folder(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.series import apply_series_plan
+
+        (tmp_path / "Breaking.Bad").mkdir()
+        (tmp_path / "Breaking.Bad" / "S01").mkdir()
+        (tmp_path / "Breaking.Bad.S02").mkdir()
+
+        result = apply_series_plan("")
+        assert result["created"] == []
+        assert (tmp_path / "Breaking.Bad" / "S01").is_dir()
+        assert (tmp_path / "Breaking.Bad" / "Breaking.Bad.S02").is_dir()
+        assert not (tmp_path / "Breaking.Bad.S02").exists()
+
+    def test_apply_reports_conflicts_without_erasing(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.series import apply_series_plan
+
+        (tmp_path / "Show").mkdir()
+        (tmp_path / "Show" / "Show.S01").mkdir()
+        (tmp_path / "Show" / "Show.S01" / "keep.mkv").write_text("data")
+        (tmp_path / "Show.S01").mkdir()
+
+        result = apply_series_plan("")
+        assert result["moved"] == 0
+        assert result["errors"], "conflict should be reported"
+        assert (tmp_path / "Show" / "Show.S01" / "keep.mkv").exists()
+
+    def test_apply_rejects_outside_path(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.series import apply_series_plan
+        with pytest.raises(ValueError, match="Chemin hors|introuvable"):
+            apply_series_plan("../")
+
+
 class TestUltraQuota:
     def test_parse_ultra_quota_valid(self):
         total, used, free = _parse_ultra_quota(
@@ -903,6 +1006,46 @@ class TestUltraQuota:
         )
         assert total == 2 * 1024**4
         assert free == 1024**3
+
+    def test_parse_ultra_quota_storage_info_key(self):
+        total, used, free = _parse_ultra_quota(
+            {
+                "Storage Info": {
+                    "free_storage_bytes": 104152956928,
+                    "total_storage_unit": "G",
+                    "total_storage_value": 932,
+                    "used_storage_unit": "G",
+                    "used_storage_value": 835,
+                }
+            }
+        )
+        assert total == 932 * 1024**3
+        assert free == 104152956928
+        assert used == total - free
+
+    def test_parse_ultra_quota_derives_free_from_used(self):
+        total, used, free = _parse_ultra_quota(
+            {
+                "Storage Info": {
+                    "total_storage_unit": "G",
+                    "total_storage_value": 10,
+                    "used_storage_unit": "G",
+                    "used_storage_value": 4,
+                }
+            }
+        )
+        assert total == 10 * 1024**3
+        assert free == 6 * 1024**3
+        assert used == 4 * 1024**3
+
+    def test_strip_ultra_suffix_normalizes_url(self):
+        from cloud_panel.config import _strip_ultra_suffix
+
+        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get-diskquota") == "https://user.host.usbx.me/ultra-api"
+        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get_diskquota") == "https://user.host.usbx.me/ultra-api"
+        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/") == "https://user.host.usbx.me/ultra-api"
+        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api") == "https://user.host.usbx.me/ultra-api"
+        assert _strip_ultra_suffix("") == ""
 
     def test_parse_ultra_quota_returns_none_on_invalid_payload(self):
         assert _parse_ultra_quota({}) is None

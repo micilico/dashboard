@@ -20,6 +20,7 @@ from ..storage import (
     delete_item,
     clear_scandir_cache,
 )
+from ..services.series import apply_series_plan, build_series_plan
 from .csrf_guard import require_action_guard, set_csrf_cookie
 
 router = APIRouter()
@@ -213,3 +214,46 @@ async def refresh(
     """Clear cache and refresh directory listing."""
     clear_scandir_cache()
     return {"success": True, "message": "Cache vide"}
+
+
+@router.post("/files/organize-series/preview")
+async def organize_series_preview(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(""),
+):
+    """Preview how series seasons would be grouped into per-series folders."""
+    try:
+        return build_series_plan(path)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Dossier non autorisé ou introuvable.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("organize_error", "Analyse impossible.", "Réessayer"),
+        )
+
+
+@router.post("/files/organize-series/apply")
+async def organize_series_apply(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(""),
+):
+    """Group series seasons into per-series folders in the current directory."""
+    try:
+        result = apply_series_plan(path)
+        return result
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Dossier non autorisé ou introuvable.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("organize_error", "Réorganisation impossible.", "Réessayer"),
+        )
