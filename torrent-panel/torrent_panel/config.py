@@ -20,11 +20,11 @@ ACTIVITY_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_ACTIVITY_PUBLIC_PREFIX", "/act
 STORAGE_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")
 MEDIA_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_MEDIA_PUBLIC_PREFIX", "/media-panel").rstrip("/")
 HEALTH_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_HEALTH_PUBLIC_PREFIX", "/health").rstrip("/")
-CONSOLE_PREFIXES = [ACTIVITY_PUBLIC_PREFIX, STORAGE_PUBLIC_PREFIX, MEDIA_PUBLIC_PREFIX, HEALTH_PUBLIC_PREFIX]
+STATS_PUBLIC_PREFIX = os.getenv("TORRENT_PANEL_STATS_PUBLIC_PREFIX", "/stats-panel").rstrip("/")
+CONSOLE_PREFIXES = [ACTIVITY_PUBLIC_PREFIX, STORAGE_PUBLIC_PREFIX, MEDIA_PUBLIC_PREFIX, HEALTH_PUBLIC_PREFIX, STATS_PUBLIC_PREFIX]
 PROWLARR_PANEL_PUBLIC_PREFIX = os.getenv("PROWLARR_PANEL_PUBLIC_PREFIX", "/prowlarr-panel").rstrip("/")
 CSRF_COOKIE = "torrent_panel_csrf"
 CSRF_HEADER = "X-Torrent-Panel-CSRF"
-PROWLARR_PANEL_INTERNAL_AUTH_SECRET = os.getenv("PROWLARR_PANEL_INTERNAL_AUTH_SECRET", "")
 MAX_RATE_KEYS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_KEYS", "2048"))
 RATE_LIMIT_CALLS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_CALLS", "40"))
 RATE_LIMIT_SECONDS = int(os.getenv("TORRENT_PANEL_RATE_LIMIT_SECONDS", "60"))
@@ -100,6 +100,20 @@ TRACKER_STATS_STATE_PATH = Path(
         str(Path(__file__).resolve().parents[1] / "data" / "tracker-stats-state.json"),
     )
 )
+STATS_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_STATS_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "stats-state.json"),
+    )
+)
+STATS_HISTORY_DAYS = int(os.getenv("TORRENT_PANEL_STATS_HISTORY_DAYS", "60"))
+RATIO_MONITOR_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_RATIO_MONITOR_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "ratio-monitor-state.json"),
+    )
+)
+RATIO_ALERT_THRESHOLD = float(os.getenv("TORRENT_PANEL_RATIO_ALERT_THRESHOLD", "10"))
 MEDIA_MOUNT_PATH = os.getenv("TORRENT_PANEL_MEDIA_MOUNT_PATH", MONITOR_DISK_PATH)
 RCLONE_REFRESH_MODE = os.getenv("TORRENT_PANEL_RCLONE_REFRESH_MODE", "rc").strip().lower()
 RCLONE_RC_REFRESH_URL = os.getenv("TORRENT_PANEL_RCLONE_RC_REFRESH_URL", "http://127.0.0.1:5572/vfs/refresh")

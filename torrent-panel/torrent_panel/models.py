@@ -60,6 +60,10 @@ class NotificationAction(BaseModel):
     code: str = Field(..., min_length=3, max_length=160)
 
 
+class RatioThresholdUpdate(BaseModel):
+    threshold: float = Field(..., ge=1, le=100)
+
+
 class TorrentCategoryUpdate(TorrentHashesAction):
     category: str = Field(default="", max_length=80)
 

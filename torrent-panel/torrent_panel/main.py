@@ -31,7 +31,12 @@ from .config import (  # noqa: E402
     PUBLIC_PREFIX,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_SECONDS,
+    RATIO_ALERT_THRESHOLD,
+    RATIO_MONITOR_STATE_PATH,
     STATIC_DIR,
+    STATS_HISTORY_DAYS,
+    STATS_PUBLIC_PREFIX,
+    STATS_STATE_PATH,
     STORAGE_PUBLIC_PREFIX,
     TRACKER_STATS_STATE_PATH,
 )
@@ -59,6 +64,8 @@ from .services.media_automation import (  # noqa: E402
     MediaAutomationManager,
 )
 from .services.notifications import NotificationCenter  # noqa: E402
+from .services.ratio_monitor import RatioMonitor  # noqa: E402
+from .services.stats import StatsStore  # noqa: E402
 from .services.tracker_stats import TrackerStatsStore  # noqa: E402
 
 from logging import basicConfig, getLogger  # noqa: E402
@@ -104,6 +111,8 @@ app.state.media_automation = MediaAutomationManager(app.state.qbit, build_media_
 app.state.notifications = NotificationCenter(NOTIFICATION_STATE_PATH)
 app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
 app.state.tracker_stats = TrackerStatsStore(TRACKER_STATS_STATE_PATH)
+app.state.stats = StatsStore(STATS_STATE_PATH, history_days=STATS_HISTORY_DAYS)
+app.state.ratio_monitor = RatioMonitor(RATIO_MONITOR_STATE_PATH, threshold=RATIO_ALERT_THRESHOLD)
 app.state.csrf_tokens = {}
 app.state.action_limiter = RateLimiter(
     max_calls=RATE_LIMIT_CALLS,
@@ -150,6 +159,7 @@ async def config_js() -> PlainTextResponse:
                 f'  storagePrefix: "{STORAGE_PUBLIC_PREFIX or ""}",',
                 f'  mediaPrefix: "{MEDIA_PUBLIC_PREFIX or ""}",',
                 f'  healthPrefix: "{HEALTH_PUBLIC_PREFIX or ""}",',
+                f'  statsPrefix: "{STATS_PUBLIC_PREFIX or ""}",',
                 "};",
             ]
         ),
@@ -172,6 +182,7 @@ def _console_config_js(section: str, prefix: str) -> PlainTextResponse:
                 f'  storagePrefix: "{STORAGE_PUBLIC_PREFIX or ""}",',
                 f'  mediaPrefix: "{MEDIA_PUBLIC_PREFIX or ""}",',
                 f'  healthPrefix: "{HEALTH_PUBLIC_PREFIX or ""}",',
+                f'  statsPrefix: "{STATS_PUBLIC_PREFIX or ""}",',
                 "};",
             ]
         ),
@@ -215,6 +226,7 @@ register_console_page(ACTIVITY_PUBLIC_PREFIX, "activity", "activity.html")
 register_console_page(STORAGE_PUBLIC_PREFIX, "storage", "storage.html")
 register_console_page(MEDIA_PUBLIC_PREFIX, "media", "media.html")
 register_console_page(HEALTH_PUBLIC_PREFIX, "health", "health.html")
+register_console_page(STATS_PUBLIC_PREFIX, "stats", "stats.html")
 
 
 @app.get("/healthz")

@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Médias</title>
-    <link rel="stylesheet" href="./static/dist/console.min.css?v=20260803-refonte">
+    <title>Statistiques</title>
+    <link rel="stylesheet" href="./static/dist/console.min.css?v=20260806-stats">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
     <main id="content" class="shell">
-      <!-- dashboard-shell:start current="media" -->
+      <!-- dashboard-shell:start current="stats" -->
       <header class="topbar">
         <div class="brand-block">
           <a class="brand-mark" href="/torrent-panel/?view=home" aria-label="Retour a la vue d'ensemble">
@@ -47,7 +47,7 @@
               <span class="nav-label">Plus</span>
             </button>
             <div class="nav-more-panel" id="nav-more-panel" aria-hidden="true">
-          <a id="mediaLink" aria-current="page" href="/media-panel/" data-shell-nav="media">
+          <a id="mediaLink" href="/media-panel/" data-shell-nav="media">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8M8 12h5M8 15h8"></path></svg></span>
             <span class="nav-label">Médias</span>
           </a>
@@ -63,7 +63,7 @@
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"></path></svg></span>
             <span class="nav-label">Activité</span>
           </a>
-          <a id="statsLink" href="/stats-panel/" data-shell-nav="stats">
+          <a id="statsLink" aria-current="page" href="/stats-panel/" data-shell-nav="stats">
             <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"></path></svg></span>
             <span class="nav-label">Statistiques</span>
           </a>
@@ -76,7 +76,7 @@
               <span class="status-dot"></span>
               <span id="statusText">Service prêt</span>
             </div>
-            <p id="sidebarStatusDetail">Surveillance en direct.</p>
+            <p id="sidebarStatusDetail">Historique des métriques.</p>
           </div>
           <div class="status-pill" id="refreshStatus" aria-live="polite">
             <span>Dernière mise a jour</span>
@@ -95,10 +95,10 @@
         </div>
       </header>
       <!-- dashboard-shell:end -->
-      <section class="page-header" aria-labelledby="pageTitle" data-od-id="media-header">
+      <section class="page-header" aria-labelledby="pageTitle" data-od-id="stats-header">
         <div class="page-header-copy">
-          <p class="eyebrow" id="pageEyebrow">Bibliothèque</p>
-          <h1 id="pageTitle">Médias</h1>
+          <p class="eyebrow" id="pageEyebrow">Métriques</p>
+          <h1 id="pageTitle">Statistiques</h1>
           <p id="pageSubtitle" class="page-subtitle"></p>
           <div id="pageStatus" class="page-status" hidden></div>
         </div>
@@ -109,15 +109,15 @@
           <button id="primaryButton" type="button" class="button primary" hidden></button>
         </div>
       </section>
-      <section id="summaryGrid" class="summary-grid summary-grid-console" data-od-id="media-summary"></section>
-      <section class="content-grid" data-od-id="media-content">
+      <section id="summaryGrid" class="summary-grid summary-grid-console" data-od-id="stats-summary"></section>
+      <section class="content-grid" data-od-id="stats-content">
         <div id="contentA"></div>
         <div id="contentB"></div>
       </section>
-      <section id="cardsGrid" class="cards-grid" data-od-id="media-cards"></section>
+      <section id="cardsGrid" class="cards-grid" data-od-id="stats-cards"></section>
     </main>
     <div id="toast" class="toast" hidden></div>
-    <script src="./config.js?v=20260803-refonte"></script>
-    <script src="./static/dist/console.min.js?v=20260803-refonte" defer></script>
+    <script src="./config.js?v=20260806-stats"></script>
+    <script src="./static/dist/console.min.js?v=20260806-stats" defer></script>
   </body>
   </html>

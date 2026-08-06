@@ -205,6 +205,7 @@ async def config_js() -> PlainTextResponse:
                 f'  storagePrefix: "{os.getenv("TORRENT_PANEL_STORAGE_PUBLIC_PREFIX", "/storage-panel").rstrip("/")}",',
                 f'  mediaPrefix: "{os.getenv("TORRENT_PANEL_MEDIA_PUBLIC_PREFIX", "/media-panel").rstrip("/")}",',
                 f'  healthPrefix: "{os.getenv("TORRENT_PANEL_HEALTH_PUBLIC_PREFIX", "/health").rstrip("/")}",',
+                f'  statsPrefix: "{os.getenv("TORRENT_PANEL_STATS_PUBLIC_PREFIX", "/stats-panel").rstrip("/")}",',
                 "};",
             ]
         ),

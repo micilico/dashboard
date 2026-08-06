@@ -3,6 +3,9 @@ services:
     image: ghcr.io/gethomepage/homepage:v1.13.1
     container_name: homepage
     restart: unless-stopped
+    # NOTE: cap_drop ALL non appliqué ici volontairement — l'image officielle
+    # utilise PUID/PGID via gosu/su-exec (nécessite CAP_SETUID/SETGID au boot).
+    # Testez cap_drop: [ALL] après mise à niveau avant de l'activer.
     ports:
       - "127.0.0.1:3001:3000"
     extra_hosts:
@@ -15,8 +18,12 @@ services:
       TZ: ${TZ:-Europe/Paris}
     volumes:
       - ./homepage:/app/config
-      - /mnt/ultra-media:/mnt/ultra-media:ro
+      # - /sys:/sys:ro  # Désactivable : évite d'exposer /sys au conteneur.
+      #                    Les widgets disque/CPU Homepage nécessitent ce montage.
       - /sys:/sys:ro
+      # Sécurité : les variables HOMEPAGE_VAR_* (identifiants qBittorrent,
+      # Prowlarr/Jellyfin) vivent dans ./.env et sont injectées dans ce
+      # conteneur. Préférez des identifiants dédiés, à moindre privilège.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 30s
@@ -32,6 +39,8 @@ services:
     restart: unless-stopped
     init: true
     read_only: true
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     network_mode: "host"
@@ -68,6 +77,8 @@ services:
     restart: unless-stopped
     init: true
     read_only: true
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     network_mode: "host"
@@ -98,6 +109,8 @@ services:
     restart: unless-stopped
     init: true
     read_only: true
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     network_mode: "host"
@@ -133,6 +146,8 @@ services:
     profiles: ["tools"]
     network_mode: none
     read_only: true
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
     environment:

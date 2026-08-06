@@ -5,7 +5,7 @@ import threading
 import time
 from contextlib import contextmanager
 
-from .config import DB_PATH
+from .config import DB_PATH, SHARE_MAX_EXPIRY_DAYS
 
 _conn: sqlite3.Connection | None = None
 _conn_lock = threading.Lock()
@@ -143,6 +143,7 @@ def create_share_link(
     expiry_days: int,
     is_zip: bool = False,
 ) -> dict:
+    expiry_days = max(0, min(int(expiry_days), SHARE_MAX_EXPIRY_DAYS))
     expires_at = time.time() + expiry_days * 86400 if expiry_days > 0 else None
     with get_db() as db:
         db.execute(
@@ -169,7 +170,12 @@ def get_share_links(limit: int = 50, offset: int = 0) -> list[dict]:
             "SELECT * FROM share_links ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
-    return [dict(r) for r in rows]
+    items = []
+    for row in rows:
+        item = dict(row)
+        item.pop("password_hash", None)
+        items.append(item)
+    return items
 
 
 def revoke_share_link(token: str) -> dict:
@@ -179,12 +185,18 @@ def revoke_share_link(token: str) -> dict:
 
 
 def extend_share_link(token: str, extra_days: int) -> dict:
+    extra_days = max(0, min(int(extra_days), SHARE_MAX_EXPIRY_DAYS))
     with get_db() as db:
         row = db.execute("SELECT expires_at FROM share_links WHERE token = ?", (token,)).fetchone()
         if not row:
             return {"success": False, "error": "Lien introuvable"}
         current_expiry = row["expires_at"] or time.time()
         new_expiry = current_expiry + extra_days * 86400
+        if extra_days <= 0:
+            return {"success": False, "error": "Duree invalide"}
+        cap = time.time() + SHARE_MAX_EXPIRY_DAYS * 86400
+        if new_expiry > cap:
+            new_expiry = cap
         db.execute("UPDATE share_links SET expires_at = ? WHERE token = ?", (new_expiry, token))
     return {"success": True, "token": token, "expires_at": new_expiry}
 

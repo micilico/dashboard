@@ -4,6 +4,7 @@ import html
 import hashlib
 import hmac
 import os
+import secrets
 import time
 from datetime import datetime
 from typing import Optional
@@ -13,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from common import error_detail
 
-from ..config import MOUNT_PATH, PUBLIC_PREFIX
+from ..config import MOUNT_PATH, PUBLIC_PREFIX, SHARE_MAX_EXPIRY_DAYS
 from ..services.share import (
     create_file_share_link,
     create_folder_share_link,
@@ -30,7 +31,7 @@ from ..models import (
     increment_download_count,
 )
 from ..security import resolve_path_within
-from .csrf_guard import require_action_guard
+from .csrf_guard import client_key, require_action_guard
 
 router = APIRouter()
 
@@ -302,6 +303,7 @@ async def share_file(
     expiry_days: int = Form(7),
 ):
     try:
+        expiry_days = max(0, min(expiry_days, SHARE_MAX_EXPIRY_DAYS))
         password_hash = _hash_password(password) if password else None
         result = create_file_share_link(path, password_hash, expiry_days)
         base_url = str(request.base_url).rstrip("/")
@@ -328,6 +330,7 @@ async def share_folder(
     expiry_days: int = Form(7),
 ):
     try:
+        expiry_days = max(0, min(expiry_days, SHARE_MAX_EXPIRY_DAYS))
         password_hash = _hash_password(password) if password else None
         result = create_folder_share_link(path, password_hash, expiry_days)
         base_url = str(request.base_url).rstrip("/")
@@ -381,8 +384,14 @@ async def extend_link(
     days: int = Form(7),
 ):
     try:
+        days = max(0, min(days, SHARE_MAX_EXPIRY_DAYS))
         result = extend_share_link(token, days)
         if not result.get("success"):
+            if result.get("error") == "Duree invalide":
+                raise HTTPException(
+                    status_code=422,
+                    detail=error_detail("invalid_duration", "Durée de prolongation invalide.", "Choisir une durée positive"),
+                )
             raise HTTPException(
                 status_code=404,
                 detail=error_detail("not_found", "Lien introuvable.", "Actualiser la liste"),
@@ -432,9 +441,14 @@ async def download_share(
                         samesite="Lax",
                     )
                     return response
-                if password:
-                    return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
-                return HTMLResponse(content=PASSWORD_FORM, status_code=401)
+                if not password:
+                    return HTMLResponse(content=PASSWORD_FORM, status_code=401)
+                if not _share_attempt_allowed(request, token):
+                    return HTMLResponse(
+                        content=_notice_card("Trop de tentatives", "Trop de tentatives de connexion. Réessayez plus tard.", "error"),
+                        status_code=429,
+                    )
+                return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
 
         is_dir = link.get("is_dir", False)
         is_zip = link.get("is_zip", False)
@@ -519,14 +533,38 @@ async def history_data(request: Request, limit: int = 50, offset: int = 0):
 
 
 def _hash_password(password: str) -> str:
-    import hashlib
+    iterations = 210_000
     salt = os.urandom(16).hex()
-    return salt + ":" + hashlib.sha256((salt + password).encode()).hexdigest()
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations).hex()
+    return f"pbkdf2_sha256${iterations}${salt}${derived}"
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    import hashlib
+    if not isinstance(password_hash, str) or not password_hash:
+        return False
+    if password_hash.startswith("pbkdf2_sha256$"):
+        parts = password_hash.split("$")
+        if len(parts) != 4:
+            return False
+        _scheme, iterations, salt, expected = parts
+        try:
+            iterations = int(iterations)
+        except ValueError:
+            return False
+        if iterations < 1:
+            return False
+        derived = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations).hex()
+        return secrets.compare_digest(derived, expected)
     if ":" not in password_hash:
         return False
     salt, hsh = password_hash.split(":", 1)
-    return hsh == hashlib.sha256((salt + password).encode()).hexdigest()
+    candidate = hashlib.sha256((salt + password).encode()).hexdigest()
+    return secrets.compare_digest(candidate, hsh)
+
+
+def _share_attempt_allowed(request: Request, token: str) -> bool:
+    """Rate-limit password attempts on the public share route per token+client."""
+    limiter = getattr(request.app.state, "share_limiter", None)
+    if limiter is None:
+        return True
+    return limiter.allow(f"share:{token}:{client_key(request)}")

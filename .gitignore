@@ -14,6 +14,10 @@ logs/
 **/logs/
 torrent-panel/data/media-automation-state.json
 torrent-panel/data/notification-state.json
+torrent-panel/data/stats-state.json
+torrent-panel/data/ratio-monitor-state.json
+torrent-panel/data/automation-rules.json
+torrent-panel/data/tracker-stats-state.json
 
 # Runtime databases and SQLite journals may contain private paths or share tokens
 **/*.db

@@ -21,6 +21,10 @@ from .config import (  # noqa: E402
     MAX_RATE_KEYS,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_SECONDS,
+    READ_RATE_LIMIT_CALLS,
+    READ_RATE_LIMIT_SECONDS,
+    SHARE_RATE_LIMIT_CALLS,
+    SHARE_RATE_LIMIT_SECONDS,
     STATIC_DIR,
 )
 from .routes.files import router as files_router  # noqa: E402
@@ -46,6 +50,16 @@ app.state.csrf_tokens = {}
 app.state.action_limiter = RateLimiter(
     max_calls=RATE_LIMIT_CALLS,
     period_seconds=RATE_LIMIT_SECONDS,
+    max_keys=MAX_RATE_KEYS,
+)
+app.state.share_limiter = RateLimiter(
+    max_calls=SHARE_RATE_LIMIT_CALLS,
+    period_seconds=SHARE_RATE_LIMIT_SECONDS,
+    max_keys=MAX_RATE_KEYS,
+)
+app.state.read_limiter = RateLimiter(
+    max_calls=READ_RATE_LIMIT_CALLS,
+    period_seconds=READ_RATE_LIMIT_SECONDS,
     max_keys=MAX_RATE_KEYS,
 )
 app.state.last_csrf_cleanup = 0.0

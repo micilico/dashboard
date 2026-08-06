@@ -23,8 +23,11 @@ from torrent_panel.main import (  # noqa: E402
     validate_magnet,
 )
 from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
+from torrent_panel.routes import dashboard as dashboard_routes  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
 from torrent_panel.services.monitoring import _fetch_ultra_quota, _parse_ultra_quota  # noqa: E402
+from torrent_panel.services.ratio_monitor import MAX_THRESHOLD, MIN_THRESHOLD, RatioMonitor, RatioThresholdError  # noqa: E402
+from torrent_panel.services.stats import StatsStore  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
 
 
@@ -84,6 +87,8 @@ class BackendTests(unittest.TestCase):
         self.original_qbit = app.state.qbit
         self.original_media = app.state.media_automation
         self.original_tracker_stats = app.state.tracker_stats
+        self.original_stats = app.state.stats
+        self.original_ratio_monitor = app.state.ratio_monitor
         self.original_limiter = app.state.action_limiter
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
         self.original_tr4ker_announce_url = torrent_routes.TR4KER_ANNOUNCE_URL
@@ -114,6 +119,8 @@ class BackendTests(unittest.TestCase):
             ),
         )
         app.state.tracker_stats = TrackerStatsStore(temp_state.parent / "tracker-stats.json")
+        app.state.stats = StatsStore(temp_state.parent / "stats.json", history_days=30)
+        app.state.ratio_monitor = RatioMonitor(temp_state.parent / "ratio-monitor.json", threshold=10.0)
         app.state.action_limiter = RateLimiter(max_calls=100, period_seconds=60, max_keys=100)
         app.state.csrf_tokens = {}
         self.client = TestClient(app)
@@ -125,6 +132,8 @@ class BackendTests(unittest.TestCase):
         app.state.qbit = self.original_qbit
         app.state.media_automation = self.original_media
         app.state.tracker_stats = self.original_tracker_stats
+        app.state.stats = self.original_stats
+        app.state.ratio_monitor = self.original_ratio_monitor
         app.state.action_limiter = self.original_limiter
         app.state.csrf_tokens = self.original_csrf_tokens
         torrent_routes.TR4KER_ANNOUNCE_URL = self.original_tr4ker_announce_url
@@ -387,6 +396,132 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(stats["totals"][0]["downloaded"], 500)
         self.assertEqual(stats["totals"][0]["uploaded"], 250)
         self.assertEqual(stats["totals"][0]["ratio"], 0.5)
+
+    def test_stats_store_records_daily_deltas_and_totals(self):
+        first = app.state.stats.observe(
+            [
+                {
+                    "hash": VALID_HASH,
+                    "name": "Ubuntu",
+                    "downloaded": 1000,
+                    "uploaded": 100,
+                    "state": "downloading",
+                    "downloadSpeed": 1024,
+                    "uploadSpeed": 512,
+                }
+            ],
+            disk={"usedPercent": 42.5, "freeBytes": 1000, "totalBytes": 2000},
+        )
+        self.assertEqual(first["totals"]["observedDays"], 1)
+        self.assertEqual(first["daily"][-1]["downloaded"], 0)
+
+        second = app.state.stats.observe(
+            [
+                {
+                    "hash": VALID_HASH,
+                    "name": "Ubuntu",
+                    "downloaded": 1500,
+                    "uploaded": 350,
+                    "state": "uploading",
+                    "downloadSpeed": 0,
+                    "uploadSpeed": 64,
+                }
+            ],
+            disk={"usedPercent": 50.0, "freeBytes": 1000, "totalBytes": 2000},
+        )
+        last = second["daily"][-1]
+        self.assertEqual(last["downloaded"], 500)
+        self.assertEqual(last["uploaded"], 250)
+        self.assertEqual(last["ratio"], 0.5)
+        self.assertEqual(second["totals"]["downloaded"], 500)
+        self.assertEqual(second["totals"]["uploaded"], 250)
+        self.assertEqual(second["totals"]["ratio"], 0.5)
+        self.assertEqual(last["diskUsedPercent"], 50.0)
+        self.assertEqual(last["downloadingTorrents"], 0)
+        self.assertEqual(last["activeTorrents"], 1)
+
+    def test_stats_store_trims_days_window(self):
+        store = StatsStore(app.state.stats._state_path, history_days=7)
+        days = {}
+        for index in range(10):
+            days[f"2026-08-{index + 1:02d}"] = {"downloaded": 100 * (index + 1), "uploaded": 10 * (index + 1), "ratio": 0.1}
+        store._save({"updatedAt": "2026-08-10T00:00:00+00:00", "torrents": {}, "days": days})
+        snapshot = store.snapshot()
+        self.assertEqual(len(snapshot["daily"]), 7)
+        self.assertEqual(snapshot["daily"][0]["date"], "2026-08-04")
+        self.assertEqual(snapshot["totals"]["downloaded"], sum(100 * (index + 1) for index in range(10)))
+
+    def test_ratio_monitor_flags_high_ratio(self):
+        monitor = app.state.ratio_monitor
+        findings = monitor.evaluate(
+            [
+                {"hash": VALID_HASH, "name": "Seed", "uploaded": 11000, "downloaded": 1000, "tracker": "tracker.test"},
+                {"hash": "b" * 40, "name": "OK", "uploaded": 5000, "downloaded": 1000},
+                {"hash": "c" * 40, "name": "Pas de DL", "uploaded": 5000, "downloaded": 0},
+            ]
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["hash"], VALID_HASH)
+        self.assertEqual(findings[0]["ratio"], 11.0)
+
+    def test_ratio_monitor_build_alerts_uses_stable_code(self):
+        alerts = app.state.ratio_monitor.build_alerts(
+            [{"hash": VALID_HASH, "name": "Seed", "uploaded": 11000, "downloaded": 1000}]
+        )
+        self.assertEqual(len(alerts), 1)
+        self.assertEqual(alerts[0]["code"], f"ratio_high_{VALID_HASH}")
+        self.assertEqual(alerts[0]["severity"], "warning")
+        self.assertIn("11.0", alerts[0]["message"])
+
+    def test_ratio_monitor_threshold_persists_across_instances(self):
+        app.state.ratio_monitor.set_threshold(15.0)
+        reloaded = RatioMonitor(app.state.ratio_monitor._state_path, threshold=10.0)
+        self.assertEqual(reloaded.threshold, 15.0)
+
+    def test_ratio_monitor_snaps_to_step_and_rejects_out_of_bounds(self):
+        monitor = app.state.ratio_monitor
+        monitor.set_threshold(15.3)
+        self.assertEqual(monitor.threshold, 15.5)
+        with self.assertRaises(RatioThresholdError):
+            monitor.set_threshold(0.5)
+        with self.assertRaises(RatioThresholdError):
+            monitor.set_threshold(MAX_THRESHOLD + 1)
+        self.assertEqual(MIN_THRESHOLD, 1.0)
+
+    def test_ratio_threshold_endpoint_updates_threshold(self):
+        response = self.post_action("/torrent-panel/api/stats/ratio-threshold", {"threshold": 15})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["settings"]["threshold"], 15.0)
+        self.assertEqual(app.state.ratio_monitor.threshold, 15.0)
+
+    def test_ratio_threshold_endpoint_rejects_out_of_bounds(self):
+        response = self.post_action("/torrent-panel/api/stats/ratio-threshold", {"threshold": 200})
+        self.assertEqual(response.status_code, 422)
+        response = self.post_action("/torrent-panel/api/stats/ratio-threshold", {"threshold": 0})
+        self.assertEqual(response.status_code, 422)
+
+    def test_stats_endpoint_returns_persistent_payload(self):
+        async def fake_stats_snapshot(app):
+            return {
+                "generatedAt": "2026-08-06T00:00:00+00:00",
+                "stats": app.state.stats.observe(
+                    [{"hash": VALID_HASH, "name": "X", "downloaded": 100, "uploaded": 10}]
+                ),
+                "ratioThreshold": app.state.ratio_monitor.settings(),
+                "ratioAlerts": app.state.ratio_monitor.evaluate(
+                    [{"hash": VALID_HASH, "name": "X", "downloaded": 100, "uploaded": 10000}]
+                ),
+            }
+
+        with mock.patch.object(dashboard_routes, "stats_snapshot", new=fake_stats_snapshot):
+            response = self.client.get("/torrent-panel/api/stats")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("stats", body)
+        self.assertEqual(body["ratioThreshold"]["threshold"], 10.0)
+        self.assertEqual(len(body["ratioAlerts"]), 1)
+        self.assertEqual(body["ratioAlerts"][0]["ratio"], 100.0)
 
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):

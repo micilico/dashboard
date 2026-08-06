@@ -108,6 +108,18 @@ class TestSanitizeFilename:
         with pytest.raises(ValueError, match="invalide"):
             sanitize_filename("..")
 
+    def test_sanitize_trailing_dots_and_spaces(self):
+        assert sanitize_filename("file.txt ") == "file.txt"
+        assert sanitize_filename("file.") == "file"
+        assert sanitize_filename("file  ") == "file"
+
+    def test_sanitize_windows_reserved_names(self):
+        for reserved in ("CON", "con", "NUL", "PRN", "AUX", "COM1", "LPT9"):
+            with pytest.raises(ValueError, match="invalide"):
+                sanitize_filename(reserved)
+            with pytest.raises(ValueError, match="invalide"):
+                sanitize_filename(reserved + ".txt")
+
 
 class TestFormatSize:
     def test_bytes(self):
@@ -793,6 +805,127 @@ class TestShareAndFavorites:
         assert [item["name"] for item in listing["items"]] == ["nested.txt"]
         with pytest.raises(ValueError, match="Chemin hors"):
             _shared_folder_listing(str(shared), "../")
+
+
+class TestSharePassword:
+    def test_pbkdf2_hash_roundtrip(self):
+        from cloud_panel.routes.share import _hash_password, verify_password
+        h = _hash_password("secret")
+        assert h.startswith("pbkdf2_sha256$")
+        assert verify_password("secret", h)
+        assert not verify_password("wrong", h)
+        assert not verify_password("secret", "")
+        assert not verify_password("secret", "not-a-hash")
+        assert not verify_password("secret", "pbkdf2_sha256$abc")
+
+    def test_legacy_sha256_hash_still_verified(self):
+        import hashlib
+        from cloud_panel.routes.share import verify_password
+        salt = "aabbccdd"
+        h = salt + ":" + hashlib.sha256((salt + "oldpw").encode()).hexdigest()
+        assert verify_password("oldpw", h)
+        assert not verify_password("other", h)
+
+    def test_generate_token_is_opaque_hex(self):
+        from cloud_panel.services.share import generate_token
+        from cloud_panel.config import SHARE_TOKEN_BYTES
+        token = generate_token()
+        assert len(token) == SHARE_TOKEN_BYTES * 2
+        assert all(c in "0123456789abcdef" for c in token)
+        assert generate_token() != generate_token()
+
+    def test_get_share_links_hides_password_hash(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.models
+        importlib.reload(cloud_panel.models)
+        from cloud_panel.models import create_share_link, get_share_links, _get_conn
+        _get_conn()
+        token = "tok_" + secrets.token_hex(4)
+        create_share_link(
+            path="/a.txt", filename="a.txt", is_dir=False, size_bytes=1,
+            token=token, password_hash="pbkdf2_sha256$210000$s$h", expiry_days=7,
+        )
+        items = get_share_links()
+        assert len(items) == 1
+        assert "password_hash" not in items[0]
+        assert items[0]["token"] == token
+
+    def test_create_share_link_clamps_expiry(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.models
+        importlib.reload(cloud_panel.models)
+        from cloud_panel.models import create_share_link, get_share_link, _get_conn
+        from cloud_panel.config import SHARE_MAX_EXPIRY_DAYS
+        _get_conn()
+        token = "tok_" + secrets.token_hex(4)
+        create_share_link(
+            path="/b.txt", filename="b.txt", is_dir=False, size_bytes=1,
+            token=token, password_hash=None, expiry_days=9999,
+        )
+        import time
+        link = get_share_link(token)
+        assert link["expires_at"] <= time.time() + SHARE_MAX_EXPIRY_DAYS * 86400 + 1
+
+    def test_extend_share_link_clamps_to_max(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.models
+        importlib.reload(cloud_panel.models)
+        from cloud_panel.models import create_share_link, extend_share_link, get_share_link, _get_conn
+        from cloud_panel.config import SHARE_MAX_EXPIRY_DAYS
+        _get_conn()
+        token = "tok_" + secrets.token_hex(4)
+        create_share_link(
+            path="/c.txt", filename="c.txt", is_dir=False, size_bytes=1,
+            token=token, password_hash=None, expiry_days=7,
+        )
+        result = extend_share_link(token, 9999)
+        assert result["success"]
+        import time
+        assert result["expires_at"] <= time.time() + SHARE_MAX_EXPIRY_DAYS * 86400 + 1
+
+
+class TestSharePasswordRateLimit:
+    def test_form_render_is_free_but_wrong_passwords_are_limited(self, tmp_path, monkeypatch):
+        import importlib
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", tmp_path / "test.db")
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import cloud_panel.models
+        import cloud_panel.services.share as share_services
+        import cloud_panel.routes.share as share_routes
+        importlib.reload(cloud_panel.models)
+        importlib.reload(share_services)
+        importlib.reload(share_routes)
+        from cloud_panel.models import create_share_link, _get_conn
+        from cloud_panel.routes.share import _hash_password
+        from common.rate_limiter import RateLimiter
+
+        _get_conn()
+        token = "pw_" + secrets.token_hex(6)
+        create_share_link(
+            path="/protected.txt", filename="protected.txt", is_dir=False, size_bytes=5,
+            token=token, password_hash=_hash_password("hunter2"), expiry_days=7,
+        )
+
+        import cloud_panel.main
+        importlib.reload(cloud_panel.main)
+        app = cloud_panel.main.app
+        app.state.share_limiter = RateLimiter(max_calls=1, period_seconds=60, max_keys=64)
+
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        url = f"/cloud-panel/download/{token}"
+
+        form = client.get(url)
+        assert form.status_code == 401, "form render must not be blocked"
+        wrong1 = client.get(url, params={"password": "nope"})
+        assert wrong1.status_code == 403
+        wrong2 = client.get(url, params={"password": "nope"})
+        assert wrong2.status_code == 429, "second wrong password must be rate-limited"
+        good = client.get(url, params={"password": "hunter2"}, follow_redirects=False)
+        assert good.status_code == 303, "correct password must bypass the limiter"
 
 
 class TestEdgeCases:

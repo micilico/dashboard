@@ -23,6 +23,7 @@ render_shell_files(
         "storage.html": "storage",
         "media.html": "media",
         "health.html": "health",
+        "stats.html": "stats",
     },
 )
 

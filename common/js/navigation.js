@@ -6,6 +6,7 @@ const DASHBOARD_NAV_DEFAULT_PREFIXES = {
   storage: "/storage-panel",
   media: "/media-panel",
   health: "/health",
+  stats: "/stats-panel",
 };
 
 function normalizeDashboardPrefix(value, fallback = "") {
@@ -22,6 +23,7 @@ function dashboardPrefixConfig(config = {}) {
     storage: normalizeDashboardPrefix(config.storagePrefix, DASHBOARD_NAV_DEFAULT_PREFIXES.storage),
     media: normalizeDashboardPrefix(config.mediaPrefix, DASHBOARD_NAV_DEFAULT_PREFIXES.media),
     health: normalizeDashboardPrefix(config.healthPrefix, DASHBOARD_NAV_DEFAULT_PREFIXES.health),
+    stats: normalizeDashboardPrefix(config.statsPrefix, DASHBOARD_NAV_DEFAULT_PREFIXES.stats),
   };
 }
 
@@ -35,6 +37,7 @@ function dashboardNavHref(key, prefixes) {
   if (key === "storage") return withSlash(prefixes.storage);
   if (key === "health") return withSlash(prefixes.health);
   if (key === "activity") return withSlash(prefixes.activity);
+  if (key === "stats") return withSlash(prefixes.stats);
   return "";
 }
 

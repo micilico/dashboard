@@ -9,11 +9,11 @@ from typing import Any
 logger = logging.getLogger("dashboard.monitoring")
 
 _sensitive_keywords = re.compile(
-    r"(api[_-]?key|apikey|passkey|token|password|secret|cookie|authorization|qbittorrent_password|jellyfin_api_key)",
+    r"(api[_-]?key|apikey|passkey|token|password|secret|cookie|authorization|qbittorrent_password|jellyfin_api_key|torrentname|torrent_name|savepath|save_path|source_title|releasename|release_title)",
     re.IGNORECASE,
 )
 _private_data_re = re.compile(
-    r"magnet:\?\S+|https?://\S*(?:[^/@\s]+@|[?&](?:api[_-]?key|passkey|token|password|secret)=)\S*|/(?:Users|home)/[^/\s]+",
+    r"magnet:\?\S+|https?://\S*(?:[^/@\s]+@|[?&](?:api[_-]?key|passkey|token|password|secret)=)\S*|/(?:Users|home)/[^/\s]+|/mnt/[^/\s\"']+",
     re.IGNORECASE,
 )
 

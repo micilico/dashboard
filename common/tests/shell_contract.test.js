@@ -3,15 +3,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "..", "..");
-const navOrder = ["home", "torrent", "prowlarr", "cloud", "media", "storage", "health", "activity"];
-const navIds = ["homeLink", "torrentLink", "prowlarrLink", "cloudLink", "mediaLink", "storageLink", "healthLink", "activityLink"];
-const navLabels = ["Vue d’ensemble", "Torrents", "Prowlarr", "Cloud", "Médias", "Système", "Santé", "Activité"];
+const navOrder = ["home", "torrent", "prowlarr", "cloud", "media", "storage", "health", "activity", "stats"];
+const navIds = ["homeLink", "torrentLink", "prowlarrLink", "cloudLink", "mediaLink", "storageLink", "healthLink", "activityLink", "statsLink"];
+const navLabels = ["Vue d’ensemble", "Torrents", "Prowlarr", "Cloud", "Médias", "Système", "Santé", "Activité", "Statistiques"];
 const htmlFiles = [
   "torrent-panel/torrent_panel/static/index.html",
   "torrent-panel/torrent_panel/static/activity.html",
   "torrent-panel/torrent_panel/static/storage.html",
   "torrent-panel/torrent_panel/static/media.html",
   "torrent-panel/torrent_panel/static/health.html",
+  "torrent-panel/torrent_panel/static/stats.html",
   "prowlarr-panel/prowlarr_panel/static/index.html",
   "cloud-panel/cloud_panel/static/index.html",
 ];

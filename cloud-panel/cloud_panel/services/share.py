@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import os
 import time
 
@@ -10,10 +8,9 @@ from ..models import create_share_link, increment_download_count, get_share_link
 from ..security import resolve_path_within
 
 
-def generate_token(data: str) -> str:
-    raw = os.urandom(SHARE_TOKEN_BYTES)
-    sig = hmac.new(raw, data.encode(), hashlib.sha256).hexdigest()[:12]
-    return raw.hex() + sig
+def generate_token() -> str:
+    """Return an opaque, non-guessable share token (SHARE_TOKEN_BYTES of entropy)."""
+    return os.urandom(SHARE_TOKEN_BYTES).hex()
 
 
 def create_file_share_link(
@@ -27,7 +24,7 @@ def create_file_share_link(
 
     filename = os.path.basename(file_path)
     size_bytes = os.path.getsize(file_path)
-    token = generate_token(relative_path)
+    token = generate_token()
 
     return create_share_link(
         path=relative_path,
@@ -57,7 +54,7 @@ def create_folder_share_link(
                 size_bytes += os.path.getsize(os.path.join(root, f))
             except OSError:
                 pass
-    token = generate_token(relative_path)
+    token = generate_token()
 
     return create_share_link(
         path=relative_path,

@@ -14,7 +14,9 @@ Internet
       ├─ /                  → Homepage      :3001
       ├─ /torrent-panel/   → Torrent Panel :3110
       ├─ /prowlarr-panel/  → Prowlarr      :3120
-      └─ /cloud-panel/     → Cloud Panel   :3130
+      ├─ /cloud-panel/     → Cloud Panel   :3130
+      │                        (pages console: /activity, /storage-panel,
+      │                         /media-panel, /health, /stats-panel)
                               │
             autossh ──────────┼─ qBittorrent :16141
                               └─ Prowlarr    :16124
@@ -109,9 +111,15 @@ validation fonctionnelle, responsive et accessible sont dans
 ## Sécurité
 
 - Caddy est le seul point d’entrée public.
+- Les panels n’ont pas d’authentification applicative : ils reposent
+  exclusivement sur le `basic_auth` de Caddy. Les ports applicatifs
+  (`3110`, `3120`, `3130`, `3001`) doivent rester liés à `127.0.0.1` et ne
+  jamais être exposés directement (firewall, port forwarding, IPv6).
 - La route `/cloud-panel/download/<jeton>` est publique : le jeton généré,
-  révocable et limité dans le temps fait office d'autorisation. Les API et
-  l'interface Cloud Panel restent protégées par `basic_auth`.
+  révocable et limité dans le temps fait office d'autorisation. Un mot de
+  passe optionnel protège le contenu ; les tentatives sont limitées en débit
+  (`CLOUD_PANEL_SHARE_RATE_LIMIT_*`). Les API et l'interface Cloud Panel
+  restent protégées par `basic_auth`.
 - Toute mutation exige un jeton CSRF et passe par une limite de débit.
 - La CSP interdit les scripts inline, les CDN et l’encapsulation.
 - Les erreurs sont structurées et nettoyées avant de parvenir au navigateur.

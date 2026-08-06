@@ -424,6 +424,10 @@ async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
         )
     alerts.extend(media_automation.dashboard_alerts())
 
+    ratio_monitor = getattr(app.state, "ratio_monitor", None)
+    if ratio_monitor is not None:
+        alerts.extend(ratio_monitor.build_alerts(torrents))
+
     storage = await storage_snapshot(app)
     overview = build_overview_metrics(torrents, prowlarr_overview)
     recent_activity = build_recent_activity(alerts, media_automation.snapshot().get("entries", []))
@@ -684,7 +688,15 @@ async def jellyfin_snapshot() -> dict[str, Any]:
     summary["status"] = "operational"
     summary["version"] = str(info.get("Version") or info.get("version") or "inconnue")
     summary["serverName"] = str(info.get("ServerName") or info.get("serverName") or "Jellyfin")
-    summary["sessions"] = [item for item in sessions if isinstance(item, dict)]
+    summary["sessions"] = [
+        {
+            "userName": str(item.get("UserName") or item.get("userName") or ""),
+            "client": str(item.get("Client") or item.get("client") or ""),
+            "deviceName": str(item.get("DeviceName") or item.get("deviceName") or ""),
+            "nowPlaying": str((item.get("NowPlayingItem") or item.get("nowPlayingItem") or {}).get("Name") or ""),
+        }
+        for item in sessions if isinstance(item, dict)
+    ]
     summary["activeUsers"] = [
         {"name": str(item.get("Name") or item.get("name") or ""), "id": str(item.get("Id") or item.get("id") or "")}
         for item in users if isinstance(item, dict)
@@ -797,4 +809,33 @@ async def activity_snapshot(app: FastAPI) -> dict[str, Any]:
         "alerts": notifications_snapshot,
         "simulations": simulations,
         "lastSuccessfulRefreshAt": dashboard.get("generatedAt"),
+    }
+
+
+async def stats_snapshot(app: FastAPI) -> dict[str, Any]:
+    qbit = app.state.qbit
+    torrents: list[dict[str, Any]] = []
+    try:
+        torrents = await qbit.torrents()
+    except QbitError:
+        torrents = []
+    dashboard = await dashboard_snapshot(app)
+    stats_store = getattr(app.state, "stats", None)
+    ratio_monitor = getattr(app.state, "ratio_monitor", None)
+    media_history = app.state.media_automation.snapshot().get("entries", [])
+    stats = (
+        stats_store.observe(
+            torrents,
+            disk=dashboard.get("storage"),
+            media_history=media_history,
+            alerts=dashboard.get("alerts", []),
+        )
+        if stats_store is not None
+        else {}
+    )
+    return {
+        "generatedAt": dashboard.get("generatedAt"),
+        "stats": stats,
+        "ratioThreshold": ratio_monitor.settings() if ratio_monitor is not None else {},
+        "ratioAlerts": ratio_monitor.evaluate(torrents) if ratio_monitor is not None else [],
     }

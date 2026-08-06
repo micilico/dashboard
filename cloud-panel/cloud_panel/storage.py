@@ -250,12 +250,20 @@ def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, se
 
 
 _INVALID_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
+_RESERVED_WINDOWS_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 
 
 def sanitize_filename(filename: str) -> str:
-    """Remove path separators and dangerous characters from filename."""
+    """Remove path separators, dangerous characters, trailing dots/spaces and reject reserved names."""
     name = _INVALID_FILENAME_RE.sub('_', filename)
+    name = name.rstrip(" .")
     if not name or name in ('.', '..'):
+        raise ValueError('Nom de fichier invalide')
+    if name.split('.', 1)[0].upper() in _RESERVED_WINDOWS_NAMES:
         raise ValueError('Nom de fichier invalide')
     return name
 

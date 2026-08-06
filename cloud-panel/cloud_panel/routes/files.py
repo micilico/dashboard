@@ -42,6 +42,12 @@ async def get_files(
     search: str = Query("", max_length=200),
 ):
     """List directory contents."""
+    limiter = getattr(request.app.state, "read_limiter", None)
+    if limiter is not None and not limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(
+            status_code=429,
+            detail=error_detail("rate_limited", "Trop de requêtes en peu de temps.", "Réessayer"),
+        )
     try:
         result = list_directory(path, offset=offset, limit=limit, search=search)
         return result
@@ -184,11 +190,17 @@ async def download_zip(
             )
 
         tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        seen: set[str] = set()
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             for rel_path in file_list:
                 abs_path = resolve_path_within(MOUNT_PATH, rel_path, must_exist=True)
-                if os.path.isfile(abs_path):
-                    zf.write(abs_path, os.path.basename(abs_path))
+                if not os.path.isfile(abs_path):
+                    continue
+                arcname = os.path.relpath(abs_path, MOUNT_PATH).replace(os.sep, "/")
+                if arcname in seen:
+                    continue
+                seen.add(arcname)
+                zf.write(abs_path, arcname)
         tmp.close()
         tmp_path = tmp.name
         tasks.add_task(os.unlink, tmp_path)

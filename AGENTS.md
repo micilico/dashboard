@@ -19,6 +19,7 @@ Caddy (reverse proxy, basic_auth, HTTPS)
   ├── /activity/*          → torrent-panel
   ├── /storage-panel/*     → torrent-panel
   ├── /media-panel/*       → torrent-panel
+  ├── /stats-panel/*       → torrent-panel
   └── /health/*            → torrent-panel
 ```
 
@@ -98,7 +99,7 @@ dashboard/
 │   │   ├── preview.html
 │   │   ├── routes/             # Endpoints API
 │   │   │   ├── torrents.py     # CRUD torrents
-│   │   │   ├── dashboard.py    # Vue d'ensemble, santé, stockage, activité
+│   │   │   ├── dashboard.py    # Vue d'ensemble, santé, stockage, activité, statistiques
 │   │   │   ├── media_automation.py
 │   │   │   ├── notifications.py
 │   │   │   └── automations.py  # Règles d'automatisation
@@ -106,14 +107,16 @@ dashboard/
 │   │   │   ├── media_automation.py  # Gestion transfert → Jellyfin → rclone
 │   │   │   ├── monitoring.py   # Checks santé, agrégation dashboard
 │   │   │   ├── notifications.py
-│   │   │   └── automations.py
+│   │   │   ├── automations.py
+│   │   │   ├── stats.py        # Statistiques persistantes quotidiennes
+│   │   │   └── ratio_monitor.py # Surveillance du ratio UP/DL (seuil réglable)
 │   │   └── static/             # Frontend
 │   │       ├── index.html      # App principale (vues : home, torrents, prowlarr)
 │   │       ├── app.js          # Logique principale
 │   │       ├── app.css
-│   │       ├── console.js      # Pages secondaires (activity, storage, media, health)
+│   │       ├── console.js      # Pages secondaires (activity, storage, media, health, stats)
 │   │       ├── console.css
-│   │       ├── activity.html / storage.html / media.html / health.html
+│   │       ├── activity.html / storage.html / media.html / health.html / stats.html
 │   │       ├── css/            # Modules CSS (home.css, responsive.css, etc.)
 │   │       └── dist/           # Bundles générés par build.py
 │   └── tests/
@@ -256,6 +259,8 @@ curl -I http://127.0.0.1:3130/healthz
 | GET | `/api/health` | État de santé complet |
 | GET | `/api/activity` | Activité récente |
 | GET | `/api/storage` | Statistiques stockage |
+| GET | `/api/stats` | Statistiques persistantes (volumes, disque, activité, ratio) |
+| POST | `/api/stats/ratio-threshold` | Modifier le seuil du moniteur de ratio UP/DL |
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Readiness (vérifie qBittorrent) |
 
@@ -320,6 +325,11 @@ curl -I http://127.0.0.1:3130/healthz
 | `TORRENT_PANEL_RCLONE_REFRESH_MODE` | `rc` = vfs/refresh via l'API rc locale (non destructif) ; `systemd` = restart explicite (opt-in) |
 | `TORRENT_PANEL_JELLYFIN_LIBRARY_MAP` | Mapping catégories → IDs Jellyfin |
 | `TORRENT_PANEL_JELLYFIN_API_URL/API_KEY` | Backend uniquement |
+| `TORRENT_PANEL_STATS_PUBLIC_PREFIX` | Préfixe public page Statistiques (défaut `/stats-panel`) |
+| `TORRENT_PANEL_STATS_STATE_PATH` | Fichier d'état des statistiques (défaut `data/stats-state.json`) |
+| `TORRENT_PANEL_STATS_HISTORY_DAYS` | Fenêtre d'historique en jours (défaut 60) |
+| `TORRENT_PANEL_RATIO_MONITOR_STATE_PATH` | Fichier d'état du seuil de ratio (défaut `data/ratio-monitor-state.json`) |
+| `TORRENT_PANEL_RATIO_ALERT_THRESHOLD` | Seuil initial du moniteur de ratio (défaut 10 ; réglable dans l'interface) |
 
 ### Cloud Panel (`cloud-panel/.env`)
 

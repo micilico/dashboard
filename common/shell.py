@@ -80,6 +80,14 @@ NAV_ITEMS = (
         '<path d="M4 13.5h3l2.25-6 4.5 10 2.25-4H20"></path>',
         primary=False,
     ),
+    NavItem(
+        "stats",
+        "statsLink",
+        "Statistiques",
+        "/stats-panel/",
+        '<path d="M5 19V9M12 19V5M19 19v-7"></path>',
+        primary=False,
+    ),
 )
 
 
@@ -138,6 +146,13 @@ SHELL_DEFAULTS = {
     "health": {
         "status": "Service prêt",
         "detail": "Surveillance en direct.",
+        "meta_label": "Dernière mise a jour",
+        "meta_id": "refreshStatus",
+        "time_id": "lastCheck",
+    },
+    "stats": {
+        "status": "Service prêt",
+        "detail": "Historique des métriques.",
         "meta_label": "Dernière mise a jour",
         "meta_id": "refreshStatus",
         "time_id": "lastCheck",
