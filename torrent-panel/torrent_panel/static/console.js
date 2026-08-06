@@ -480,9 +480,41 @@ function smoothPath(xyPoints) {
   return d;
 }
 
-function seriesLineChart(daily, series, { height = 220, width = 480, tickEvery = 5 } = {}) {
+function chartPeriodLabel(points) {
+  if (points.length >= 30) return "30 derniers jours";
+  const first = points[0].date;
+  const last = points[points.length - 1].date;
+  return `Du ${shortDate(first)} au ${shortDate(last)}`;
+}
+
+function chartEmptyState(title, count) {
+  const box = element("div", { className: "chart-box chart-box-empty" });
+  const head = element("div", {
+    className: "chart-head",
+    children: [
+      element("strong", { className: "chart-title", text: title }),
+      count > 0
+        ? element("span", { className: "chart-period", text: `${count} jour${count > 1 ? "s" : ""} observé${count > 1 ? "s" : ""}` })
+        : null,
+    ].filter(Boolean),
+  });
+  const body = element("div", {
+    className: "chart-empty",
+    children: [
+      element("strong", { text: "Historique en cours d’accumulation" }),
+      element("span", {
+        text: count > 0 ? "Un graphique apparaîtra après quelques jours de mesure." : "Aucune donnée enregistrée pour le moment.",
+      }),
+    ],
+  });
+  box.append(head, body);
+  return box;
+}
+
+function seriesLineChart(daily, series, { title = "Évolution", height = 220, width = 480, tickEvery = 5, minPoints = 2 } = {}) {
   const points = daily.slice(-30);
-  if (!points.length) return null;
+  if (!points.length) return chartEmptyState(title, 0);
+  if (points.length < minPoints) return chartEmptyState(title, points.length);
   const padTop = 20;
   const padBottom = 30;
   const padLeft = 54;
@@ -564,8 +596,19 @@ function seriesLineChart(daily, series, { height = 220, width = 480, tickEvery =
   svg.append(guide, hit);
 
   const box = element("div", { className: "chart-box", children: [svg] });
+  const head = element("div", {
+    className: "chart-head",
+    children: [
+      element("strong", { className: "chart-title", text: title }),
+      element("span", { className: "chart-period", text: chartPeriodLabel(points) }),
+    ],
+  });
+  const legend = element("div", {
+    className: "chart-legend",
+    children: series.map((s) => legendItem(s.label, s.className)),
+  });
   const tooltip = element("div", { className: "chart-tooltip", attrs: { role: "tooltip", hidden: "hidden" } });
-  box.append(tooltip);
+  box.replaceChildren(head, legend, svg, tooltip);
 
   const moveAt = (clientX) => {
     const rect = svg.getBoundingClientRect();
@@ -756,17 +799,16 @@ async function renderStats() {
       "Évolution",
       "Volumes échangés et occupation disque sur les 30 derniers jours. Survolez la courbe pour afficher les valeurs.",
       [
-        element("div", { className: "chart-legend", children: [legendItem("Download", "download"), legendItem("Upload", "upload")] }),
         element("div", {
           className: "chart-grid",
           children: [
             seriesLineChart(daily, [
               { key: "downloaded", label: "Download", format: formatBytes, className: "series-a" },
               { key: "uploaded", label: "Upload", format: formatBytes, className: "series-b" },
-            ]) || systemState({ type: "empty", title: "Aucun point de mesure.", compact: true }),
+            ], { title: "Volumes échangés" }),
             seriesLineChart(daily, [
               { key: "diskUsedPercent", label: "Occupation disque", format: (value) => `${value} %`, className: "series-a" },
-            ]) || systemState({ type: "empty", title: "Aucun point de mesure.", compact: true }),
+            ], { title: "Occupation disque" }),
           ],
         }),
       ],

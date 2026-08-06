@@ -162,10 +162,57 @@
 .chart-box {
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: linear-gradient(145deg, var(--surface-1), color-mix(in srgb, var(--surface-1) 82%, var(--accent) 18%));
-  padding: 16px 14px 10px;
+  background: var(--surface-2);
+  padding: 14px 14px 10px;
   overflow: hidden;
   position: relative;
+}
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.chart-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chart-period {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chart-box > .chart-legend {
+  margin: 2px 0 10px;
+}
+
+.chart-box-empty .chart-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 164px;
+  padding: 20px 12px;
+  text-align: center;
+}
+
+.chart-box-empty .chart-empty strong {
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.chart-box-empty .chart-empty span {
+  color: var(--muted);
+  font-size: 0.8125rem;
 }
 
 .chart {
@@ -179,20 +226,20 @@
   stroke: var(--border);
   stroke-width: 1;
   stroke-dasharray: 2 4;
-  opacity: 0.42;
+  opacity: 0.65;
   shape-rendering: crispEdges;
 }
 
 .chart-lines .chart-axis-line {
-  stroke: var(--text-muted);
-  stroke-width: 1.15;
-  opacity: 0.55;
+  stroke: var(--muted);
+  stroke-width: 1.25;
+  opacity: 0.7;
   shape-rendering: crispEdges;
 }
 
 .chart-lines .chart-y-label {
-  fill: var(--text-muted);
-  font-size: 9.5px;
+  fill: var(--muted);
+  font-size: 10px;
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
 }
@@ -204,7 +251,7 @@
 }
 
 .chart-guide {
-  stroke: var(--text-muted);
+  stroke: var(--muted);
   stroke-width: 1.25;
   stroke-dasharray: 2 4;
   opacity: 0;
@@ -212,11 +259,11 @@
 }
 
 .chart-guide.is-visible {
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
 .chart-gradient-stop.series-a {
-  stop-color: var(--accent);
+  stop-color: var(--accent-strong);
 }
 
 .chart-gradient-stop.series-b {
@@ -225,7 +272,7 @@
 
 .chart-area {
   pointer-events: none;
-  opacity: 0.82;
+  opacity: 0.55;
 }
 
 .chart-line-path {
@@ -238,7 +285,7 @@
 }
 
 .chart-line-path.series-a {
-  stroke: var(--accent);
+  stroke: var(--accent-strong);
 }
 
 .chart-line-path.series-b {
@@ -247,21 +294,24 @@
 
 .chart-line-dot {
   fill: var(--surface-2);
-  stroke: var(--accent);
+  stroke: var(--accent-strong);
   stroke-width: 1.5;
-  opacity: 0.58;
+  opacity: 0.55;
+  color: var(--accent-strong);
   transition: r 120ms ease, opacity 120ms ease, stroke-width 120ms ease;
 }
 
 .chart-line-dot.series-b {
   stroke: var(--success);
+  color: var(--success);
 }
 
 .chart-line-dot.is-active {
   fill: var(--surface-2);
-  stroke-width: 2.5;
+  stroke-width: 2.75;
   opacity: 1;
-  r: 4.25;
+  r: 4.5;
+  filter: drop-shadow(0 0 5px currentColor);
 }
 
 .chart-line-dot.is-active.series-b {
@@ -269,8 +319,8 @@
 }
 
 .chart-tick {
-  fill: var(--text-muted);
-  font-size: 9.5px;
+  fill: var(--muted);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -286,7 +336,7 @@
   align-items: center;
   gap: 7px;
   font-size: 0.8125rem;
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .chart-legend-dot {
@@ -296,11 +346,11 @@
   flex: none;
 }
 
-.chart-legend-dot.download {
-  background: var(--accent);
+.chart-legend-dot.series-a {
+  background: var(--accent-strong);
 }
 
-.chart-legend-dot.upload {
+.chart-legend-dot.series-b {
   background: var(--success);
 }
 
@@ -368,7 +418,7 @@
 }
 
 .chart-tooltip-dot.series-a {
-  background: var(--accent);
+  background: var(--accent-strong);
 }
 
 .chart-tooltip-dot.series-b {
@@ -376,7 +426,7 @@
 }
 
 .chart-tooltip-dot-ratio {
-  background: var(--text-muted);
+  background: var(--muted);
 }
 
 @keyframes chart-tooltip-in {
@@ -408,6 +458,12 @@
 @media (max-width: 767px) {
   .ratio-threshold-form {
     flex-wrap: wrap;
+  }
+
+  .chart-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
   }
 }
 

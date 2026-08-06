@@ -202,4 +202,144 @@ api.renderFollowNotice();
 assert.equal(api.els.followNotice.hidden, false);
 assert.equal(api.els.followNotice.children.length > 0, true);
 
+// ————— Graphique SVG : tokens et rendu —————
+
+const chartCss = fs.readFileSync("torrent-panel/torrent_panel/static/console.css", "utf8");
+const tokenCss = fs.readFileSync("common/css/tokens.css", "utf8");
+assert.equal(chartCss.includes("--text-muted"), false, "invalid token --text-muted must not be used");
+assert.equal(chartCss.includes("--surface-1"), false, "invalid token --surface-1 must not be used");
+const definedTokens = new Set([...tokenCss.matchAll(/--[a-z0-9-]+:/g)].map((m) => m[0].slice(0, -1)));
+const usedTokens = new Set([...chartCss.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]));
+for (const used of usedTokens) {
+  if (used === "--arrow-x") continue; // variable locale définie dynamiquement (fallback fourni)
+  assert.ok(definedTokens.has(used), `token ${used} must be defined in tokens.css`);
+}
+
+function chartElement(tag = "") {
+  return {
+    tag,
+    children: [],
+    dataset: {},
+    className: "",
+    class: "",
+    textContent: "",
+    value: "",
+    hidden: false,
+    style: { setProperty() {} },
+    classList: { add() {}, remove() {}, toggle() {} },
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren(...items) {
+      this.children = items;
+    },
+    setAttribute(name, value) {
+      this[name] = String(value);
+    },
+    getBoundingClientRect() {
+      return { left: 0, top: 0, width: 480, height: 260 };
+    },
+    addEventListener() {},
+  };
+}
+
+const chartContext = {
+  console,
+  setTimeout(fn) {
+    return fn ? 1 : 0;
+  },
+  clearTimeout() {},
+  setInterval() {
+    return 1;
+  },
+  clearInterval() {},
+  navigator: { clipboard: { writeText() {} } },
+  document: {
+    createElement: (t) => chartElement(t),
+    createElementNS: (ns, t) => chartElement(t),
+    querySelector: () => chartElement(),
+    querySelectorAll: () => [],
+    addEventListener() {},
+  },
+};
+chartContext.window = {
+  DashboardDOM: null,
+  DashboardNavigation: { configure() {} },
+  setTimeout(fn) {
+    return fn ? 1 : 0;
+  },
+  clearTimeout() {},
+  setInterval() {
+    return 1;
+  },
+  clearInterval() {},
+};
+vm.runInNewContext(
+  `${fs.readFileSync("common/js/api.js", "utf8")}
+${fs.readFileSync("common/js/dom.js", "utf8")}
+window.__DASHBOARD_CONSOLE_CONFIG__ = { section: "stats", apiPrefix: "/api", publicPrefix: "/stats-panel" };
+${consoleSource}
+globalThis.__chartTest = { seriesLineChart, chartEmptyState };`,
+  chartContext,
+);
+const chartApi = chartContext.__chartTest;
+const chartSeries = [
+  { key: "downloaded", label: "Download", format: (v) => `${v} o`, className: "series-a" },
+  { key: "uploaded", label: "Upload", format: (v) => `${v} o`, className: "series-b" },
+];
+const makeDay = (date, values) => Object.assign({ date, ratio: 0.4, diskUsedPercent: 0 }, values);
+const collectText = (root) =>
+  (root.textContent || "") + (root.children || []).map(collectText).join("");
+
+// Aucune donnée → état vide dédié
+const emptyBox = chartApi.seriesLineChart([], chartSeries, { title: "Volumes échangés" });
+assert.ok(emptyBox, "empty input must return a box");
+assert.match(emptyBox.className, /chart-box-empty/);
+assert.ok(collectText(emptyBox).includes("Aucune donnée"), "empty state message required");
+
+// Un seul jour → état vide informatif (pas de courbe trompeuse)
+const oneDayBox = chartApi.seriesLineChart([makeDay("2026-08-06", { downloaded: 10, uploaded: 5 })], chartSeries, { title: "Volumes échangés" });
+assert.match(oneDayBox.className, /chart-box-empty/);
+assert.ok(collectText(oneDayBox).includes("1 jour observé"), "single-day state must mention observed count");
+
+// Plusieurs jours → SVG complet avec titre, période, légende
+const days = [];
+const start = new Date("2026-07-08T00:00:00");
+for (let i = 0; i < 30; i += 1) {
+  const d = new Date(start);
+  d.setDate(d.getDate() + i);
+  days.push(makeDay(d.toISOString().slice(0, 10), { downloaded: i * 10, uploaded: i * 3 }));
+}
+const fullBox = chartApi.seriesLineChart(days, chartSeries, { title: "Volumes échangés" });
+assert.equal(fullBox.className, "chart-box");
+const svgNode = fullBox.children.find((n) => n.tag === "svg");
+assert.ok(svgNode, "chart box must contain an svg");
+const svgTags = svgNode.children.map((n) => n.tag);
+for (const expected of ["desc", "defs", "path", "circle", "rect", "text", "line"]) {
+  assert.ok(svgTags.includes(expected), `svg must include <${expected}>`);
+}
+const linePath = svgNode.children.find((n) => n.tag === "path" && String(n.class || n.className).includes("chart-line-path"));
+assert.match(linePath.d, /C /, "curves must be smoothed with bezier commands");
+const gradientStops = svgNode.children.find((n) => n.tag === "defs").children.flatMap((g) => g.children);
+assert.equal(gradientStops.length, 4, "two series must produce two gradients with two stops each");
+assert.ok(gradientStops.every((s) => String(s.class || s.className).includes("chart-gradient-stop")), "gradient stops must be styled by class");
+
+const head = fullBox.children.find((n) => String(n.className || "").includes("chart-head"));
+assert.ok(head.children.some((n) => n.textContent === "Volumes échangés"), "chart title required");
+assert.ok(head.children.some((n) => n.textContent.includes("30 derniers jours")), "30-day period label required");
+const legend = fullBox.children.find((n) => String(n.className || "").includes("chart-legend"));
+assert.equal(legend.children.length, 2, "legend must list each series");
+
+// Période réelle quand la fenêtre est plus courte que 30 jours
+const shortBox = chartApi.seriesLineChart(days.slice(0, 7), chartSeries, { title: "Volumes échangés" });
+const shortHead = shortBox.children.find((n) => String(n.className || "").includes("chart-head"));
+assert.ok(shortHead.children.some((n) => n.textContent.includes("Du ")), "shorter period must show a date range");
+
+// Valeurs nulles ou égales à zéro → le graphique reste rendu
+const zeroDays = days.map((d, i) => makeDay(d.date, i % 2 ? { downloaded: 0, uploaded: 0 } : { downloaded: 100, uploaded: 50 }));
+const zeroBox = chartApi.seriesLineChart(zeroDays, chartSeries, { title: "Volumes échangés" });
+assert.equal(zeroBox.className, "chart-box", "zero values must still render a chart");
+
+console.log("chart svg ok");
+
 console.log("frontend logic ok");
