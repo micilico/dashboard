@@ -164,9 +164,9 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>
                 Partager dossier
               </button>
-              <button id="btnOrganizeSeries" class="button secondary" title="Grouper les saisons des séries dans des dossiers" type="button">
+              <button id="btnOrganizeSeries" class="button secondary" title="Grouper les séries, ranger les films et signaler les parasites" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/><path d="M12 11v4m0 0 1.5-1.5M12 15l-1.5-1.5"/></svg>
-                <span>Grouper les séries</span>
+                <span>Ranger les médias</span>
               </button>
               <button id="btnSync" class="button secondary" title="Synchroniser" aria-label="Synchroniser" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
@@ -332,14 +332,14 @@
 
     <dialog id="organizeDialog" class="dialog">
       <form method="dialog" id="organizeForm">
-        <h2>Grouper les séries</h2>
-        <p class="muted">Les saisons détectées seront déplacées dans un dossier au nom de leur série.</p>
+        <h2>Ranger les médias</h2>
+        <p class="muted">Saisons groupées par série (Saison N), films déplacés dans Films/ et parasites signalés.</p>
         <p id="organizeSummary" class="organize-summary" aria-live="polite"></p>
-        <div id="organizeGroups" class="organize-groups" role="list"></div>
+        <div id="organizeSections" class="organize-sections" role="list"></div>
         <p id="organizeMessage" class="field-message" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="cancelOrganizeBtn" class="button secondary" type="button">Annuler</button>
-          <button id="confirmOrganizeBtn" class="button primary" type="button">Réorganiser</button>
+          <button id="confirmOrganizeBtn" class="button primary" type="button">Ranger</button>
         </div>
       </form>
     </dialog>

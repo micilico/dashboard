@@ -16,6 +16,7 @@ from .security import resolve_path_within
 logger = logging.getLogger(__name__)
 
 _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
+_folder_size_cache: dict[tuple[str, float], tuple[float, int]] = {}
 _disk_cache: tuple[float, dict[str, str | float]] | None = None
 
 _ULTRA_UNIT_MULTIPLIERS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
@@ -168,6 +169,53 @@ def clear_scandir_cache() -> None:
     _scandir_cache.clear()
 
 
+def clear_folder_size_cache() -> None:
+    _folder_size_cache.clear()
+
+
+def _folder_size_cached(abs_path: str, ttl: float = SCANDIR_CACHE_TTL) -> int:
+    """Recursively sum file sizes under abs_path, cached by (path, mtime)."""
+    try:
+        mtime = os.path.getmtime(abs_path)
+    except OSError:
+        mtime = 0
+    cache_key = (abs_path, mtime)
+    cached = _folder_size_cache.get(cache_key)
+    if cached is not None and time.time() - cached[0] < ttl:
+        return cached[1]
+    total = 0
+    try:
+        for root, dirs, files in os.walk(abs_path, followlinks=False):
+            dirs.sort(key=str.casefold)
+            for fname in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, fname))
+                except OSError:
+                    continue
+    except OSError:
+        logger.warning('folder size walk error for %s', abs_path, exc_info=True)
+        return 0
+    _folder_size_cache[cache_key] = (time.time(), total)
+    return total
+
+
+def get_folder_size(relative_path: str, name: str) -> dict:
+    """Return the recursive size of a folder as display string + bytes."""
+    parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    if not os.path.isdir(parent_dir):
+        raise ValueError('Dossier introuvable')
+    target = os.path.join(parent_dir, name)
+    if not os.path.isdir(target):
+        raise ValueError('Dossier introuvable')
+    size_bytes = _folder_size_cached(os.path.realpath(target))
+    return {
+        'name': name,
+        'size': format_size(size_bytes),
+        'size_bytes': size_bytes,
+        'path': os.path.relpath(target, MOUNT_PATH),
+    }
+
+
 def format_size(size_bytes: int) -> str:
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if size_bytes < 1024.0:
@@ -237,6 +285,7 @@ async def upload_file_streaming(
 
         os.rename(tmp_path, final_path)
         clear_scandir_cache()
+        clear_folder_size_cache()
 
         try:
             from .models import add_history_entry
@@ -278,6 +327,7 @@ def create_directory(relative_path: str, dirname: str) -> dict:
 
     os.makedirs(new_dir, exist_ok=True)
     clear_scandir_cache()
+    clear_folder_size_cache()
 
     return {
         'success': True,
@@ -300,6 +350,7 @@ def rename_item(relative_path: str, old_name: str, new_name: str) -> dict:
 
     os.rename(old_path, new_path)
     clear_scandir_cache()
+    clear_folder_size_cache()
 
     return {
         'success': True,
@@ -368,6 +419,7 @@ def move_item(source_path: str, name: str, dest_path: str) -> dict:
     old_rel = _rel(src_real, mount_real)
     shutil.move(src, dest)
     clear_scandir_cache()
+    clear_folder_size_cache()
     new_rel = _rel(os.path.realpath(dest), mount_real)
     _rewrite_paths_after_move(old_rel, new_rel)
 
@@ -400,6 +452,7 @@ def delete_item(relative_path: str, name: str) -> dict:
         os.remove(target)
 
     clear_scandir_cache()
+    clear_folder_size_cache()
 
     return {
         'success': True,

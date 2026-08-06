@@ -19,8 +19,9 @@ from ..storage import (
     move_item,
     delete_item,
     clear_scandir_cache,
+    get_folder_size,
 )
-from ..services.series import apply_series_plan, build_series_plan
+from ..services.media import apply_organization_plan, build_organization_plan
 from .csrf_guard import require_action_guard, set_csrf_cookie
 
 router = APIRouter()
@@ -216,15 +217,37 @@ async def refresh(
     return {"success": True, "message": "Cache vide"}
 
 
-@router.post("/files/organize-series/preview")
-async def organize_series_preview(
+@router.post("/files/size")
+async def folder_size(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(""),
+    name: str = Form(...),
+):
+    """Compute the recursive size of a folder."""
+    try:
+        return get_folder_size(path, name)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Dossier non autorisé ou introuvable.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("size_error", "Calcul de la taille impossible.", "Réessayer"),
+        )
+
+
+@router.post("/files/organize/preview")
+async def organize_preview(
     request: Request,
     _=Depends(require_action_guard),
     path: str = Form(""),
 ):
-    """Preview how series seasons would be grouped into per-series folders."""
+    """Preview how the directory would be reorganized (series, movies, parasites)."""
     try:
-        return build_series_plan(path)
+        return build_organization_plan(path)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -237,15 +260,15 @@ async def organize_series_preview(
         )
 
 
-@router.post("/files/organize-series/apply")
-async def organize_series_apply(
+@router.post("/files/organize/apply")
+async def organize_apply(
     request: Request,
     _=Depends(require_action_guard),
     path: str = Form(""),
 ):
-    """Group series seasons into per-series folders in the current directory."""
+    """Group seasons into series folders, rename them, and move movies to Films/."""
     try:
-        result = apply_series_plan(path)
+        result = apply_organization_plan(path)
         return result
     except ValueError:
         raise HTTPException(

@@ -536,7 +536,7 @@ suite('Drag & drop (move) logic', () => {
   });
 });
 
-suite('Organize series feature', () => {
+suite('Ranger les médias feature', () => {
   const html = fs.readFileSync(
     path.join(__dirname, "..", "cloud_panel", "static", "index.html"),
     "utf8",
@@ -546,39 +546,93 @@ suite('Organize series feature', () => {
     "utf8",
   );
 
-  test('toolbar exposes a "Grouper les séries" button', () => {
+  test('toolbar exposes a "Ranger les médias" button', () => {
     assert.ok(html.includes('id="btnOrganizeSeries"'));
-    assert.ok(html.includes("Grouper les séries"));
+    assert.ok(html.includes("Ranger les médias"));
   });
 
-  test('organize dialog is present with summary, list and confirm/cancel', () => {
+  test('organize dialog is present with summary, sections and confirm/cancel', () => {
     assert.ok(html.includes('id="organizeDialog"'));
     assert.ok(html.includes('id="organizeSummary"'));
-    assert.ok(html.includes('id="organizeGroups"'));
+    assert.ok(html.includes('id="organizeSections"'));
     assert.ok(html.includes('id="confirmOrganizeBtn"'));
     assert.ok(html.includes('id="cancelOrganizeBtn"'));
   });
 
-  test('preview and apply call the series endpoints', () => {
-    assert.ok(appSource.includes('au("/files/organize-series/preview")'));
-    assert.ok(appSource.includes('au("/files/organize-series/apply")'));
+  test('preview and apply call the media endpoints', () => {
+    assert.ok(appSource.includes('au("/files/organize/preview")'));
+    assert.ok(appSource.includes('au("/files/organize/apply")'));
+    assert.ok(!appSource.includes('"/files/organize-series/'));
   });
 
-  test('preview renders series names safely with textContent', () => {
+  test('preview renders series, movies and parasites sections safely', () => {
+    assert.ok(appSource.includes("function renderOrganizePreview"));
+    assert.ok(appSource.includes('organizeSection("Séries"'));
+    assert.ok(appSource.includes('organizeSection("Films"'));
+    assert.ok(appSource.includes('organizeSection("Parasites signalés"'));
     assert.ok(appSource.includes("name.textContent = g.name"));
-    assert.ok(appSource.includes("txt.textContent = entry.name"));
+    assert.ok(appSource.includes("from.textContent = source"));
+    assert.ok(appSource.includes("to.textContent = entry.target"));
+    assert.ok(appSource.includes("to.textContent = m.target"));
     assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{g\.name\}/.test(appSource));
     assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{entry\.name\}/.test(appSource));
+    assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{m\.name\}/.test(appSource));
   });
 
   test('confirmation is disabled when nothing to organize', () => {
     assert.ok(appSource.includes('confirmBtn.disabled = true'));
-    assert.ok(appSource.includes("Aucune saison détectée dans ce dossier."));
+    assert.ok(appSource.includes("Aucun média détecté dans ce dossier."));
   });
 
   test('apply result shows a summary toast and reloads the listing', () => {
     assert.ok(appSource.includes("r.series_count"));
+    assert.ok(appSource.includes("r.series_moved"));
+    assert.ok(appSource.includes("r.movies_moved"));
     assert.ok(appSource.includes("loadFiles();"));
+  });
+});
+
+suite('Folder size on demand', () => {
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+
+  function folderSizeLabel(f) {
+    if (!f.is_dir) return f.size || fmtSize(f.size_bytes);
+    return f.size_bytes ? f.size : "—";
+  }
+
+  test('files keep their size text, folders show a placeholder', () => {
+    assert.strictEqual(folderSizeLabel({ is_dir: false, size: "1.2 Mo", size_bytes: 1200000 }), "1.2 Mo");
+    assert.strictEqual(folderSizeLabel({ is_dir: true, size_bytes: 0 }), "—");
+  });
+
+  test('a computed folder size replaces the placeholder', () => {
+    assert.strictEqual(folderSizeLabel({ is_dir: true, size: "2.5 Go", size_bytes: 2684354560 }), "2.5 Go");
+  });
+
+  test('folder size request derives path and name from the item', () => {
+    const it = { path: "docs/shows/Show.S01", name: "Show.S01", is_dir: true };
+    const pp = it.path.split("/").slice(0, -1).join("/");
+    const nm = it.path.split("/").pop();
+    assert.strictEqual(pp, "docs/shows");
+    assert.strictEqual(nm, "Show.S01");
+  });
+
+  test('folder size requests the /files/size endpoint', () => {
+    assert.ok(appSource.includes('au("/files/size")'));
+    assert.ok(appSource.includes("function folderSizeCell"));
+  });
+
+  test('folder sizes are rendered without raw innerHTML', () => {
+    assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{d\.size\}/.test(appSource));
+    assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{f\.size\}/.test(appSource));
+  });
+
+  test('folder size button is keyboard accessible', () => {
+    assert.ok(appSource.includes('btn.type = "button"'));
+    assert.ok(appSource.includes('setAttribute("aria-label"'));
   });
 });
 

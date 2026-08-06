@@ -20,6 +20,7 @@ if str(_cloud_panel_parent) not in sys.path:
 
 from cloud_panel.security import resolve_path_within, validate_public_id
 from cloud_panel.storage import format_size, clear_scandir_cache, get_cached_scandir
+from cloud_panel.storage import clear_folder_size_cache, get_folder_size
 from cloud_panel.storage import sanitize_filename, list_directory
 from cloud_panel.storage import _parse_ultra_quota
 
@@ -152,6 +153,70 @@ class TestScandirCache:
         clear_scandir_cache()
         result = get_cached_scandir(str(tmp_path / "nonexistent"))
         assert result == []
+
+
+class TestFolderSize:
+    def _reload(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import get_folder_size as fn
+        return fn
+
+    def test_folder_size_recursive(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "a.txt").write_bytes(b"a" * 100)
+        (tmp_path / "docs" / "nested").mkdir()
+        (tmp_path / "docs" / "nested" / "b.txt").write_bytes(b"b" * 200)
+        result = get_folder_size_fn("", "docs")
+        assert result["size_bytes"] == 300
+        assert "docs" == result["name"]
+        assert result["path"] == "docs"
+
+    def test_folder_size_nested_path(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "a").mkdir()
+        (tmp_path / "a" / "b").mkdir()
+        (tmp_path / "a" / "b" / "c.txt").write_bytes(b"c" * 50)
+        result = get_folder_size_fn("a", "b")
+        assert result["size_bytes"] == 50
+
+    def test_folder_size_empty(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "empty").mkdir()
+        result = get_folder_size_fn("", "empty")
+        assert result["size_bytes"] == 0
+
+    def test_folder_size_missing_raises(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        with pytest.raises(ValueError, match="Dossier introuvable"):
+            get_folder_size_fn("", "nope")
+
+    def test_folder_size_file_name_raises(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "file.txt").write_text("x")
+        with pytest.raises(ValueError, match="Dossier introuvable"):
+            get_folder_size_fn("", "file.txt")
+
+    def test_folder_size_repeat_call_cached(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "a.txt").write_bytes(b"a" * 10)
+        first = get_folder_size_fn("", "docs")
+        second = get_folder_size_fn("", "docs")
+        assert first["size_bytes"] == 10
+        assert second["size_bytes"] == 10
+
+    def test_folder_size_clear_cache(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "a.txt").write_bytes(b"a" * 10)
+        get_folder_size_fn("", "docs")
+        clear_folder_size_cache()
+        (tmp_path / "docs" / "b.txt").write_bytes(b"b" * 5)
+        assert get_folder_size_fn("", "docs")["size_bytes"] == 15
 
 
 class TestListDirectory:
@@ -874,107 +939,190 @@ class TestEdgeCases:
         assert "PB" in result
 
 
-class TestSeriesOrganizer:
+class TestMediaOrganizer:
     @staticmethod
     def _reload(monkeypatch, tmp_path):
         monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
         import importlib
         import cloud_panel.storage
         importlib.reload(cloud_panel.storage)
-        import cloud_panel.services.series
-        importlib.reload(cloud_panel.services.series)
+        import cloud_panel.services.media
+        importlib.reload(cloud_panel.services.media)
+
+    def test_normalize_series_name(self):
+        from cloud_panel.services.media import normalize_series_name
+        assert normalize_series_name("breaking.bad") == "Breaking Bad"
+        assert normalize_series_name("GAME.OF.THRONES") == "Game Of Thrones"
+        assert normalize_series_name("The 100") == "The 100"
+        assert normalize_series_name("Better.Caul.Saul") == "Better Caul Saul"
 
     def test_extract_series_name_patterns(self):
-        from cloud_panel.services.series import extract_series_name
+        from cloud_panel.services.media import extract_series_name
         assert extract_series_name("Breaking.Bad.S01") == "Breaking.Bad"
         assert extract_series_name("Breaking.Bad.S01E01.1080p.WEB-DL") == "Breaking.Bad"
         assert extract_series_name("Breaking.Bad.Season.1") == "Breaking.Bad"
         assert extract_series_name("The Office - Saison 2") == "The Office"
         assert extract_series_name("Show.S01E03.mkv") == "Show"
-        assert extract_series_name("Show S01E01") == "Show"
-        assert extract_series_name("breaking.bad.s05") == "breaking.bad"
+        assert extract_series_name("Show.Specials") == "Show"
 
     def test_extract_series_name_no_match(self):
-        from cloud_panel.services.series import extract_series_name
+        from cloud_panel.services.media import extract_series_name
         assert extract_series_name("Movie.2020.1080p") is None
         assert extract_series_name("recap.txt") is None
         assert extract_series_name("Show.posters") is None
         assert extract_series_name("S01E01.mkv") is None
         assert extract_series_name("") is None
 
-    def test_plan_groups_seasons_without_moving(self, tmp_path, monkeypatch):
+    def test_extract_season_number(self):
+        from cloud_panel.services.media import extract_season_number, season_folder_label
+        assert extract_season_number("Show.S01") == 1
+        assert extract_season_number("Show.Season.2") == 2
+        assert extract_season_number("Show.Saison.3") == 3
+        assert extract_season_number("Show.S01E02") == 1
+        assert extract_season_number("Show.Specials") == 0
+        assert extract_season_number("recap.txt") is None
+        assert season_folder_label(0) == "Specials"
+        assert season_folder_label(2) == "Saison 2"
+
+    def test_extract_movie(self):
+        from cloud_panel.services.media import extract_movie
+        assert extract_movie("Dune.2021.1080p") == {"title": "Dune", "year": "2021"}
+        assert extract_movie("Inception (2010)") == {"title": "Inception", "year": "2010"}
+        assert extract_movie("Dune.2021.1080p.mkv") == {"title": "Dune", "year": "2021"}
+        assert extract_movie("Movie.2020") is None
+        assert extract_movie("documents.2021") is None
+        assert extract_movie("Breaking.Bad.S01") is None
+        assert extract_movie("recap.txt") is None
+
+    def test_detect_parasite(self):
+        from cloud_panel.services.media import detect_parasite
+        assert detect_parasite("sample.mkv") == "sample"
+        assert detect_parasite("Show.S01E01.Sample.720p.mkv") == "sample"
+        assert detect_parasite("readme.txt") == "txt"
+        assert detect_parasite("ep.nfo") == "nfo"
+        assert detect_parasite("Show.S01E01.mkv") is None
+        assert detect_parasite("subtitles.srt") is None
+        assert detect_parasite("") is None
+
+    def test_plan_mixed_directory_without_moving(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
-        from cloud_panel.services.series import build_series_plan
+        from cloud_panel.services.media import build_organization_plan
 
-        (tmp_path / "Show.S01").mkdir()
-        (tmp_path / "Show.S02").mkdir()
-        (tmp_path / "Other.Show.S01E01.mkv").write_text("data")
-        (tmp_path / "Movie.2020.1080p").mkdir()
-        (tmp_path / "recap.txt").write_text("x")
+        (tmp_path / "Breaking.Bad.S01").mkdir()
+        (tmp_path / "Breaking.Bad.S01" / "S01E01.mkv").write_text("data")
+        (tmp_path / "Breaking.Bad.S01" / "sample.mkv").write_text("data")
+        (tmp_path / "Breaking.Bad.S02").mkdir()
+        (tmp_path / "The.Office.S01E01.1080p.mkv").write_text("data")
+        (tmp_path / "Dune.2021.1080p").mkdir()
+        (tmp_path / "readme.txt").write_text("x")
 
-        plan = build_series_plan("")
-        assert [g["name"] for g in plan["series"]] == ["Other.Show", "Show"]
+        plan = build_organization_plan("")
+        assert plan["totals"] == {"series": 2, "series_items": 3, "movies": 1, "parasites": 2}
         by_name = {g["name"]: g for g in plan["series"]}
-        assert sorted(i["name"] for i in by_name["Show"]["items"]) == ["Show.S01", "Show.S02"]
-        assert by_name["Show"]["items"][0]["is_dir"] is True
-        assert plan["total"] == 3
-        assert (tmp_path / "Show.S01").is_dir(), "preview must not move anything"
-        assert (tmp_path / "recap.txt").exists()
+        assert set(by_name) == {"Breaking Bad", "The Office"}
+        assert by_name["Breaking Bad"]["items"][0]["target"] == "Breaking Bad/Saison 1"
+        assert by_name["The Office"]["items"][0]["target"] == "The Office/Saison 1"
+        movie_targets = {m["target"] for m in plan["movies"]}
+        assert movie_targets == {"Films/Dune (2021)"}
+        parasite_paths = {p["path"] for p in plan["parasites"]}
+        assert parasite_paths == {"Breaking.Bad.S01/sample.mkv", "readme.txt"}
+        assert (tmp_path / "Breaking.Bad.S01" / "S01E01.mkv").exists(), "preview must not move anything"
 
-    def test_apply_moves_seasons_into_series_folder(self, tmp_path, monkeypatch):
+    def test_apply_groups_and_renames_seasons(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
         self._reload(monkeypatch, tmp_path)
-        from cloud_panel.services.series import apply_series_plan
+        from cloud_panel.services.media import apply_organization_plan
         from cloud_panel.models import _get_conn, get_history
         _get_conn()
 
         (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S01" / "S01E01.mkv").write_text("data")
         (tmp_path / "Show.S02").mkdir()
         (tmp_path / "Show.S02" / "ep.mkv").write_text("data")
 
-        result = apply_series_plan("")
+        result = apply_organization_plan("")
         assert result["success"]
-        assert result["moved"] == 2
-        assert result["created"] == ["Show"]
-        assert (tmp_path / "Show" / "Show.S01").is_dir()
-        assert (tmp_path / "Show" / "Show.S02" / "ep.mkv").exists()
+        assert result["created_series"] == ["Show"]
+        assert result["series_moved"] == 2
+        assert (tmp_path / "Show" / "Saison 1" / "S01E01.mkv").exists()
+        assert (tmp_path / "Show" / "Saison 2" / "ep.mkv").exists()
         assert not (tmp_path / "Show.S01").exists()
+        assert not (tmp_path / "Show.S02").exists()
         moves = [h for h in get_history() if h["action"] == "move"]
         assert len(moves) >= 2
 
-    def test_apply_merges_into_existing_series_folder(self, tmp_path, monkeypatch):
+    def test_apply_renames_existing_series_folder_to_normalized(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
-        from cloud_panel.services.series import apply_series_plan
+        from cloud_panel.services.media import apply_organization_plan
 
         (tmp_path / "Breaking.Bad").mkdir()
         (tmp_path / "Breaking.Bad" / "S01").mkdir()
         (tmp_path / "Breaking.Bad.S02").mkdir()
 
-        result = apply_series_plan("")
-        assert result["created"] == []
-        assert (tmp_path / "Breaking.Bad" / "S01").is_dir()
-        assert (tmp_path / "Breaking.Bad" / "Breaking.Bad.S02").is_dir()
+        result = apply_organization_plan("")
+        assert result["renamed_series"] == ["Breaking Bad"]
+        assert (tmp_path / "Breaking Bad" / "S01").is_dir()
+        assert (tmp_path / "Breaking Bad" / "Saison 2").is_dir()
+        assert not (tmp_path / "Breaking.Bad").exists()
         assert not (tmp_path / "Breaking.Bad.S02").exists()
+
+    def test_apply_moves_movies_to_films_folder(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "Dune.2021.1080p").mkdir()
+        (tmp_path / "Inception.2010.720p.BluRay").mkdir()
+
+        result = apply_organization_plan("")
+        assert result["movies_moved"] == 2
+        assert (tmp_path / "Films" / "Dune (2021)").is_dir()
+        assert (tmp_path / "Films" / "Inception (2010)").is_dir()
+        assert not (tmp_path / "Dune.2021.1080p").exists()
+
+    def test_apply_renames_movies_in_place_in_films_dir(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "films").mkdir()
+        (tmp_path / "films" / "Dune.2021.1080p").mkdir()
+
+        result = apply_organization_plan("films")
+        assert result["movies_moved"] == 1
+        assert (tmp_path / "films" / "Dune (2021)").is_dir()
+        assert not (tmp_path / "films" / "Dune.2021.1080p").exists()
 
     def test_apply_reports_conflicts_without_erasing(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
-        from cloud_panel.services.series import apply_series_plan
+        from cloud_panel.services.media import apply_organization_plan
 
         (tmp_path / "Show").mkdir()
-        (tmp_path / "Show" / "Show.S01").mkdir()
-        (tmp_path / "Show" / "Show.S01" / "keep.mkv").write_text("data")
+        (tmp_path / "Show" / "Saison 1").mkdir()
+        (tmp_path / "Show" / "Saison 1" / "ep1.mkv").write_text("keep")
         (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S01" / "ep1.mkv").write_text("other")
 
-        result = apply_series_plan("")
-        assert result["moved"] == 0
+        result = apply_organization_plan("")
         assert result["errors"], "conflict should be reported"
-        assert (tmp_path / "Show" / "Show.S01" / "keep.mkv").exists()
+        assert (tmp_path / "Show" / "Saison 1" / "ep1.mkv").read_text() == "keep"
+        assert (tmp_path / "Show.S01" / "ep1.mkv").exists(), "conflicted item must not be lost"
+
+    def test_apply_leaves_parasites_in_place(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S01" / "sample.mkv").write_text("x")
+        (tmp_path / "readme.txt").write_text("x")
+
+        result = apply_organization_plan("")
+        assert (tmp_path / "Show" / "Saison 1" / "sample.mkv").exists()
+        assert (tmp_path / "readme.txt").exists(), "top-level parasite must not be moved or deleted"
 
     def test_apply_rejects_outside_path(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
-        from cloud_panel.services.series import apply_series_plan
+        from cloud_panel.services.media import apply_organization_plan
         with pytest.raises(ValueError, match="Chemin hors|introuvable"):
-            apply_series_plan("../")
+            apply_organization_plan("../")
 
 
 class TestUltraQuota:
