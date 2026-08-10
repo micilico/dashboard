@@ -1460,7 +1460,7 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .col-size { width: 100px; text-align: right; }
 .col-date { width: 150px; }
 .col-fav { width: 36px; }
-.col-actions { width: 120px; text-align: right; }
+.col-actions { width: 120px; text-align: right; position: sticky; right: 0; z-index: 2; background: var(--surface); box-shadow: -8px 0 12px -10px rgba(0, 0, 0, .55); }
 
 .file-table td { padding: 12px; border-bottom: 1px solid var(--border-faint); font-size: .88rem; vertical-align: middle; }
 .file-table tr { transition: background var(--motion-fast); }
@@ -1510,9 +1510,11 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .size-btn:disabled { cursor: default; opacity: .8; }
 .date-cell { color: var(--muted); white-space: nowrap; font-size: .82rem; }
 
-.action-cell { text-align: right; white-space: nowrap; }
+.action-cell { text-align: right; white-space: nowrap; position: sticky; right: 0; z-index: 1; background: var(--surface); box-shadow: -8px 0 12px -10px rgba(0, 0, 0, .55); }
+.file-table tr:hover .action-cell { background: var(--row-hover); }
+.file-table tr.selected .action-cell { background: var(--accent-soft); }
 .row-actions { display: flex; justify-content: flex-end; }
-.action-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); border-radius: var(--radius-control); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); padding: 0; vertical-align: middle; }
+.action-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text); border-radius: var(--radius-control); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); padding: 0; vertical-align: middle; }
 .action-btn:hover { background: var(--surface-3); color: var(--text); }
 .action-btn.danger:hover { color: var(--danger); }
 
@@ -1662,6 +1664,8 @@ th[aria-sort="descending"]::after { content: " ▼"; }
   .col-created { display: none; }
   .col-type { display: none; }
   .col-size { width: 80px; }
+  #filesView .file-table th.col-actions { position: static; box-shadow: none; }
+  #filesView .file-table td.action-cell { position: static; box-shadow: none; }
   #filesView .table-wrap { overflow-x: visible; padding: var(--space-8); }
   #filesView .file-table,
   #filesView .file-table tbody { display: block; width: 100%; }
