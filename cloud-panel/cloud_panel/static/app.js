@@ -830,6 +830,7 @@ function renderOrganizePreview(d) {
   const series = d.series || [];
   const movies = d.movies || [];
   const parasites = d.parasites || [];
+  const duplicates = d.duplicates || [];
   const totals = d.totals || {};
   const summary = $("organizeSummary");
   const sections = $("organizeSections");
@@ -839,6 +840,7 @@ function renderOrganizePreview(d) {
   if (series.length) parts.push(`${series.length} série${series.length > 1 ? "s" : ""}`);
   if (movies.length) parts.push(`${movies.length} film${movies.length > 1 ? "s" : ""}`);
   if (parasites.length) parts.push(`${parasites.length} parasite${parasites.length > 1 ? "s" : ""}`);
+  if (duplicates.length) parts.push(`${duplicates.length} doublon${duplicates.length > 1 ? "s" : ""}`);
   if (!parts.length) {
     summary.textContent = "Aucun média détecté dans ce dossier.";
     confirmBtn.disabled = true;
@@ -892,6 +894,17 @@ function renderOrganizePreview(d) {
       to.classList.add("organize-note");
       to.textContent = `signalé (${p.reason}), non supprimé`;
       to.title = p.path;
+      return li;
+    }));
+  }
+
+  if (duplicates.length) {
+    sections.append(organizeSection("Doublons détectés", duplicates, (duplicate) => {
+      const { li, to } = organizeRowCell(duplicate.file, false);
+      li.classList.add("organize-duplicate");
+      to.classList.add("organize-note");
+      to.textContent = `${duplicate.status} → ${duplicate.target}`;
+      to.title = duplicate.target;
       return li;
     }));
   }

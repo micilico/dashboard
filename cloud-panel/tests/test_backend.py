@@ -1273,13 +1273,13 @@ class TestMediaOrganizer:
         (tmp_path / "readme.txt").write_text("x")
 
         plan = build_organization_plan("")
-        assert plan["totals"] == {"series": 2, "series_items": 3, "movies": 1, "parasites": 2}
+        assert plan["totals"] == {"series": 2, "series_items": 3, "movies": 1, "parasites": 2, "duplicates": 0}
         by_name = {g["name"]: g for g in plan["series"]}
         assert set(by_name) == {"Breaking Bad", "The Office"}
-        assert by_name["Breaking Bad"]["items"][0]["target"] == "Breaking Bad/Saison 1"
-        assert by_name["The Office"]["items"][0]["target"] == "The Office/Saison 1"
+        assert by_name["Breaking Bad"]["items"][0]["target"] == "séries/Breaking Bad/Saison 1"
+        assert by_name["The Office"]["items"][0]["target"] == "séries/The Office/Saison 1"
         movie_targets = {m["target"] for m in plan["movies"]}
-        assert movie_targets == {"Films/Dune (2021)"}
+        assert movie_targets == {"films/Dune (2021)"}
         parasite_paths = {p["path"] for p in plan["parasites"]}
         assert parasite_paths == {"Breaking.Bad.S01/sample.mkv", "readme.txt"}
         assert (tmp_path / "Breaking.Bad.S01" / "S01E01.mkv").exists(), "preview must not move anything"
@@ -1300,8 +1300,8 @@ class TestMediaOrganizer:
         assert result["success"]
         assert result["created_series"] == ["Show"]
         assert result["series_moved"] == 2
-        assert (tmp_path / "Show" / "Saison 1" / "S01E01.mkv").exists()
-        assert (tmp_path / "Show" / "Saison 2" / "ep.mkv").exists()
+        assert (tmp_path / "séries" / "Show" / "Saison 1" / "S01E01.mkv").exists()
+        assert (tmp_path / "séries" / "Show" / "Saison 2" / "ep.mkv").exists()
         assert not (tmp_path / "Show.S01").exists()
         assert not (tmp_path / "Show.S02").exists()
         moves = [h for h in get_history() if h["action"] == "move"]
@@ -1311,15 +1311,16 @@ class TestMediaOrganizer:
         self._reload(monkeypatch, tmp_path)
         from cloud_panel.services.media import apply_organization_plan
 
-        (tmp_path / "Breaking.Bad").mkdir()
-        (tmp_path / "Breaking.Bad" / "S01").mkdir()
+        (tmp_path / "séries").mkdir()
+        (tmp_path / "séries" / "Breaking.Bad").mkdir()
+        (tmp_path / "séries" / "Breaking.Bad" / "S01").mkdir()
         (tmp_path / "Breaking.Bad.S02").mkdir()
 
         result = apply_organization_plan("")
         assert result["renamed_series"] == ["Breaking Bad"]
-        assert (tmp_path / "Breaking Bad" / "S01").is_dir()
-        assert (tmp_path / "Breaking Bad" / "Saison 2").is_dir()
-        assert not (tmp_path / "Breaking.Bad").exists()
+        assert (tmp_path / "séries" / "Breaking Bad" / "S01").is_dir()
+        assert (tmp_path / "séries" / "Breaking Bad" / "Saison 2").is_dir()
+        assert not (tmp_path / "séries" / "Breaking.Bad").exists()
         assert not (tmp_path / "Breaking.Bad.S02").exists()
 
     def test_apply_moves_movies_to_films_folder(self, tmp_path, monkeypatch):
@@ -1331,8 +1332,8 @@ class TestMediaOrganizer:
 
         result = apply_organization_plan("")
         assert result["movies_moved"] == 2
-        assert (tmp_path / "Films" / "Dune (2021)").is_dir()
-        assert (tmp_path / "Films" / "Inception (2010)").is_dir()
+        assert (tmp_path / "films" / "Dune (2021)").is_dir()
+        assert (tmp_path / "films" / "Inception (2010)").is_dir()
         assert not (tmp_path / "Dune.2021.1080p").exists()
 
     def test_apply_renames_movies_in_place_in_films_dir(self, tmp_path, monkeypatch):
@@ -1351,15 +1352,16 @@ class TestMediaOrganizer:
         self._reload(monkeypatch, tmp_path)
         from cloud_panel.services.media import apply_organization_plan
 
-        (tmp_path / "Show").mkdir()
-        (tmp_path / "Show" / "Saison 1").mkdir()
-        (tmp_path / "Show" / "Saison 1" / "ep1.mkv").write_text("keep")
+        (tmp_path / "séries").mkdir()
+        (tmp_path / "séries" / "Show").mkdir()
+        (tmp_path / "séries" / "Show" / "Saison 1").mkdir()
+        (tmp_path / "séries" / "Show" / "Saison 1" / "ep1.mkv").write_text("keep")
         (tmp_path / "Show.S01").mkdir()
         (tmp_path / "Show.S01" / "ep1.mkv").write_text("other")
 
         result = apply_organization_plan("")
         assert result["errors"], "conflict should be reported"
-        assert (tmp_path / "Show" / "Saison 1" / "ep1.mkv").read_text() == "keep"
+        assert (tmp_path / "séries" / "Show" / "Saison 1" / "ep1.mkv").read_text() == "keep"
         assert (tmp_path / "Show.S01" / "ep1.mkv").exists(), "conflicted item must not be lost"
 
     def test_apply_leaves_parasites_in_place(self, tmp_path, monkeypatch):
@@ -1371,8 +1373,37 @@ class TestMediaOrganizer:
         (tmp_path / "readme.txt").write_text("x")
 
         result = apply_organization_plan("")
-        assert (tmp_path / "Show" / "Saison 1" / "sample.mkv").exists()
+        assert (tmp_path / "séries" / "Show" / "Saison 1" / "sample.mkv").exists()
         assert (tmp_path / "readme.txt").exists(), "top-level parasite must not be moved or deleted"
+
+    def test_apply_routes_media_to_existing_categories(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "films").mkdir()
+        (tmp_path / "séries").mkdir()
+        (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Movie.2024.1080p").mkdir()
+
+        result = apply_organization_plan("")
+        assert result["series_moved"] == 1
+        assert result["movies_moved"] == 1
+        assert (tmp_path / "séries" / "Show" / "Saison 1").is_dir()
+        assert (tmp_path / "films" / "Movie (2024)").is_dir()
+
+    def test_apply_skips_identical_duplicate_files(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "séries" / "Show" / "Saison 1").mkdir(parents=True)
+        (tmp_path / "séries" / "Show" / "Saison 1" / "episode.mkv").write_text("same")
+        (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S01" / "episode.mkv").write_text("same")
+
+        result = apply_organization_plan("")
+        assert result["duplicates_skipped"] == 1
+        assert not (tmp_path / "Show.S01").exists()
+        assert (tmp_path / "séries" / "Show" / "Saison 1" / "episode.mkv").read_text() == "same"
 
     def test_apply_rejects_outside_path(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)

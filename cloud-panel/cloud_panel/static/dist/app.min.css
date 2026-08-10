@@ -1903,6 +1903,7 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
 .organize-arrow { color: var(--text-subtle); opacity: .6; flex-shrink: 0; }
 .organize-to { color: var(--accent-strong); overflow-wrap: anywhere; }
 .organize-parasite { opacity: .75; }
+.organize-duplicate { background: var(--warning-soft); }
 .organize-parasite .organize-to,
 .organize-note { color: var(--warning); font-size: .78rem; }
 @media (max-width: 767px) {

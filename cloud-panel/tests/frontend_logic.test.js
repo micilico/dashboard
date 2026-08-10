@@ -570,6 +570,8 @@ suite('Ranger les médias feature', () => {
     assert.ok(appSource.includes('organizeSection("Séries"'));
     assert.ok(appSource.includes('organizeSection("Films"'));
     assert.ok(appSource.includes('organizeSection("Parasites signalés"'));
+    assert.ok(appSource.includes('organizeSection("Doublons détectés"'));
+    assert.ok(appSource.includes("const duplicates = d.duplicates || []"));
     assert.ok(appSource.includes("name.textContent = g.name"));
     assert.ok(appSource.includes("from.textContent = source"));
     assert.ok(appSource.includes("to.textContent = entry.target"));
