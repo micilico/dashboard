@@ -206,8 +206,7 @@
 .size-btn:disabled { cursor: default; opacity: .8; }
 .date-cell { color: var(--muted); white-space: nowrap; font-size: .82rem; }
 
-.action-cell { text-align: right; white-space: nowrap; opacity: 0; transition: opacity var(--motion-fast); }
-tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacity: 1; }
+.action-cell { text-align: right; white-space: nowrap; }
 .row-actions { display: flex; justify-content: flex-end; }
 .action-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); border-radius: var(--radius-control); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); padding: 0; vertical-align: middle; }
 .action-btn:hover { background: var(--surface-3); color: var(--text); }
@@ -359,7 +358,6 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
   .col-created { display: none; }
   .col-type { display: none; }
   .col-size { width: 80px; }
-  .action-cell { opacity: 1; }
   #filesView .table-wrap { overflow-x: visible; padding: var(--space-8); }
   #filesView .file-table,
   #filesView .file-table tbody { display: block; width: 100%; }

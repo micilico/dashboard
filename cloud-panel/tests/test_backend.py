@@ -1405,6 +1405,79 @@ class TestMediaOrganizer:
         assert not (tmp_path / "Show.S01").exists()
         assert (tmp_path / "séries" / "Show" / "Saison 1" / "episode.mkv").read_text() == "same"
 
+    def test_apply_merges_into_existing_noncanonical_season_dir(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "séries" / "Show" / "S1").mkdir(parents=True)
+        (tmp_path / "séries" / "Show" / "S1" / "S01E01.mkv").write_text("data")
+        (tmp_path / "Show.S02").mkdir()
+        (tmp_path / "Show.S02" / "S02E01.mkv").write_text("data")
+
+        result = apply_organization_plan("")
+        assert result["success"]
+        assert (tmp_path / "séries" / "Show" / "S1" / "S01E01.mkv").exists()
+        assert (tmp_path / "séries" / "Show" / "Saison 2" / "S02E01.mkv").exists()
+        assert not (tmp_path / "séries" / "Show" / "Saison 1").exists(), "must reuse existing S1, not create Saison 1"
+        assert not (tmp_path / "Show.S02").exists()
+
+    def test_apply_places_loose_episode_in_existing_noncanonical_season(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "séries" / "Show" / "Season 1").mkdir(parents=True)
+        (tmp_path / "Show.S01E02.mkv").write_text("data")
+
+        result = apply_organization_plan("")
+        assert result["success"]
+        assert (tmp_path / "séries" / "Show" / "Season 1" / "Show.S01E02.mkv").exists()
+        assert not (tmp_path / "séries" / "Show" / "Saison 1").exists(), "must reuse existing Season 1 folder"
+        assert not (tmp_path / "Show.S01E02.mkv").exists()
+
+    def test_plan_preview_targets_existing_season_folder(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import build_organization_plan
+
+        (tmp_path / "séries" / "Show" / "S1").mkdir(parents=True)
+        (tmp_path / "Show.S01").mkdir()
+        (tmp_path / "Show.S01" / "S01E02.mkv").write_text("data")
+
+        plan = build_organization_plan("")
+        item = plan["series"][0]["items"][0]
+        assert item["target"] == "séries/Show/S1"
+
+    def test_apply_skips_episode_similar_file_without_moving(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "séries" / "Show" / "Saison 1").mkdir(parents=True)
+        (tmp_path / "séries" / "Show" / "Saison 1" / "Show.S01E01.720p.mkv").write_text("existing")
+        (tmp_path / "Show.S01E01.1080p.mkv").write_text("source")
+
+        result = apply_organization_plan("")
+        assert result["errors"], "episode-similar file should be reported"
+        assert result["duplicates_skipped"] == 1
+        assert (tmp_path / "Show.S01E01.1080p.mkv").exists(), "source must be left in place"
+        assert not (tmp_path / "séries" / "Show" / "Saison 1" / "Show.S01E01.1080p.mkv").exists()
+        assert (tmp_path / "séries" / "Show" / "Saison 1" / "Show.S01E01.720p.mkv").exists()
+
+    def test_apply_merges_movie_into_existing_folder(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "films").mkdir()
+        (tmp_path / "films" / "Dune 2021").mkdir()
+        (tmp_path / "films" / "Dune 2021" / "dune.mkv").write_text("data")
+        (tmp_path / "Dune.2021.1080p").mkdir()
+        (tmp_path / "Dune.2021.1080p" / "extra.mkv").write_text("more")
+
+        result = apply_organization_plan("")
+        assert result["movies_moved"] == 1
+        assert (tmp_path / "films" / "Dune 2021" / "dune.mkv").exists()
+        assert (tmp_path / "films" / "Dune 2021" / "extra.mkv").exists()
+        assert not (tmp_path / "films" / "Dune (2021)").exists(), "must reuse existing folder"
+        assert not (tmp_path / "Dune.2021.1080p").exists()
+
     def test_apply_rejects_outside_path(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
         from cloud_panel.services.media import apply_organization_plan

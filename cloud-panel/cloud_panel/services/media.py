@@ -70,16 +70,23 @@ def season_folder_label(season: int) -> str:
     return "Specials" if season == 0 else f"Saison {season}"
 
 
-def extract_movie(name: str) -> dict | None:
+def _movie_signature(name: str) -> tuple[str, str] | None:
     if not isinstance(name, str) or not name or _SEASON_RE.search(name):
         return None
     match = _YEAR_RE.search(name)
     if not match:
         return None
+    title = normalize_series_name(re.sub(r"^[\W_]+|[\W_]+$", "", name[: match.start()]))
+    return (title, match.group()) if title else None
+
+
+def extract_movie(name: str) -> dict | None:
+    if not isinstance(name, str) or not name or _SEASON_RE.search(name):
+        return None
     if not (_QUALITY_RE.search(name) or re.search(r"\(\s*(?:19\d{2}|20\d{2})\s*\)\s*$", name)):
         return None
-    title = normalize_series_name(re.sub(r"^[\W_]+|[\W_]+$", "", name[: match.start()]))
-    return {"title": title, "year": match.group()} if title else None
+    signature = _movie_signature(name)
+    return {"title": signature[0], "year": signature[1]} if signature else None
 
 
 def detect_parasite(name: str) -> str | None:
@@ -130,6 +137,29 @@ def _existing_named_dir(parent: str, name: str, *, normalize: bool = False) -> s
                 continue
             candidate = normalize_series_name(entry.name).casefold() if normalize else entry.name.casefold()
             if candidate == wanted:
+                return entry.name
+    except OSError:
+        pass
+    return None
+
+
+def _find_existing_season_dir(series_abs: str, season: int) -> str | None:
+    try:
+        for entry in os.scandir(series_abs):
+            if entry.is_dir() and extract_season_number(entry.name) == season:
+                return entry.name
+    except OSError:
+        pass
+    return None
+
+
+def _find_existing_movie_dir(films_parent_abs: str, title: str, year: str, exclude: str | None = None) -> str | None:
+    try:
+        for entry in os.scandir(films_parent_abs):
+            if not entry.is_dir() or entry.name == exclude:
+                continue
+            signature = _movie_signature(entry.name)
+            if signature and signature[0].casefold() == title.casefold() and signature[1] == year:
                 return entry.name
     except OSError:
         pass
@@ -209,42 +239,46 @@ def build_organization_plan(relative_path: str) -> dict:
             normalized = normalize_series_name(series)
             key = normalized.casefold()
             season = extract_season_number(entry.name) or 0
-            label = season_folder_label(season)
-            target = posixpath.join(categories["series"], normalized, label)
             if key not in series_groups:
+                existing_series = _existing_named_dir(series_parent, normalized, normalize=True)
                 series_groups[key] = {
                     "name": normalized,
-                    "folder_exists": _existing_named_dir(series_parent, normalized, normalize=True) is not None,
+                    "folder_exists": existing_series is not None,
+                    "existing_series": existing_series,
                     "items": [],
                 }
+            group = series_groups[key]
+            series_dir_name = group["existing_series"] or normalized
+            series_abs = resolve_path_within(MOUNT_PATH, posixpath.join(categories["series"], series_dir_name), must_exist=False)
+            existing_season = _find_existing_season_dir(series_abs, season)
+            season_dir = existing_season or season_folder_label(season)
+            target = posixpath.join(categories["series"], series_dir_name, season_dir)
             item = {"name": entry.name, "is_dir": is_dir, "season": season, "target": target}
-            series_groups[key]["items"].append(item)
+            group["items"].append(item)
+            destination = resolve_path_within(MOUNT_PATH, target, must_exist=False)
             if is_dir:
-                destination = resolve_path_within(MOUNT_PATH, target, must_exist=False)
                 duplicates.extend(_duplicate_entries(entry.path, destination, source, target, "série"))
                 parasites.extend(_find_parasites(entry.path, source))
-            else:
-                destination = resolve_path_within(MOUNT_PATH, target, must_exist=False)
-                if os.path.isdir(destination):
-                    source_size = entry.stat().st_size
-                    target_files = _file_map(destination)
-                    if entry.name in target_files:
-                        status = "identique" if target_files[entry.name][0] == source_size else "conflit"
-                        duplicates.append({"kind": "série", "source": source, "target": target, "file": entry.name, "status": status})
-                    episode = extract_episode_number(entry.name)
-                    if episode and any(info[1] == episode and filename != entry.name for filename, info in target_files.items()):
-                        duplicates.append({"kind": "série", "source": source, "target": target, "file": entry.name, "status": "épisode similaire"})
+            elif os.path.isdir(destination):
+                source_size = entry.stat().st_size
+                target_files = _file_map(destination)
+                if entry.name in target_files:
+                    status = "identique" if target_files[entry.name][0] == source_size else "conflit"
+                    duplicates.append({"kind": "série", "source": source, "target": target, "file": entry.name, "status": status})
+                episode = extract_episode_number(entry.name)
+                if episode and any(info[1] == episode and filename != entry.name for filename, info in target_files.items()):
+                    duplicates.append({"kind": "série", "source": source, "target": target, "file": entry.name, "status": "épisode similaire"})
             continue
         movie = extract_movie(entry.name)
         if movie:
             folder = f"{movie['title']} ({movie['year']})"
             if not is_dir:
                 folder += os.path.splitext(entry.name)[1]
-            target = posixpath.join(categories["films"], folder)
+            existing_movie = _find_existing_movie_dir(films_parent, movie["title"], movie["year"], exclude=entry.name)
+            target = posixpath.join(categories["films"], existing_movie or folder)
             movies.append({"name": entry.name, "is_dir": is_dir, "folder": folder, "target": target})
             destination = resolve_path_within(MOUNT_PATH, target, must_exist=False)
-            if is_dir:
-                duplicates.extend(_duplicate_entries(entry.path, destination, source, target, "film"))
+            duplicates.extend(_duplicate_entries(entry.path, destination, source, target, "film"))
             continue
 
     series_list = sorted(series_groups.values(), key=lambda group: group["name"].casefold())
@@ -267,7 +301,7 @@ def build_organization_plan(relative_path: str) -> dict:
 def _move_children_deduplicated(src_dir: str, dest_dir_rel: str, source: str, kind: str, errors: list[str]) -> tuple[int, int]:
     dest_dir = resolve_path_within(MOUNT_PATH, dest_dir_rel, must_exist=True)
     existing = _file_map(dest_dir)
-    source_parent_rel = _rel(os.path.dirname(src_dir), os.path.realpath(MOUNT_PATH))
+    source_parent_rel = _rel(src_dir, os.path.realpath(MOUNT_PATH))
     moved = skipped = 0
     for child in list(os.scandir(src_dir)):
         if not child.is_file():
@@ -286,10 +320,15 @@ def _move_children_deduplicated(src_dir: str, dest_dir_rel: str, source: str, ki
                     pass
             skipped += 1
             continue
+        episode = extract_episode_number(child.name)
+        if episode and any(info[1] == episode for info in existing.values()):
+            errors.append(f"{source}/{child.name} : épisode déjà présent (autre qualité)")
+            skipped += 1
+            continue
         try:
             move_item(source_parent_rel, child.name, dest_dir_rel)
             moved += 1
-            existing[child.name] = (size, extract_episode_number(child.name))
+            existing[child.name] = (size, episode)
         except ValueError as exc:
             errors.append(f"{source}/{child.name} : {exc}")
     return moved, skipped
@@ -333,6 +372,11 @@ def _place_loose(src_parent_rel: str, name: str, season_rel: str, errors: list[s
             except OSError:
                 pass
         return 0, 1
+    episode = extract_episode_number(name)
+    target_files = _file_map(target_dir)
+    if episode and any(info[1] == episode for info in target_files.values()):
+        errors.append(f"{name} : épisode déjà présent (autre qualité)")
+        return 0, 1
     move_item(src_parent_rel, name, season_rel)
     return 1, 0
 
@@ -341,17 +385,45 @@ def _merge_movie(src_parent_rel: str, name: str, destination_rel: str, is_dir: b
     parent = resolve_path_within(MOUNT_PATH, src_parent_rel, must_exist=True)
     source_abs = os.path.join(parent, name)
     destination = resolve_path_within(MOUNT_PATH, destination_rel, must_exist=False)
-    if not is_dir and os.path.exists(destination):
-        source_size = os.path.getsize(source_abs)
-        target_size = os.path.getsize(destination)
-        if source_size != target_size:
-            errors.append(f"{name} : conflit de contenu")
-        else:
+    if not is_dir:
+        if os.path.isdir(destination):
+            existing = _file_map(destination)
+            size = os.path.getsize(source_abs)
+            if name in existing:
+                if existing[name][0] != size:
+                    errors.append(f"{name} : conflit de contenu")
+                else:
+                    try:
+                        os.remove(source_abs)
+                    except OSError:
+                        pass
+                return 0, 1
             try:
-                os.remove(source_abs)
-            except OSError:
-                pass
-        return 0, 1
+                move_item(src_parent_rel, name, destination_rel)
+                return 1, 0
+            except ValueError as exc:
+                errors.append(f"{name} : {exc}")
+                return 0, 0
+        if os.path.exists(destination):
+            source_size = os.path.getsize(source_abs)
+            target_size = os.path.getsize(destination)
+            if source_size != target_size:
+                errors.append(f"{name} : conflit de contenu")
+            else:
+                try:
+                    os.remove(source_abs)
+                except OSError:
+                    pass
+            return 0, 1
+        destination_parent = posixpath.dirname(destination_rel)
+        if destination_parent == src_parent_rel:
+            rename_item(src_parent_rel, name, os.path.basename(destination_rel))
+            return 1, 0
+        _ensure_nested_dir(posixpath.dirname(destination_rel))
+        move_item(src_parent_rel, name, destination_parent)
+        if os.path.basename(destination_rel) != name:
+            rename_item(posixpath.dirname(destination_rel), name, os.path.basename(destination_rel))
+        return 1, 0
     if not os.path.exists(destination):
         destination_parent = posixpath.dirname(destination_rel)
         if destination_parent == src_parent_rel:
@@ -399,8 +471,10 @@ def apply_organization_plan(relative_path: str) -> dict:
             except ValueError as exc:
                 errors.append(f"{existing} → {normalized} : {exc}")
         series_rel = posixpath.join(categories["series"], existing)
+        series_abs = resolve_path_within(MOUNT_PATH, series_rel, must_exist=True)
         for item in group["items"]:
-            season_rel = posixpath.join(series_rel, season_folder_label(item["season"]))
+            existing_season = _find_existing_season_dir(series_abs, item["season"])
+            season_rel = posixpath.join(series_rel, existing_season or season_folder_label(item["season"]))
             try:
                 if item["is_dir"]:
                     moved, skipped = _flatten_season(relative_path, item["name"], series_rel, season_rel, errors)
