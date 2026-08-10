@@ -210,8 +210,8 @@
 .file-table tr:hover .action-cell { background: var(--row-hover); }
 .file-table tr.selected .action-cell { background: var(--accent-soft); }
 .row-actions { display: flex; justify-content: flex-end; }
-.action-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text); border-radius: var(--radius-control); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); padding: 0; vertical-align: middle; }
-.action-btn:hover { background: var(--surface-3); color: var(--text); }
+.action-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: var(--text-on-accent); color: var(--bg); border-radius: var(--radius-control); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); padding: 0; vertical-align: middle; }
+.action-btn:hover { background: var(--muted); color: var(--bg); }
 .action-btn.danger:hover { color: var(--danger); }
 
 .fav-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); border-radius: var(--radius-control); cursor: pointer; padding: 0; transition: color var(--motion-fast); }
