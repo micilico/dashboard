@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cloud · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260803-refonte">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260810-p1p2p3">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -147,6 +147,10 @@
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg></span>
               <span>Liens</span>
             </button>
+            <button class="nav-btn" data-nav="trash" title="Corbeille" data-od-id="nav-trash" type="button">
+              <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 7.75h14M9 7.75V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2.25M19 7.75v11a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 18.75V7.75"/></svg></span>
+              <span>Corbeille</span>
+            </button>
             <button class="nav-btn" data-nav="stats" title="Statistiques" data-od-id="nav-stats" type="button">
               <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M6 16l4-6 4 4 4-8"/></svg></span>
               <span>Statistiques</span>
@@ -164,6 +168,10 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 Nouveau dossier
               </button>
+              <button id="btnTouch" class="button secondary" title="Nouveau fichier texte" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                Nouveau fichier
+              </button>
               <button id="btnShareFolder" class="button secondary" title="Partager le dossier courant" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/></svg>
                 Partager dossier
@@ -179,6 +187,12 @@
               <button id="btnSync" class="button secondary" title="Synchroniser" aria-label="Synchroniser" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
               </button>
+              <button id="btnHiddenToggle" class="button secondary" title="Afficher/masquer les fichiers cachés" aria-pressed="false" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 6.5c4 0 7.25 2.75 9 5.5-1.75 2.75-5 5.5-9 5.5S4.75 14.75 3 12c1.75-2.75 5-5.5 9-5.5Z"/><circle cx="12" cy="12" r="2.25"/></svg>
+              </button>
+              <button id="btnViewToggle" class="button secondary" title="Basculer liste / grille" aria-pressed="false" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>
+              </button>
               <button id="btnSelectionMode" class="button secondary mobile-priority" type="button" aria-pressed="false">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 11.5 11 13.5 15.5 8.5"/><rect x="4" y="4" width="16" height="16" rx="3"/></svg>
                 <span>Sélectionner</span>
@@ -186,6 +200,7 @@
             </div>
             <div class="toolbar-center">
               <nav class="breadcrumb" id="breadcrumb" aria-label="Chemin"></nav>
+              <input id="pathInput" class="path-input" type="text" autocomplete="off" spellcheck="false" aria-label="Saisir un chemin" hidden>
             </div>
             <div class="toolbar-right">
               <label class="search-wrap">
@@ -193,12 +208,17 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.25 4.25"/></svg>
                 <input id="searchInput" type="search" placeholder="Rechercher…" autocomplete="off">
               </label>
+              <label class="checkbox-wrap" title="Rechercher dans tout le stockage">
+                <input id="globalSearch" type="checkbox">
+                <span>Partout</span>
+              </label>
             </div>
           </header>
 
           <div id="bulkBar" class="bulk-bar" hidden>
             <span id="bulkCount">0 sélectionné</span>
-            <button id="bulkDownload" class="button secondary" type="button">Télécharger (ZIP)</button>
+            <button id="bulkPaste" class="button secondary" type="button" hidden>Coller ici</button>
+            <button id="bulkCopy" class="button secondary" type="button">Copier la sélection</button>
             <button id="bulkShare" class="button secondary" type="button">Générer les liens</button>
             <button id="bulkShareFolder" class="button secondary" type="button" hidden>Dossier navigable</button>
             <button id="bulkDelete" class="button danger" type="button">Supprimer</button>
@@ -216,8 +236,10 @@
                 <tr>
                   <th class="col-check"><input id="selectAll" type="checkbox" aria-label="Tout sélectionner"></th>
                   <th class="col-name sortable" data-sort="name" tabindex="0" aria-sort="ascending">Nom <span class="sort-arrow"></span></th>
+                  <th class="col-type sortable" data-sort="type" tabindex="0" aria-sort="none">Type <span class="sort-arrow"></span></th>
                   <th class="col-size sortable" data-sort="size" tabindex="0" aria-sort="none">Taille <span class="sort-arrow"></span></th>
                   <th class="col-date sortable" data-sort="date" tabindex="0" aria-sort="none">Modifié <span class="sort-arrow"></span></th>
+                  <th class="col-created sortable" data-sort="created" tabindex="0" aria-sort="none">Créé <span class="sort-arrow"></span></th>
                   <th class="col-fav"></th>
                   <th class="col-actions">Actions</th>
                 </tr>
@@ -225,6 +247,8 @@
               <tbody id="fileBody"></tbody>
             </table>
           </div>
+
+          <div id="fileGrid" class="file-grid" hidden></div>
 
           <div id="emptyState" class="empty-state" hidden>
             <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 18.25h8.25a3.25 3.25 0 0 0 .6-6.44A4.75 4.75 0 0 0 8 10.5a3.5 3.5 0 0 0 .5 6.94Z"/></svg></div>
@@ -250,6 +274,19 @@
           <div class="page-head"><h2>Liens de partage</h2></div>
           <div class="table-wrap links-table-wrap">
             <table class="file-table links-table" aria-label="Liens de partage"><thead><tr><th>Fichier</th><th>Jeton</th><th>Téléchargements</th><th>Expiration</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="linksBody"></tbody></table>
+          </div>
+        </div>
+
+        <div class="view-page" id="trashView" hidden>
+          <div class="page-head">
+            <h2>Corbeille</h2>
+            <div class="page-head-actions">
+              <button id="btnEmptyTrash" class="button danger" type="button">Vider la corbeille</button>
+            </div>
+          </div>
+          <p class="muted">Les éléments supprimés restent récupérables jusqu'à ce que la corbeille soit vidée. La corbeille consomme de l'espace de stockage.</p>
+          <div class="table-wrap">
+            <table class="file-table" aria-label="Corbeille"><thead><tr><th>Nom</th><th>Emplacement d'origine</th><th>Taille</th><th>Supprimé le</th><th>Actions</th></tr></thead><tbody id="trashBody"></tbody></table>
           </div>
         </div>
 
@@ -296,6 +333,10 @@
           <p class="upload-hint">Aucune limite de taille</p>
           <input id="fileInput" type="file" multiple hidden>
         </div>
+        <label class="checkbox-wrap" title="En cas de conflit, renommer le nouveau fichier plutôt que d'écraser">
+          <input id="uploadRenameConflict" type="checkbox" checked>
+          <span>Renommer en cas de conflit</span>
+        </label>
         <div id="uploadProgress" class="upload-progress" hidden></div>
         <p id="uploadMessage" class="field-message" aria-live="polite"></p>
         <div class="dialog-actions"><button id="cancelUploadBtn" class="button secondary" type="button">Fermer</button></div>
@@ -310,6 +351,30 @@
       </form>
     </dialog>
 
+    <dialog id="touchDialog" class="dialog">
+      <form method="dialog" id="touchForm"><h2>Nouveau fichier</h2>
+        <label>Nom <input id="touchNameInput" type="text" autocomplete="off" required placeholder="note.txt"></label>
+        <p id="touchMessage" class="field-message" aria-live="polite"></p>
+          <div class="dialog-actions"><button id="cancelTouchBtn" class="button secondary" type="button">Annuler</button><button id="confirmTouchBtn" class="button primary" type="button">Créer</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="editDialog" class="dialog edit-dialog">
+      <form method="dialog" id="editForm">
+        <div class="edit-head"><h2 id="editTitle"></h2><div class="dialog-actions"><button value="close" class="button secondary" type="submit">Fermer</button><button id="saveEditBtn" class="button primary" type="button">Enregistrer</button></div></div>
+        <textarea id="editContent" class="edit-textarea" spellcheck="false" aria-label="Contenu du fichier"></textarea>
+        <p id="editMessage" class="field-message" aria-live="polite"></p>
+      </form>
+    </dialog>
+
+    <dialog id="propertiesDialog" class="dialog">
+      <form method="dialog" id="propertiesForm">
+        <h2>Propriétés</h2>
+        <dl id="propertiesList" class="props-list"></dl>
+        <div class="dialog-actions"><button id="closePropertiesBtn" class="button secondary" type="button">Fermer</button></div>
+      </form>
+    </dialog>
+
     <dialog id="renameDialog" class="dialog">
       <form method="dialog" id="renameForm"><h2>Renommer</h2>
         <label>Nouveau nom <input id="renameInput" type="text" autocomplete="off" required></label>
@@ -321,7 +386,11 @@
     <dialog id="deleteDialog" class="dialog">
       <form method="dialog" id="deleteForm"><h2>Supprimer</h2>
         <p id="deleteName" class="dialog-name"></p>
-        <p class="destructive-copy">Action irréversible.</p>
+        <p class="destructive-copy">L’élément sera déplacé vers la corbeille et restera récupérable.</p>
+        <label class="checkbox-wrap">
+          <input id="deletePermanent" type="checkbox">
+          <span>Supprimer définitivement (sans corbeille)</span>
+        </label>
         <div class="dialog-actions"><button id="cancelDeleteBtn" class="button secondary" type="button">Annuler</button><button id="confirmDeleteBtn" class="button danger" type="button">Supprimer</button></div>
       </form>
     </dialog>
@@ -330,7 +399,7 @@
       <form method="dialog" id="bulkDeleteForm">
         <h2>Supprimer la sélection</h2>
         <p id="bulkDeleteDescription" class="dialog-name"></p>
-        <p class="destructive-copy">Cette action est irréversible.</p>
+        <p class="destructive-copy">Les éléments seront envoyés à la corbeille et resteront récupérables.</p>
         <div class="dialog-actions">
           <button id="cancelBulkDeleteBtn" class="button secondary" type="button">Annuler</button>
           <button id="confirmBulkDeleteBtn" class="button danger" type="submit">Supprimer</button>
@@ -363,7 +432,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <div id="fileActionMenu" class="action-menu" role="menu" hidden></div>
 
-    <script src="./config.js?v=20260803-refonte"></script>
-    <script src="./static/dist/app.min.js?v=20260803-refonte" defer></script>
+    <script src="./config.js?v=20260810-p1p2p3"></script>
+    <script src="./static/dist/app.min.js?v=20260810-p1p2p3" defer></script>
   </body>
 </html>

@@ -41,7 +41,9 @@ ULTRA_API_CACHE_TTL = float(os.getenv("CLOUD_PANEL_ULTRA_API_CACHE_TTL", "60"))
 
 DATA_DIR = Path(os.getenv("CLOUD_PANEL_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))
 DB_PATH = DATA_DIR / "cloud_panel.db"
-TEMP_ZIP_DIR = DATA_DIR / "temp_zips"
+TRASH_DIR_NAME = os.getenv("CLOUD_PANEL_TRASH_DIR", ".cloud-trash").strip("/")
+SEARCH_MAX_RESULTS = int(os.getenv("CLOUD_PANEL_SEARCH_MAX_RESULTS", "500"))
+TEXT_EDITOR_MAX_BYTES = int(os.getenv("CLOUD_PANEL_TEXT_EDITOR_MAX_BYTES", str(1024 * 1024)))
 SHARE_TOKEN_BYTES = int(os.getenv("CLOUD_PANEL_SHARE_TOKEN_BYTES", "24"))
 SHARE_DEFAULT_EXPIRY_DAYS = int(os.getenv("CLOUD_PANEL_SHARE_DEFAULT_EXPIRY_DAYS", "7"))
 SHARE_MAX_EXPIRY_DAYS = int(os.getenv("CLOUD_PANEL_SHARE_MAX_EXPIRY_DAYS", "30"))

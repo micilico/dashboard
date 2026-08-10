@@ -13,6 +13,9 @@ const S = {
   diskUsed: "", diskTotal: "", diskPct: 0, diskAvailable: true, totalItems: 0,
   uploadRows: new Map(),
   folderSizes: new Map(),
+  clipboard: { mode: null, items: [] },
+  viewMode: "list", showHidden: false, globalSearch: false, lastRangeIdx: -1,
+  trash: [], autoRefreshTimer: null, uploadJobs: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -99,7 +102,9 @@ function updateUrl() {
   const u = new URL(window.location.href);
   if (S.path) u.searchParams.set("path", S.path); else u.searchParams.delete("path");
   u.searchParams.set("view", S.view);
+  if (S.viewMode === "grid") u.searchParams.set("viewmode", "grid"); else u.searchParams.delete("viewmode");
   if (S.search) u.searchParams.set("search", S.search); else u.searchParams.delete("search");
+  if (S.globalSearch) u.searchParams.set("global", "1"); else u.searchParams.delete("global");
   if (S.sortKey !== "name") u.searchParams.set("sort", S.sortKey); else u.searchParams.delete("sort");
   if (S.sortDir !== "asc") u.searchParams.set("direction", S.sortDir); else u.searchParams.delete("direction");
   if (S.page > 1) u.searchParams.set("page", String(S.page)); else u.searchParams.delete("page");
@@ -107,26 +112,38 @@ function updateUrl() {
 }
 
 // ── Load files ──
+function visibleItems() {
+  if (!S.showHidden) return S.files.filter(f => !f.name.startsWith("."));
+  return S.files;
+}
+
 async function loadFiles(append) {
   if (S.loading) return; S.loading = true;
   const el = $("scrollSentinel");
   if (!append) { el.classList.remove("loading"); S.files = []; renderFileSkeleton(); }
   try {
-    const params = new URLSearchParams({ path: S.path, offset: String((S.page - 1) * S.pageSize), limit: String(S.pageSize) });
-    if (S.search) params.set("search", S.search);
-    const d = await api(au(`/files?${params.toString()}`));
+    const offset = (S.page - 1) * S.pageSize;
+    let d;
+    if (S.globalSearch && S.search) {
+      const params = new URLSearchParams({ q: S.search, path: S.path, offset: String(offset), limit: String(S.pageSize) });
+      d = await api(au(`/files/search?${params.toString()}`));
+    } else {
+      const params = new URLSearchParams({ path: S.path, offset: String(offset), limit: String(S.pageSize) });
+      if (S.search) params.set("search", S.search);
+      d = await api(au(`/files?${params.toString()}`));
+    }
     S.diskUsed = d.disk_used || ""; S.diskTotal = d.disk_total || ""; S.diskPct = d.disk_percent || 0;
     S.diskAvailable = d.disk_available !== false;
     const items = d.items || [];
-    S.files = items;
-    S.allFiles = items;
+    S.files = append ? S.files.concat(items) : items;
+    S.allFiles = S.files;
     items.forEach(f => {
       if (!f.is_dir) return;
       const s = S.folderSizes.get(f.path);
       if (s) { f.size = s.size; f.size_bytes = s.size_bytes; }
     });
     S.totalItems = Number(d.total) || items.length;
-    S.hasMore = false;
+    S.hasMore = Boolean(d.has_more);
     renderSidebarDisk();
     renderFiles();
     if (S.hasMore) { el.classList.add("loading"); startObserving(); } else { el.classList.remove("loading"); stopObserving(); }
@@ -134,39 +151,35 @@ async function loadFiles(append) {
   S.loading = false;
 }
 
-function renderFileSkeleton() {
-  $("emptyState").hidden = true;
-  $("paginationBar").hidden = true;
-  $("fileBody").replaceChildren(...Array.from({ length: 5 }, () => {
-    const row = document.createElement("tr");
-    row.className = "skeleton-row";
-    const cell = document.createElement("td");
-    cell.colSpan = 6;
-    const line = document.createElement("span");
-    line.className = "skeleton-line";
-    cell.append(line);
-    row.append(cell);
-    return row;
-  }));
-}
-
 // ── Infinite scroll ──
 function startObserving() {
   stopObserving();
-  S.obs = new IntersectionObserver(([e]) => { if (e.isIntersecting && S.hasMore && !S.loading) loadFiles(true); }, { rootMargin: "200px" });
+  S.obs = new IntersectionObserver(([e]) => {
+    if (e.isIntersecting && S.hasMore && !S.loading) { S.page++; loadFiles(true); }
+  }, { rootMargin: "200px" });
   S.obs.observe($("scrollSentinel"));
 }
 function stopObserving() { if (S.obs) { S.obs.disconnect(); S.obs = null; } }
 
 // ── Sort & filter ──
+function fileTypeLabel(f) {
+  if (f.is_dir) return "Dossier";
+  const t = fileIcon(f.name, false);
+  const labels = { video: "Vidéo", audio: "Audio", image: "Image", pdf: "PDF", archive: "Archive", document: "Document", file: "Fichier" };
+  return labels[t] || "Fichier";
+}
+
 function getSortedFiltered() {
-  let items = S.search ? S.allFiles.filter(f => f.name.toLowerCase().includes(S.search.toLowerCase())) : S.allFiles;
+  let items = visibleItems();
+  if (S.search && !S.globalSearch) items = items.filter(f => f.name.toLowerCase().includes(S.search.toLowerCase()));
   const key = S.sortKey, dir = S.sortDir === "asc" ? 1 : -1;
   items = [...items].sort((a, b) => {
     if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
     if (key === "name") return a.name.localeCompare(b.name, "fr") * dir;
     if (key === "size") return ((a.size_bytes || 0) - (b.size_bytes || 0)) * dir;
     if (key === "date") return ((a.modified || 0) - (b.modified || 0)) * dir;
+    if (key === "created") return ((a.created || 0) - (b.created || 0)) * dir;
+    if (key === "type") return fileTypeLabel(a).localeCompare(fileTypeLabel(b), "fr") * dir;
     return 0;
   });
   return items;
@@ -247,15 +260,202 @@ function changePage(delta) {
   loadFiles(false); updateUrl();
 }
 
+function renderFileSkeleton() {
+  $("emptyState").hidden = true;
+  $("paginationBar").hidden = true;
+  $("fileBody").replaceChildren(...Array.from({ length: 5 }, () => {
+    const row = document.createElement("tr");
+    row.className = "skeleton-row";
+    const cell = document.createElement("td");
+    cell.colSpan = 8;
+    const line = document.createElement("span");
+    line.className = "skeleton-line";
+    cell.append(line);
+    row.append(cell);
+    return row;
+  }));
+}
+
+function rangeSelectTo(idx) {
+  const items = getSortedFiltered();
+  if (S.lastRangeIdx < 0) S.lastRangeIdx = idx;
+  const from = Math.min(S.lastRangeIdx, idx);
+  const to = Math.max(S.lastRangeIdx, idx);
+  S.selectionMode = true;
+  for (let i = from; i <= to; i++) {
+    const item = items[i];
+    if (!item) continue;
+    if (!S.selected.has(item.path)) {
+      S.selected.add(item.path);
+      S.selectedItems.set(item.path, item);
+    }
+  }
+}
+
+function wireRowEvents(tr, f, i) {
+  tr.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!S.selected.has(f.path)) {
+      S.selected = new Set([f.path]);
+      S.selectedItems = new Map([[f.path, f]]);
+      S.selectionMode = true;
+      renderFiles();
+    }
+    openFileActionMenu(f, tr.querySelector(".action-btn"));
+  });
+  tr.addEventListener("dblclick", (e) => {
+    if (e.target.closest("button,a,input")) return;
+    if (f.is_dir) navigate(f.path);
+    else openPreview(f);
+  });
+  tr.addEventListener("click", (e) => {
+    if (e.target.closest("button,a,input")) return;
+    if (e.ctrlKey || e.metaKey) { toggleSelect(f); S.lastRangeIdx = i; return; }
+    if (e.shiftKey) { rangeSelectTo(i); renderFiles(); renderBulkBar(); return; }
+    S.focusedIdx = i;
+    if (S.selectionMode) toggleSelect(f);
+  });
+}
+
+function makeRow(f, i) {
+  const tr = document.createElement("tr");
+  tr.dataset.path = f.path;
+  if (S.selected.has(f.path)) tr.classList.add("selected");
+  if (i === S.focusedIdx) { tr.classList.add("focused"); tr.tabIndex = 0; }
+
+  // Checkbox
+  const td0 = document.createElement("td"); td0.className = "col-check";
+  const cb = document.createElement("input"); cb.type = "checkbox";
+  cb.checked = S.selected.has(f.path);
+  cb.setAttribute("aria-label", `Sélectionner ${f.name}`);
+  cb.addEventListener("change", () => toggleSelect(f));
+  td0.append(cb);
+
+  // Name
+  const td1 = document.createElement("td");
+  const nc = document.createElement("div"); nc.className = "file-name-cell";
+  const ic = document.createElement("span"); ic.className = `file-icon ${f.is_dir ? "folder" : fileIcon(f.name)}`; ic.innerHTML = fileIconSVG(fileIcon(f.name, f.is_dir));
+  const nm = document.createElement(f.is_dir ? "button" : "span");
+  nm.className = `file-name${f.is_dir ? " dir" : ""}`;
+  nm.textContent = f.name;
+  nm.title = f.name;
+  if (f.is_dir) {
+    nm.type = "button";
+    nm.setAttribute("aria-label", `Ouvrir ${f.name}`);
+    nm.addEventListener("click", () => {
+      if (S.selectionMode) toggleSelect(f);
+      else navigate(f.path);
+    });
+  }
+  nc.append(ic, nm); td1.append(nc);
+
+  // Type
+  const tdType = document.createElement("td"); tdType.className = "type-cell"; tdType.textContent = fileTypeLabel(f);
+
+  // Size
+  const td2 = document.createElement("td"); td2.className = "size-cell"; td2.append(folderSizeCell(f));
+
+  // Date
+  const td3 = document.createElement("td"); td3.className = "date-cell"; td3.textContent = f.modified ? fmtDate(f.modified) : "—";
+
+  // Created
+  const tdCreated = document.createElement("td"); tdCreated.className = "created-cell"; tdCreated.textContent = f.created ? fmtDate(f.created) : "—";
+
+  // Fav
+  const td4 = document.createElement("td");
+  const fb = document.createElement("button"); fb.className = `fav-btn${S.favs.some(x => x.path === f.path) ? " active" : ""}`;
+  fb.setAttribute("aria-label", "Favori"); fb.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="currentColor" stroke-width="1"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>';
+  fb.addEventListener("click", async (e) => { e.stopPropagation(); await toggleFav(f); });
+  td4.append(fb);
+
+  // Actions
+  const td5 = document.createElement("td"); td5.className = "action-cell";
+  const acts = document.createElement("div"); acts.className = "row-actions";
+  const more = document.createElement("button"); more.className = "action-btn"; more.type = "button";
+  more.setAttribute("aria-haspopup", "menu");
+  more.setAttribute("aria-expanded", "false");
+  more.setAttribute("aria-label", `Actions pour ${f.name}`);
+  more.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>';
+  more.addEventListener("click", (e) => { e.stopPropagation(); openFileActionMenu(f, e.currentTarget); });
+  acts.append(more);
+  td5.append(acts);
+
+  tr.append(td0, td1, tdType, td2, td3, tdCreated, td4, td5);
+  tr.draggable = true;
+  tr.addEventListener("dragstart", (e) => dragPayload(e, f));
+  tr.addEventListener("dragend", clearDrag);
+  if (f.is_dir) {
+    tr.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      tr.classList.add("drop-target");
+    });
+    tr.addEventListener("dragleave", () => tr.classList.remove("drop-target"));
+    tr.addEventListener("drop", (e) => {
+      e.preventDefault();
+      tr.classList.remove("drop-target");
+      const items = readDragItems(e);
+      if (items.length) {
+        if (e.ctrlKey || e.metaKey) copyItems(items, f.path);
+        else moveItemsTo(f.path, items);
+      }
+      else if (e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files, f.path);
+    });
+  }
+  wireRowEvents(tr, f, i);
+  return tr;
+}
+
+function makeTile(f, i) {
+  const tile = document.createElement("div");
+  tile.className = "grid-tile";
+  tile.dataset.path = f.path;
+  tile.tabIndex = 0;
+  if (S.selected.has(f.path)) tile.classList.add("selected");
+  const isImg = !f.is_dir && ["jpg","jpeg","png","gif","webp","svg","bmp","ico"].includes((f.name.split(".").pop() || "").toLowerCase());
+  const preview = document.createElement("div"); preview.className = "grid-preview";
+  if (f.is_dir) {
+    preview.innerHTML = `<span class="grid-icon folder">${fileIconSVG("folder")}</span>`;
+  } else if (isImg) {
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.alt = f.name;
+    img.src = au(`/files/download?path=${encodeURIComponent(f.path)}`);
+    img.addEventListener("error", () => { preview.innerHTML = `<span class="grid-icon ${fileIcon(f.name)}">${fileIconSVG(fileIcon(f.name))}</span>`; });
+    preview.append(img);
+  } else {
+    preview.innerHTML = `<span class="grid-icon ${fileIcon(f.name)}">${fileIconSVG(fileIcon(f.name))}</span>`;
+  }
+  const meta = document.createElement("div"); meta.className = "grid-meta";
+  const name = document.createElement("span"); name.className = "grid-name"; name.textContent = f.name; name.title = f.name;
+  const sub = document.createElement("span"); sub.className = "grid-sub";
+  sub.textContent = f.is_dir ? fileTypeLabel(f) : `${fmtSize(f.size_bytes)} · ${fileTypeLabel(f)}`;
+  meta.append(name, sub);
+  tile.append(preview, meta);
+  tile.addEventListener("click", (e) => {
+    if (e.ctrlKey || e.metaKey) { toggleSelect(f); S.lastRangeIdx = i; return; }
+    if (e.shiftKey) { rangeSelectTo(i); renderFiles(); renderBulkBar(); return; }
+    if (S.selectionMode) toggleSelect(f);
+    else if (f.is_dir) navigate(f.path);
+    else openPreview(f);
+  });
+  tile.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!S.selected.has(f.path)) { S.selected = new Set([f.path]); S.selectedItems = new Map([[f.path, f]]); S.selectionMode = true; renderFiles(); }
+    openFileActionMenu(f, tile);
+  });
+  return tile;
+}
+
 function renderFiles() {
   const all = getSortedFiltered();
   const totalPages = Math.max(1, Math.ceil(S.totalItems / S.pageSize));
   S.page = Math.min(S.page, totalPages);
-  const items = all;
-  const body = $("fileBody");
   const empty = $("emptyState");
   const sentinel = $("scrollSentinel");
   const pagBar = $("paginationBar");
+  const tableWrap = $("filesView").querySelector(".table-wrap");
+  const grid = $("fileGrid");
   $("filesView").classList.toggle("selection-mode", S.selectionMode);
   const selectionButton = $("btnSelectionMode");
   if (selectionButton) {
@@ -264,104 +464,37 @@ function renderFiles() {
     const label = qs("span", selectionButton);
     if (label) label.textContent = S.selectionMode ? "Terminer" : "Sélectionner";
   }
+  const viewToggle = $("btnViewToggle");
+  if (viewToggle) viewToggle.setAttribute("aria-pressed", S.viewMode === "grid" ? "true" : "false");
+  const hiddenToggle = $("btnHiddenToggle");
+  if (hiddenToggle) hiddenToggle.setAttribute("aria-pressed", S.showHidden ? "true" : "false");
   closeFileActionMenu();
 
-  if (items.length === 0) {
-    body.replaceChildren(); empty.hidden = false;
-    qs("p", empty).textContent = S.search ? "Aucun resultat." : "Ce dossier est vide.";
-    sentinel.classList.remove("loading"); pagBar.hidden = true; return;
+  if (all.length === 0) {
+    if (tableWrap) tableWrap.hidden = false;
+    if (grid) grid.hidden = true;
+    $("fileBody").replaceChildren();
+    empty.hidden = false;
+    qs("p", empty).textContent = S.search ? "Aucun résultat." : "Ce dossier est vide.";
+    sentinel.classList.remove("loading"); pagBar.hidden = true; renderBreadcrumb(); renderBulkBar(); return;
   }
   empty.hidden = true;
 
-  body.replaceChildren(...items.map((f, i) => {
-    const tr = document.createElement("tr");
-    tr.dataset.path = f.path;
-    if (S.selected.has(f.path)) tr.classList.add("selected");
-    if (i === S.focusedIdx) { tr.classList.add("focused"); tr.tabIndex = 0; }
-
-    // Checkbox
-    const td0 = document.createElement("td"); td0.className = "col-check";
-    const cb = document.createElement("input"); cb.type = "checkbox";
-    cb.checked = S.selected.has(f.path);
-    cb.setAttribute("aria-label", `Sélectionner ${f.name}`);
-    cb.addEventListener("change", () => toggleSelect(f));
-    td0.append(cb);
-
-    // Name
-    const td1 = document.createElement("td");
-    const nc = document.createElement("div"); nc.className = "file-name-cell";
-    const ic = document.createElement("span"); ic.className = `file-icon ${f.is_dir ? "folder" : fileIcon(f.name)}`; ic.innerHTML = fileIconSVG(fileIcon(f.name, f.is_dir));
-    const nm = document.createElement(f.is_dir ? "button" : "span");
-    nm.className = `file-name${f.is_dir ? " dir" : ""}`;
-    nm.textContent = f.name;
-    nm.title = f.name;
-    if (f.is_dir) {
-      nm.type = "button";
-      nm.setAttribute("aria-label", `Ouvrir ${f.name}`);
-      nm.addEventListener("click", () => {
-        if (S.selectionMode) toggleSelect(f);
-        else navigate(f.path);
-      });
-    }
-    nc.append(ic, nm); td1.append(nc);
-
-    // Size
-    const td2 = document.createElement("td"); td2.className = "size-cell"; td2.append(folderSizeCell(f));
-
-    // Date
-    const td3 = document.createElement("td"); td3.className = "date-cell"; td3.textContent = f.modified ? fmtDate(f.modified) : "—";
-
-    // Fav
-    const td4 = document.createElement("td");
-    const fb = document.createElement("button"); fb.className = `fav-btn${S.favs.some(x => x.path === f.path) ? " active" : ""}`;
-    fb.setAttribute("aria-label", "Favori"); fb.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="currentColor" stroke-width="1"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>';
-    fb.addEventListener("click", async (e) => { e.stopPropagation(); await toggleFav(f); });
-    td4.append(fb);
-
-    // Actions
-    const td5 = document.createElement("td"); td5.className = "action-cell";
-    const acts = document.createElement("div"); acts.className = "row-actions";
-    const more = document.createElement("button"); more.className = "action-btn"; more.type = "button";
-    more.setAttribute("aria-haspopup", "menu");
-    more.setAttribute("aria-expanded", "false");
-    more.setAttribute("aria-label", `Actions pour ${f.name}`);
-    more.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h.01M12 12h.01M19 12h.01"/></svg>';
-    more.addEventListener("click", (e) => { e.stopPropagation(); openFileActionMenu(f, e.currentTarget); });
-    acts.append(more);
-    td5.append(acts);
-
-    tr.append(td0, td1, td2, td3, td4, td5);
-    tr.draggable = true;
-    tr.addEventListener("dragstart", (e) => dragPayload(e, f));
-    tr.addEventListener("dragend", clearDrag);
-    if (f.is_dir) {
-      tr.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        tr.classList.add("drop-target");
-      });
-      tr.addEventListener("dragleave", () => tr.classList.remove("drop-target"));
-      tr.addEventListener("drop", (e) => {
-        e.preventDefault();
-        tr.classList.remove("drop-target");
-        const items = readDragItems(e);
-        if (items.length) moveItemsTo(f.path, items);
-        else if (e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files, f.path);
-      });
-    }
-    tr.addEventListener("click", (e) => {
-      if (e.target.closest("button,a,input")) return;
-      S.focusedIdx = i;
-      if (S.selectionMode) toggleSelect(f);
-    });
-    return tr;
-  }));
+  if (S.viewMode === "grid") {
+    if (tableWrap) tableWrap.hidden = true;
+    grid.hidden = false;
+    grid.replaceChildren(...all.map((f, i) => makeTile(f, i)));
+  } else {
+    if (tableWrap) tableWrap.hidden = false;
+    grid.hidden = true;
+    $("fileBody").replaceChildren(...all.map((f, i) => makeRow(f, i)));
+  }
 
   renderBreadcrumb();
   renderBulkBar();
 
   // Pagination
-  if (S.totalItems > S.pageSize) {
+  if (S.totalItems > S.pageSize && S.search && !S.globalSearch) {
     pagBar.hidden = false;
     $("pageInfo").textContent = `Page ${S.page} / ${totalPages} · ${S.totalItems} élément${S.totalItems > 1 ? "s" : ""}`;
     $("prevPageBtn").disabled = S.page <= 1;
@@ -369,25 +502,6 @@ function renderFiles() {
   } else {
     pagBar.hidden = true;
   }
-}
-
-function renderBreadcrumb() {
-  const parts = S.path ? S.path.replace(/\\/g, "/").split("/").filter(Boolean) : [];
-  const el = $("breadcrumb"); el.replaceChildren();
-  const rl = document.createElement("a"); rl.href = "#"; rl.textContent = "Cloud";
-  rl.addEventListener("click", (e) => { e.preventDefault(); navigate(""); });
-  makeDropTarget(rl, "");
-  el.append(rl);
-  let acc = "";
-  for (const p of parts) {
-    const sp = document.createElement("span"); sp.className = "sep"; sp.textContent = "/"; el.append(sp);
-    acc = acc ? `${acc}/${p}` : p;
-    const lk = document.createElement("a"); lk.href = "#"; lk.textContent = p;
-    lk.addEventListener("click", (e) => { e.preventDefault(); navigate(acc); });
-    makeDropTarget(lk, acc);
-    el.append(lk);
-  }
-  qs("#sidebarPath").textContent = `/mnt/ultra-media/${S.path ? S.path + "/" : ""}`;
 }
 
 // ── Drag & drop (déplacer) ──
@@ -485,7 +599,11 @@ function makeDropTarget(el, destPathOrGetter) {
     e.preventDefault();
     el.classList.remove("drop-active");
     const items = readDragItems(e);
-    if (items.length) moveItemsTo(resolveDest(), items);
+    if (items.length) {
+      const dest = resolveDest();
+      if (e.ctrlKey || e.metaKey) copyItems(items, dest);
+      else moveItemsTo(dest, items);
+    }
   });
 }
 
@@ -511,12 +629,19 @@ function renderSidebarDisk() {
 
 function renderBulkBar() {
   const el = $("bulkBar"); const n = S.selected.size;
-  if (n === 0) { el.hidden = true; return; }
-  S.selectionMode = true;
+  const hasClip = S.clipboard.items.length > 0;
+  if (n === 0 && !hasClip) { el.hidden = true; return; }
+  if (n > 0) S.selectionMode = true;
   el.hidden = false;
-  qs("#bulkCount", el).textContent = `${n} sélectionné${n > 1 ? "s" : ""}`;
+  qs("#bulkCount", el).textContent = n > 0 ? `${n} sélectionné${n > 1 ? "s" : ""}` : `Presse-papiers (${S.clipboard.items.length})`;
+  $("bulkPaste").hidden = !hasClip;
   const selectedFolder = getSingleSelectedFolder();
   $("bulkShareFolder").hidden = !selectedFolder;
+  ["bulkCopy", "bulkShare", "bulkDelete"].forEach(id => { $(id).hidden = n === 0; });
+  const clearBtn = $("bulkClear");
+  clearBtn.hidden = false;
+  clearBtn.textContent = n > 0 ? "Désélectionner" : "Vider le presse-papiers";
+  if (n > 0 && !hasClip) $("bulkCopy").hidden = false;
 }
 
 function getSingleSelectedFolder() {
@@ -599,10 +724,17 @@ function openFileActionMenu(file, invoker) {
   if (!file.is_dir) {
     items.push(menuItem("Télécharger", '<path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/>', null, { href: au(`/files/download?path=${encodeURIComponent(file.path)}`) }));
     items.push(menuItem("Aperçu", '<circle cx="12" cy="12" r="8.25"/><path d="M12 8v4l3 3"/>', () => openPreview(file, invoker)));
+    if (isEditableText(file.name)) items.push(menuItem("Modifier", '<path d="M15.25 5.25 18.75 8.75M7.75 16.25l-1 2 2-1L16 10 14 8Z"/>', () => openEditor(file, invoker)));
   }
   items.push(menuItem("Partager", '<path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24M15.5 8.5l1.5-1.5a3 3 0 0 0-4.25-4.25l-3 3a3 3 0 0 0 0 4.24"/>', () => openShare(file, invoker)));
   items.push(menuItem("Renommer", '<path d="M15.25 5.25 18.75 8.75M7.75 16.25l-1 2 2-1L16 10 14 8Z"/>', () => openRename(file, invoker)));
+  items.push(menuItem("Copier", '<path d="M9 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM15 4a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v10"/>', () => copyToClipboard([file])));
+  items.push(menuItem("Dupliquer", '<path d="M9 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM15 4a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v10"/>', async () => {
+    const src = file.path.split("/").slice(0, -1).join("/");
+    await copyItems([file], src);
+  }));
   items.push(menuItem("Sélectionner", '<path d="M9 11.5 11 13.5 15.5 8.5"/><rect x="4" y="4" width="16" height="16" rx="3"/>', () => toggleSelect(file)));
+  items.push(menuItem("Propriétés", '<circle cx="12" cy="12" r="8.25"/><path d="M12 11v5M12 8h.01"/>', () => openProperties(file, invoker)));
   if (file.is_dir) {
     items.push(menuItem("Dossier navigable", '<path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/><path d="M13.5 10.5 10.5 13.5M8.5 15.5l-1.5 1.5a3 3 0 0 0 4.25 4.25l3-3a3 3 0 0 0 0-4.24"/>', () => openShare(file, invoker)));
   }
@@ -750,7 +882,12 @@ function openPreview(f, trigger) {
 }
 // ── Dialogs ──
 function openRename(f, trigger) { S.renameTarget = f; $("renameInput").value = f.name; qs("#renameMessage", $("renameDialog")).textContent = ""; openDialog($("renameDialog"), trigger); }
-function openDelete(f, trigger) { S.deleteTarget = f; qs("#deleteName", $("deleteDialog")).textContent = f.name; openDialog($("deleteDialog"), trigger); }
+function openDelete(f, trigger) {
+  S.deleteTarget = f;
+  qs("#deleteName", $("deleteDialog")).textContent = f.name;
+  $("deletePermanent").checked = false;
+  openDialog($("deleteDialog"), trigger);
+}
 
 // ── Events ──
 $("btnUpload").addEventListener("click", (event) => openDialog($("uploadDialog"), event.currentTarget));
@@ -947,6 +1084,7 @@ qsa("[data-nav]").forEach(b => b.addEventListener("click", () => {
   else if (v === "history") switchView("history");
   else if (v === "links") switchView("links");
   else if (v === "stats") switchView("stats");
+  else if (v === "trash") switchView("trash");
 }));
 
 // Cibles de dépôt : Racine / Parent
@@ -988,7 +1126,7 @@ makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="parent"]'), () => S.path.s
 
 function switchView(v) {
   S.view = v; updateUrl();
-  ["files","history","links","stats"].forEach(x => {
+  ["files","history","links","stats","trash"].forEach(x => {
     const el = $(x + "View"); if (el) el.hidden = x !== v;
   });
   qsa(".cloud-view-nav .nav-btn").forEach(b => {
@@ -996,15 +1134,16 @@ function switchView(v) {
     b.classList.toggle("active", isActive);
     b.setAttribute("aria-selected", String(isActive));
   });
-  if (v === "history") loadHistory();
-  if (v === "links") loadLinks();
-  if (v === "stats") loadStats();
-  if (v === "files") { stopObserving(); loadFiles(); }
+  if (v === "history") { stopAutoRefresh(); loadHistory(); }
+  if (v === "links") { stopAutoRefresh(); loadLinks(); }
+  if (v === "stats") { stopAutoRefresh(); loadStats(); }
+  if (v === "trash") { stopAutoRefresh(); loadTrash(); }
+  if (v === "files") { stopObserving(); loadFiles(); startAutoRefresh(); }
 }
 
 // ── Keyboard ──
 document.addEventListener("keydown", (e) => {
-  if ($("uploadDialog").open || $("mkdirDialog").open || $("renameDialog").open || $("deleteDialog").open || $("shareDialog").open || $("previewDialog").open || $("organizeDialog").open) {
+  if ($("uploadDialog").open || $("mkdirDialog").open || $("renameDialog").open || $("deleteDialog").open || $("shareDialog").open || $("previewDialog").open || $("organizeDialog").open || $("touchDialog").open || $("editDialog").open || $("propertiesDialog").open || $("bulkDeleteDialog").open) {
     if (e.key === "Escape") { e.preventDefault(); document.querySelector("dialog[open]")?.close(); }
     return;
   }
@@ -1018,6 +1157,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Delete" && S.focusedIdx >= 0) openDelete(items[S.focusedIdx]);
   if (e.key === "F2" && S.focusedIdx >= 0) { e.preventDefault(); openRename(items[S.focusedIdx]); }
   if (e.key === "a" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selectAll(); }
+  if ((e.key === "c" || e.key === "x") && (e.ctrlKey || e.metaKey) && S.selected.size) {
+    e.preventDefault();
+    const sel = [...S.selected].map(p => S.selectedItems.get(p) || { path: p, name: p.split("/").pop(), is_dir: false });
+    copyToClipboard(sel);
+  }
 });
 function scrollToRow() {
   const row = qs(`#fileBody tr:nth-child(${S.focusedIdx + 1})`);
@@ -1059,7 +1203,10 @@ $("confirmDeleteBtn").addEventListener("click", async () => {
   setButtonBusy($("confirmDeleteBtn"), true);
   try {
     const fd = new FormData(); fd.append("path", S.path); fd.append("name", S.deleteTarget.name);
-    await api(au("/files/delete"), { method: "POST", body: fd }); toast("Élément supprimé."); $("deleteDialog").close(); S.deleteTarget = null; loadFiles();
+    if ($("deletePermanent").checked) fd.append("permanent", "true");
+    await api(au("/files/delete"), { method: "POST", body: fd });
+    toast($("deletePermanent").checked ? "Élément supprimé définitivement." : "Élément déplacé vers la corbeille.");
+    $("deleteDialog").close(); S.deleteTarget = null; loadFiles();
   } catch (e) { showError(e); }
   finally { setButtonBusy($("confirmDeleteBtn"), false); }
 });
@@ -1080,39 +1227,109 @@ $("cancelUploadBtn").addEventListener("click", () => { $("uploadDialog").close()
 
 async function startUpload(files, targetPath) {
   const destPath = targetPath || S.path;
-  $("uploadMessage").textContent = ""; $("uploadProgress").hidden = false;
+  const overwrite = $("uploadRenameConflict").checked ? "rename" : "overwrite";
+  $("uploadMessage").textContent = "";
+  $("uploadProgress").hidden = false;
   S.uploadRows.clear();
-  $("uploadProgress").replaceChildren(...Array.from(files).map(f => {
+  const list = Array.from(files);
+  const jobs = [];
+  $("uploadProgress").replaceChildren(...list.map(f => {
     const r = document.createElement("div"); r.className = "progress-row";
     const name = document.createElement("span"); name.className = "pname"; name.textContent = f.name;
     const track = document.createElement("div"); track.className = "ptrack";
     const fill = document.createElement("div"); fill.className = "pfill"; fill.style.width = "0";
-    const status = document.createElement("span"); status.className = "pstatus"; status.textContent = "0%";
+    const st = document.createElement("span"); st.className = "pstatus"; st.textContent = "En attente…";
+    const controls = document.createElement("span"); controls.className = "pcontrols";
     track.append(fill);
-    r.append(name, track, status);
-    S.uploadRows.set(f, r);
+    r.append(name, track, st, controls);
+    const job = { row: r, fill, st, controls, done: false, cancelled: false, controller: null, retried: false };
+    S.uploadRows.set(f, job);
+    jobs.push({ f, job });
     return r;
   }));
-  for (const f of files) await uploadOne(f, destPath);
-  toast("Téléversement terminé."); $("uploadProgress").hidden = true; loadFiles();
+
+  const queue = [...jobs];
+  let active = 0, done = 0, ok = 0, errors = 0;
+  const CONCURRENCY = 3;
+
+  const finish = () => {
+    done++;
+    $("uploadProgress").hidden = true;
+    toast(errors ? `Téléversement terminé : ${ok} OK, ${errors} erreur(s).` : "Téléversement terminé.");
+    loadFiles();
+  };
+
+  const run = (job, f) => {
+    job.st.textContent = "0%";
+    const cancel = document.createElement("button");
+    cancel.className = "mini-btn"; cancel.type = "button"; cancel.textContent = "Annuler";
+    cancel.addEventListener("click", () => { job.cancelled = true; job.controller?.abort(); job.st.textContent = "Annulé"; });
+    job.controls.replaceChildren(cancel);
+    uploadOne(f, destPath, overwrite).then(success => {
+      active--;
+      done++;
+      if (success) ok++; else errors++;
+      if (!success) addRetry(job, f, destPath, overwrite);
+      if (done === list.length) finish();
+      else tick();
+    });
+  };
+
+  const tick = () => {
+    while (active < CONCURRENCY && queue.length) {
+      const next = queue.shift();
+      if (!next) break;
+      active++;
+      run(next.job, next.f);
+    }
+  };
+  tick();
 }
 
-async function uploadOne(file, destPath) {
-  const fd = new FormData(); fd.append("path", destPath); fd.append("file", file);
-  const row = S.uploadRows.get(file);
-  const fill = qs(".pfill", row); const st = qs(".pstatus", row);
+async function uploadOne(file, destPath, overwrite) {
+  const job = S.uploadRows.get(file);
+  if (!job) return false;
+  const fd = new FormData(); fd.append("path", destPath); fd.append("overwrite", overwrite); fd.append("file", file);
   try {
+    const controller = new AbortController();
+    job.controller = controller;
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", au("/files/upload")); xhr.setRequestHeader("X-Cloud-Panel-CSRF", S.csrf);
-    xhr.upload.addEventListener("progress", e => { if (e.lengthComputable && fill && st) { const p = Math.round(e.loaded / e.total * 100); fill.style.width = p + "%"; st.textContent = p + "%"; } });
-    xhr.timeout = 300000;
+    xhr.open("POST", au("/files/upload"));
+    xhr.setRequestHeader("X-Cloud-Panel-CSRF", S.csrf);
+    xhr.upload.addEventListener("progress", e => {
+      if (e.lengthComputable && job.fill && !job.cancelled) {
+        const p = Math.round(e.loaded / e.total * 100);
+        job.fill.style.width = p + "%";
+        job.st.textContent = p + "%";
+      }
+    });
+    xhr.timeout = 900000;
     await new Promise((res, rej) => {
-      xhr.onload = () => xhr.status < 300 ? res() : rej(new Error("Upload echoue (HTTP " + xhr.status + ")"));
-      xhr.onerror = () => rej(new Error("Erreur reseau"));
-      xhr.ontimeout = () => rej(new Error("Timeout: fichier trop volumineux ou connexion lente"));
+      xhr.onload = () => xhr.status < 300 ? res() : rej(new Error("Échec (HTTP " + xhr.status + ")"));
+      xhr.onerror = () => rej(new Error("Erreur réseau"));
+      xhr.ontimeout = () => rej(new Error("Timeout (fichier volumineux)"));
+      controller.signal.addEventListener("abort", () => xhr.abort());
       xhr.send(fd);
     });
-  } catch (e) { if (st) st.textContent = "Erreur"; showError(e); }
+    job.st.textContent = "OK";
+    job.fill.style.width = "100%";
+    job.controls.replaceChildren();
+    return true;
+  } catch (e) {
+    if (job.cancelled) job.st.textContent = "Annulé";
+    else job.st.textContent = "Erreur";
+    return false;
+  }
+}
+
+function addRetry(job, file, destPath, overwrite) {
+  const retry = document.createElement("button");
+  retry.className = "mini-btn"; retry.type = "button"; retry.textContent = "Réessayer";
+  retry.addEventListener("click", () => {
+    job.st.textContent = "0%"; job.fill.style.width = "0";
+    uploadOne(file, destPath, overwrite).then(s => { if (!s) addRetry(job, file, destPath, overwrite); });
+  });
+  job.controls.replaceChildren(retry);
 }
 
 // ── Select All ──
@@ -1163,6 +1380,13 @@ $("searchInput").addEventListener("input", () => {
   window.cloudSearchTimer = setTimeout(() => loadFiles(false), 180);
   updateUrl();
 });
+$("globalSearch").addEventListener("change", () => {
+  S.globalSearch = $("globalSearch").checked;
+  S.page = 1;
+  loadFiles(false);
+  updateUrl();
+  toast(S.globalSearch ? "Recherche globale activée." : "Recherche limitée au dossier courant.");
+});
 
 // ── Bulk actions ──
 $("bulkClear").addEventListener("click", () => setSelectionMode(false));
@@ -1182,7 +1406,7 @@ $("bulkDeleteForm").addEventListener("submit", async (event) => {
     try { const fd = new FormData(); const pp = p.split("/").slice(0, -1).join("/"); const nm = p.split("/").pop(); fd.append("path", pp); fd.append("name", nm); await api(au("/files/delete"), { method: "POST", body: fd }); } catch {}
     done++; qs("#progressBarFill", ps).value = done / it.length; qs("#progressStatus", ps).textContent = `${done}/${it.length}`;
   }
-  ps.hidden = true; S.selected.clear(); S.selectedItems.clear(); toast("Suppression terminée."); loadFiles();
+  ps.hidden = true; S.selected.clear(); S.selectedItems.clear(); toast("Suppression terminée (élément(s) envoyé(s) à la corbeille)."); loadFiles();
 });
 $("bulkShare").addEventListener("click", async () => {
   if (!S.selected.size) return;
@@ -1206,19 +1430,6 @@ $("bulkShareFolder").addEventListener("click", (event) => {
   const selectedFolder = getSingleSelectedFolder();
   if (!selectedFolder) return;
   openShare(selectedFolder, event.currentTarget);
-});
-$("bulkDownload").addEventListener("click", async () => {
-  const it = [...S.selected]; if (!it.length) return;
-  if (it.length === 1) {
-    window.location.href = au(`/files/download?path=${encodeURIComponent(it[0])}`);
-    return;
-  }
-  try {
-    const fd = new FormData(); fd.append("paths", it.join("\n"));
-    const blob = await fetch(au("/files/download-zip"), { method: "POST", headers: { "X-Cloud-Panel-CSRF": S.csrf }, body: fd }).then(r => { if (!r.ok) throw new Error("Erreur ZIP"); return r.blob(); });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "cloud-panel-bulk.zip"; a.click(); URL.revokeObjectURL(url);
-    toast("Archive ZIP téléchargée.");
-  } catch (e) { showError(e); }
 });
 
 // ── History ──
@@ -1326,6 +1537,261 @@ async function loadStats() {
   } catch (e) { showError(e); }
 }
 
+// ── Copier / presse-papiers ──
+const EDITABLE_EXTS = ["txt","md","json","xml","csv","log","ini","cfg","yml","yaml","conf","env","sh","bat","ps1","py","js","ts","css","html","htm","sql","rss","atom"];
+function isEditableText(name) { return EDITABLE_EXTS.includes((name || "").split(".").pop().toLowerCase()); }
+
+function copyToClipboard(items) {
+  S.clipboard = { mode: "copy", items: items.map(i => ({ path: i.path, name: i.name, is_dir: Boolean(i.is_dir) })) };
+  toast(`Copié : ${items.length} élément${items.length > 1 ? "s" : ""}. Utilisez « Coller ici ».`);
+  renderBulkBar();
+}
+
+async function copyItems(items, destPath) {
+  let done = 0; const errors = [];
+  for (const it of items) {
+    const srcDir = it.path.split("/").slice(0, -1).join("/");
+    const name = it.name || it.path.split("/").pop();
+    const fd = new FormData();
+    fd.append("path", srcDir);
+    fd.append("name", name);
+    fd.append("dest", destPath);
+    try {
+      await api(au("/files/copy"), { method: "POST", body: fd });
+      done++;
+    } catch (e) { errors.push(`${name} : ${e.message}`); }
+  }
+  if (errors.length) toast(`Copie refusée : ${errors.slice(0, 2).join(" · ")}`);
+  toast(done ? (done === 1 ? "Élément copié." : `${done} éléments copiés.`) : "Aucune copie effectuée.");
+  loadFiles();
+}
+
+async function pasteItems() {
+  const items = S.clipboard.items;
+  if (!items.length) return;
+  await copyItems(items, S.path);
+}
+
+$("bulkCopy").addEventListener("click", () => {
+  if (!S.selected.size) return;
+  const items = [...S.selected].map(p => S.selectedItems.get(p) || { path: p, name: p.split("/").pop(), is_dir: false });
+  copyToClipboard(items);
+});
+$("bulkPaste").addEventListener("click", async () => {
+  setButtonBusy($("bulkPaste"), true);
+  await pasteItems();
+  setButtonBusy($("bulkPaste"), false);
+});
+$("bulkClear").addEventListener("click", () => {
+  if (S.selected.size) setSelectionMode(false);
+  else { S.clipboard = { mode: null, items: [] }; toast("Presse-papiers vidé."); renderBulkBar(); }
+});
+
+// ── Nouveau fichier / éditeur ──
+$("btnTouch").addEventListener("click", (event) => {
+  $("touchNameInput").value = "";
+  qs("#touchMessage", $("touchDialog")).textContent = "";
+  openDialog($("touchDialog"), event.currentTarget);
+});
+$("touchForm").addEventListener("submit", (e) => { e.preventDefault(); $("confirmTouchBtn").click(); });
+$("confirmTouchBtn").addEventListener("click", async () => {
+  const name = $("touchNameInput").value.trim();
+  if (!name) { qs("#touchMessage", $("touchDialog")).textContent = "Nom requis."; return; }
+  setButtonBusy($("confirmTouchBtn"), true);
+  try {
+    const fd = new FormData(); fd.append("path", S.path); fd.append("name", name);
+    await api(au("/files/touch"), { method: "POST", body: fd });
+    toast(`Fichier « ${name} » créé.`);
+    $("touchDialog").close();
+    loadFiles();
+  } catch (e) { qs("#touchMessage", $("touchDialog")).textContent = e.message; }
+  finally { setButtonBusy($("confirmTouchBtn"), false); }
+});
+$("cancelTouchBtn").addEventListener("click", () => $("touchDialog").close());
+
+function openEditor(f, trigger) {
+  S.editTarget = f;
+  $("editTitle").textContent = f.name;
+  $("editContent").value = "Chargement…";
+  qs("#editMessage", $("editDialog")).textContent = "";
+  openDialog($("editDialog"), trigger);
+  loadEditContent(f);
+}
+async function loadEditContent(f) {
+  try {
+    const d = await api(au(`/files/content?path=${encodeURIComponent(f.path)}`));
+    $("editContent").value = d.content || "";
+  } catch (e) {
+    qs("#editMessage", $("editDialog")).textContent = e.message;
+    $("editContent").value = "";
+  }
+}
+$("saveEditBtn").addEventListener("click", async () => {
+  if (!S.editTarget) return;
+  const btn = $("saveEditBtn");
+  setButtonBusy(btn, true);
+  try {
+    const fd = new FormData();
+    fd.append("path", S.editTarget.path);
+    fd.append("content", $("editContent").value);
+    await api(au("/files/write"), { method: "POST", body: fd });
+    toast("Fichier enregistré.");
+    $("editDialog").close();
+    loadFiles();
+  } catch (e) { qs("#editMessage", $("editDialog")).textContent = e.message; }
+  finally { setButtonBusy(btn, false); }
+});
+
+// ── Propriétés ──
+function openProperties(f, trigger) {
+  const list = $("propertiesList");
+  list.replaceChildren();
+  const row = (k, v) => {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v ?? "—";
+    list.append(dt, dd);
+  };
+  row("Nom", f.name);
+  row("Chemin", `/${f.path}`);
+  row("Type", fileTypeLabel(f));
+  row("Taille", f.is_dir ? (f.size || "—") : fmtSize(f.size_bytes));
+  row("Modifié", f.modified ? fmtDate(f.modified) : "—");
+  if (f.created) row("Créé", fmtDate(f.created));
+  openDialog($("propertiesDialog"), trigger);
+  api(au(`/files/properties?path=${encodeURIComponent(f.path)}`))
+    .then(d => {
+      row("Taille (dossier)", d.size || "—");
+      if (d.is_dir) row("Éléments", String(d.file_count));
+      if (d.mime) row("Type MIME", d.mime);
+      if (d.permissions) row("Permissions", d.permissions);
+      if (d.owner != null) row("Owner / Groupe", `${d.owner} / ${d.group}`);
+    })
+    .catch(() => {});
+}
+$("closePropertiesBtn").addEventListener("click", () => $("propertiesDialog").close());
+
+// ── Corbeille ──
+async function loadTrash() {
+  try {
+    const d = await api(au("/files/trash"));
+    S.trash = d.items || [];
+    renderTrash();
+  } catch (e) { showError(e); }
+}
+function renderTrash() {
+  const b = $("trashBody");
+  if (!S.trash.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td"); cell.colSpan = 5; cell.className = "table-empty-cell";
+    cell.textContent = "La corbeille est vide.";
+    row.append(cell);
+    b.replaceChildren(row);
+    return;
+  }
+  b.replaceChildren(...S.trash.map(t => {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td"); name.textContent = t.name || "";
+    const orig = document.createElement("td"); orig.className = "trash-origin"; orig.textContent = `/${t.original_path}`; orig.title = t.original_path;
+    const size = document.createElement("td"); size.className = "size-cell"; size.textContent = t.size_bytes ? fmtSize(t.size_bytes) : (t.is_dir ? "Dossier" : "—");
+    const date = document.createElement("td"); date.className = "date-cell"; date.textContent = fmtDate(t.deleted_at);
+    const acts = document.createElement("td"); acts.className = "action-cell";
+    const restore = document.createElement("button"); restore.className = "action-btn"; restore.setAttribute("aria-label", "Restaurer");
+    restore.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10h8m-4-4 4 4-4 4"/></svg>';
+    restore.addEventListener("click", async () => {
+      try {
+        const fd = new FormData(); fd.append("path", t.trashed_rel);
+        await api(au("/files/trash/restore"), { method: "POST", body: fd });
+        toast("Élément restauré.");
+        loadTrash();
+      } catch (e) { toast(e.message); }
+    });
+    acts.append(restore);
+    tr.append(name, orig, size, date, acts);
+    return tr;
+  }));
+}
+$("btnEmptyTrash").addEventListener("click", async () => {
+  if (!S.trash.length) { toast("La corbeille est déjà vide."); return; }
+  setButtonBusy($("btnEmptyTrash"), true);
+  try {
+    const r = await api(au("/files/trash/empty"), { method: "POST" });
+    toast(`Corbeille vidée (${r.removed} élément${r.removed > 1 ? "s" : ""}).`);
+    loadTrash();
+  } catch (e) { toast(e.message); }
+  finally { setButtonBusy($("btnEmptyTrash"), false); }
+});
+
+// ── Chemin éditable ──
+function enablePathInput() {
+  const input = $("pathInput");
+  input.value = S.path;
+  input.hidden = false;
+  $("breadcrumb").hidden = true;
+  input.focus();
+  input.select();
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      const p = input.value.trim().replace(/^\/+/, "");
+      input.hidden = true;
+      $("breadcrumb").hidden = false;
+      navigate(p);
+    } else if (e.key === "Escape") {
+      input.hidden = true;
+      $("breadcrumb").hidden = false;
+    }
+  });
+  input.addEventListener("blur", () => { input.hidden = true; $("breadcrumb").hidden = false; });
+}
+function renderBreadcrumb() {
+  const parts = S.path ? S.path.replace(/\\/g, "/").split("/").filter(Boolean) : [];
+  const el = $("breadcrumb"); el.replaceChildren();
+  el.hidden = false;
+  const rl = document.createElement("a"); rl.href = "#"; rl.textContent = "Cloud";
+  rl.addEventListener("click", (e) => { e.preventDefault(); navigate(""); });
+  makeDropTarget(rl, "");
+  el.append(rl);
+  let acc = "";
+  for (const p of parts) {
+    const sp = document.createElement("span"); sp.className = "sep"; sp.textContent = "/"; el.append(sp);
+    acc = acc ? `${acc}/${p}` : p;
+    const lk = document.createElement("a"); lk.href = "#"; lk.textContent = p;
+    lk.addEventListener("click", (e) => { e.preventDefault(); navigate(acc); });
+    makeDropTarget(lk, acc);
+    el.append(lk);
+  }
+  el.addEventListener("click", (e) => {
+    if (e.target === el || e.target.classList.contains("sep")) enablePathInput();
+  });
+  qs("#sidebarPath").textContent = `/mnt/ultra-media/${S.path ? S.path + "/" : ""}`;
+}
+
+// ── Vues liste / grille, fichiers cachés ──
+$("btnViewToggle").addEventListener("click", () => {
+  S.viewMode = S.viewMode === "grid" ? "list" : "grid";
+  updateUrl();
+  renderFiles();
+});
+$("btnHiddenToggle").addEventListener("click", () => {
+  S.showHidden = !S.showHidden;
+  renderFiles();
+});
+
+// ── Auto-refresh ──
+function startAutoRefresh() {
+  stopAutoRefresh();
+  S.autoRefreshTimer = setInterval(() => {
+    if (document.hidden || S.view !== "files" || S.loading) return;
+    if (document.querySelector("dialog[open]")) return;
+    const active = document.activeElement;
+    if (active && (active.id === "pathInput" || active.id === "searchInput")) return;
+    loadFiles();
+  }, 30000);
+}
+function stopAutoRefresh() { if (S.autoRefreshTimer) { clearInterval(S.autoRefreshTimer); S.autoRefreshTimer = null; } }
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopAutoRefresh(); else startAutoRefresh();
+});
+
 // ── Retry ──
 $("retryButton").addEventListener("click", () => { clearError(); loadFiles(); });
 
@@ -1335,10 +1801,13 @@ async function init() {
   const v = u.searchParams.get("view") || "files";
   S.path = u.searchParams.get("path") || "";
   S.search = u.searchParams.get("search") || "";
-  S.sortKey = ["name", "size", "date"].includes(u.searchParams.get("sort")) ? u.searchParams.get("sort") : "name";
+  S.sortKey = ["name", "size", "date", "type", "created"].includes(u.searchParams.get("sort")) ? u.searchParams.get("sort") : "name";
   S.sortDir = u.searchParams.get("direction") === "desc" ? "desc" : "asc";
   S.page = Math.max(1, Number.parseInt(u.searchParams.get("page") || "1", 10) || 1);
+  if (u.searchParams.get("viewmode") === "grid") S.viewMode = "grid";
+  S.globalSearch = Boolean(u.searchParams.get("global"));
   $("searchInput").value = S.search;
+  $("globalSearch").checked = S.globalSearch;
   renderSortHeaders();
   await refreshSession();
   await loadFavs();

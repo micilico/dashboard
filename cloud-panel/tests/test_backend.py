@@ -1517,3 +1517,255 @@ class TestUltraQuota:
             is None
         )
         assert _parse_ultra_quota([]) is None
+
+
+class TestCopyItem:
+    def _reload(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import copy_item
+        return copy_item
+
+    def test_copy_file_cross_dir(self, tmp_path, monkeypatch):
+        copy_item = self._reload(tmp_path, monkeypatch)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "dst").mkdir()
+        (tmp_path / "src" / "a.txt").write_text("data")
+        result = copy_item("src", "a.txt", "dst")
+        assert result["success"]
+        assert (tmp_path / "dst" / "a.txt").read_text() == "data"
+        assert (tmp_path / "src" / "a.txt").exists()
+
+    def test_copy_dir_cross_dir(self, tmp_path, monkeypatch):
+        copy_item = self._reload(tmp_path, monkeypatch)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "dst").mkdir()
+        (tmp_path / "src" / "folder").mkdir()
+        (tmp_path / "src" / "folder" / "f.txt").write_text("x")
+        copy_item("src", "folder", "dst")
+        assert (tmp_path / "dst" / "folder" / "f.txt").read_text() == "x"
+
+    def test_duplicate_same_dir_suffixes(self, tmp_path, monkeypatch):
+        copy_item = self._reload(tmp_path, monkeypatch)
+        (tmp_path / "a.txt").write_text("data")
+        first = copy_item("", "a.txt", "")
+        assert first["name"] == "a (copie).txt"
+        second = copy_item("", "a.txt", "")
+        assert second["name"] == "a (copie 2).txt"
+
+    def test_copy_dir_into_itself_raises(self, tmp_path, monkeypatch):
+        copy_item = self._reload(tmp_path, monkeypatch)
+        (tmp_path / "folder").mkdir()
+        with pytest.raises(ValueError):
+            copy_item("", "folder", "folder")
+
+
+class TestTrash:
+    def _setup(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        monkeypatch.setattr("cloud_panel.config.DATA_DIR", Path(tmp_path))
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        monkeypatch.setattr("cloud_panel.models.DB_PATH", Path(tmp_path) / "test.db")
+        import importlib
+        import cloud_panel.models
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.models)
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.models import _get_conn
+        from cloud_panel.storage import delete_item, restore_item, empty_trash, list_trash
+        _get_conn()
+        return delete_item, restore_item, empty_trash, list_trash
+
+    def test_delete_moves_to_trash(self, tmp_path, monkeypatch):
+        delete_item, _, _, list_trash = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "gone.txt").write_text("data")
+        result = delete_item("", "gone.txt")
+        assert result["success"]
+        assert result["trashed"]
+        assert not (tmp_path / "gone.txt").exists()
+        assert (tmp_path / ".cloud-trash" / "gone.txt").exists()
+        items = list_trash()
+        assert any(i["name"] == "gone.txt" for i in items)
+
+    def test_permanent_delete_skips_trash(self, tmp_path, monkeypatch):
+        delete_item, _, _, list_trash = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "gone.txt").write_text("data")
+        delete_item("", "gone.txt", permanent=True)
+        assert not (tmp_path / "gone.txt").exists()
+        assert not (tmp_path / ".cloud-trash").exists()
+        assert list_trash() == []
+
+    def test_restore_returns_file(self, tmp_path, monkeypatch):
+        delete_item, restore_item, _, _ = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "f.txt").write_text("data")
+        delete_item("sub", "f.txt")
+        result = restore_item("sub/f.txt")
+        assert result["success"]
+        assert (tmp_path / "sub" / "f.txt").read_text() == "data"
+        assert not (tmp_path / ".cloud-trash" / "sub" / "f.txt").exists()
+
+    def test_restore_conflict_suffixes(self, tmp_path, monkeypatch):
+        delete_item, restore_item, _, _ = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "f.txt").write_text("old")
+        delete_item("", "f.txt")
+        (tmp_path / "f.txt").write_text("new")
+        result = restore_item("f.txt")
+        assert result["path"].endswith("f (copie).txt")
+        assert (tmp_path / "f.txt").read_text() == "new"
+
+    def test_empty_trash_purges(self, tmp_path, monkeypatch):
+        delete_item, _, empty_trash, list_trash = self._setup(tmp_path, monkeypatch)
+        (tmp_path / "a.txt").write_text("data")
+        (tmp_path / "b.txt").write_text("data")
+        delete_item("", "a.txt")
+        delete_item("", "b.txt")
+        result = empty_trash()
+        assert result["removed"] == 2
+        assert list_trash() == []
+        assert not (tmp_path / ".cloud-trash").exists()
+
+
+class TestSearchFiles:
+    def test_search_recursive(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import search_files
+        (tmp_path / "Series").mkdir()
+        (tmp_path / "Series" / "MyShow.S01").mkdir()
+        (tmp_path / "Series" / "MyShow.S01" / "ep.mkv").write_text("x")
+        (tmp_path / "films.txt").write_text("x")
+        result = search_files("myshow", "", limit=50)
+        assert result["total"] == 1
+        assert result["items"][0]["name"] == "MyShow.S01"
+
+    def test_search_excludes_trash(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import search_files
+        (tmp_path / ".cloud-trash").mkdir()
+        (tmp_path / ".cloud-trash" / "secret.txt").write_text("x")
+        (tmp_path / "visible.txt").write_text("x")
+        result = search_files("secret", "", limit=50)
+        assert result["total"] == 0
+        assert search_files("visible", "", limit=50)["total"] == 1
+
+    def test_search_empty_query(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import search_files
+        assert search_files("", "", limit=50)["total"] == 0
+
+
+class TestTextFiles:
+    def _reload(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import create_text_file, read_text_file, write_text_file
+        return create_text_file, read_text_file, write_text_file
+
+    def test_create_and_write_roundtrip(self, tmp_path, monkeypatch):
+        create_text_file, read_text_file, write_text_file = self._reload(tmp_path, monkeypatch)
+        create_text_file("", "note.txt")
+        assert (tmp_path / "note.txt").exists()
+        write_text_file("note.txt", "bonjour\nmonde")
+        result = read_text_file("note.txt")
+        assert result["content"] == "bonjour\nmonde"
+        assert result["name"] == "note.txt"
+
+    def test_create_existing_raises(self, tmp_path, monkeypatch):
+        create_text_file, _, _ = self._reload(tmp_path, monkeypatch)
+        (tmp_path / "note.txt").write_text("x")
+        with pytest.raises(ValueError):
+            create_text_file("", "note.txt")
+
+    def test_read_too_large_raises(self, tmp_path, monkeypatch):
+        _, read_text_file, _ = self._reload(tmp_path, monkeypatch)
+        (tmp_path / "big.txt").write_text("x" * 100)
+        with pytest.raises(ValueError):
+            read_text_file("big.txt", max_bytes=8)
+
+
+class TestUploadConflict:
+    @pytest.mark.asyncio
+    async def test_upload_skip_keeps_existing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import upload_file_streaming
+        from fastapi import UploadFile
+        from io import BytesIO
+        (tmp_path / "a.txt").write_text("old")
+        result = await upload_file_streaming("", UploadFile(filename="a.txt", file=BytesIO(b"new")), overwrite="skip")
+        assert not result["success"]
+        assert result["skipped"]
+        assert (tmp_path / "a.txt").read_text() == "old"
+
+    @pytest.mark.asyncio
+    async def test_upload_overwrite_replaces(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import upload_file_streaming
+        from fastapi import UploadFile
+        from io import BytesIO
+        (tmp_path / "a.txt").write_text("old")
+        result = await upload_file_streaming("", UploadFile(filename="a.txt", file=BytesIO(b"new")), overwrite="overwrite")
+        assert result["success"]
+        assert (tmp_path / "a.txt").read_text() == "new"
+
+    @pytest.mark.asyncio
+    async def test_upload_rename_suffixes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import upload_file_streaming
+        from fastapi import UploadFile
+        from io import BytesIO
+        (tmp_path / "a.txt").write_text("old")
+        result = await upload_file_streaming("", UploadFile(filename="a.txt", file=BytesIO(b"new")), overwrite="rename")
+        assert result["success"]
+        assert result["filename"] == "a (copie).txt"
+        assert (tmp_path / "a.txt").read_text() == "old"
+
+
+class TestProperties:
+    def test_file_properties(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import get_file_properties
+        (tmp_path / "a.txt").write_text("data")
+        props = get_file_properties("a.txt")
+        assert props["is_dir"] is False
+        assert props["size_bytes"] == 4
+        assert props["mime"] == "text/plain"
+        assert props["path"] == "a.txt"
+
+    def test_dir_properties_count(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import get_file_properties
+        (tmp_path / "folder").mkdir()
+        (tmp_path / "folder" / "a.txt").write_text("x")
+        (tmp_path / "folder" / "b.txt").write_text("y")
+        props = get_file_properties("folder")
+        assert props["is_dir"] is True
+        assert props["file_count"] == 2
+        assert props["mime"] is None

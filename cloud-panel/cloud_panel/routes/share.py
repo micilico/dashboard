@@ -451,7 +451,6 @@ async def download_share(
                 return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
 
         is_dir = link.get("is_dir", False)
-        is_zip = link.get("is_zip", False)
 
         if is_dir:
             shared_root = resolve_path_within(MOUNT_PATH, link["path"], must_exist=True)
@@ -479,11 +478,8 @@ async def download_share(
         size_formatted = _format_size(os.path.getsize(file_path))
         category = _get_file_category(filename)
 
-        if is_zip:
-            file_type = "Archive ZIP"
-        else:
-            mapping = {"video": "Video", "audio": "Audio", "image": "Image", "pdf": "Document PDF", "archive": "Archive"}
-            file_type = mapping.get(category, "Fichier")
+        mapping = {"video": "Video", "audio": "Audio", "image": "Image", "pdf": "Document PDF", "archive": "Archive"}
+        file_type = mapping.get(category, "Fichier")
 
         download_count = link.get("download_count", 0)
         expires_at = link.get("expires_at")

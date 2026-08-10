@@ -66,6 +66,17 @@ def _init_db(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_share_links_token ON share_links(token);
         CREATE INDEX IF NOT EXISTS idx_share_links_expires ON share_links(expires_at);
+
+        CREATE TABLE IF NOT EXISTS trash (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            is_dir INTEGER NOT NULL DEFAULT 0,
+            trashed_rel TEXT NOT NULL UNIQUE,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            deleted_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_trash_deleted ON trash(deleted_at DESC);
     """)
 
 
@@ -223,4 +234,48 @@ def get_stats() -> dict:
         "total_downloads": total_downloads,
         "total_history": total_history,
         "total_favorites": total_favorites,
+        "total_trash": get_trash_entries_count(),
     }
+
+
+# ── Trash ──
+
+def add_trash_entry(original_path: str, name: str, is_dir: bool, trashed_rel: str, size_bytes: int = 0) -> dict:
+    with get_db() as db:
+        db.execute(
+            "INSERT OR IGNORE INTO trash (original_path, name, is_dir, trashed_rel, size_bytes, deleted_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (original_path, name, 1 if is_dir else 0, trashed_rel, size_bytes, time.time()),
+        )
+    return {"success": True, "trashed_rel": trashed_rel}
+
+
+def get_trash_entry(trashed_rel: str) -> dict | None:
+    with get_db() as db:
+        row = db.execute("SELECT * FROM trash WHERE trashed_rel = ?", (trashed_rel,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_trash_entries(limit: int = 200, offset: int = 0) -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT * FROM trash ORDER BY deleted_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_trash_entries_count() -> int:
+    with get_db() as db:
+        return db.execute("SELECT COUNT(*) FROM trash").fetchone()[0]
+
+
+def remove_trash_entry(entry_id: int) -> None:
+    with get_db() as db:
+        db.execute("DELETE FROM trash WHERE id = ?", (entry_id,))
+
+
+def clear_trash_entries() -> int:
+    with get_db() as db:
+        count = db.execute("SELECT COUNT(*) FROM trash").fetchone()[0]
+        db.execute("DELETE FROM trash")
+    return count

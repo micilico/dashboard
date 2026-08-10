@@ -1660,6 +1660,8 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
     min-width: 0;
   }
   .col-date { display: none; }
+  .col-created { display: none; }
+  .col-type { display: none; }
   .col-size { width: 80px; }
   .action-cell { opacity: 1; }
   #filesView .table-wrap { overflow-x: visible; padding: var(--space-8); }
@@ -1685,7 +1687,7 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
   #filesView .file-table td:nth-child(1) {
     display: none;
     grid-column: 1;
-    grid-row: 1 / span 2;
+    grid-row: 1 / span 3;
     justify-content: center;
   }
   #filesView.selection-mode .file-table tr {
@@ -1694,17 +1696,20 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
   #filesView.selection-mode .file-table td:nth-child(1) { display: flex; }
   #filesView .file-table td:nth-child(2) { grid-column: 1; grid-row: 1; }
   #filesView.selection-mode .file-table td:nth-child(2) { grid-column: 2; }
-  #filesView .file-table td:nth-child(3) { grid-column: 1; grid-row: 2; justify-content: flex-start; }
+  #filesView .file-table td:nth-child(3) { grid-column: 1; grid-row: 2; justify-content: flex-start; font-size: .78rem; color: var(--text-subtle); }
   #filesView.selection-mode .file-table td:nth-child(3) { grid-column: 2; }
-  #filesView .file-table td:nth-child(4) { display: none; }
+  #filesView .file-table td:nth-child(4) { grid-column: 1; grid-row: 3; justify-content: flex-start; }
+  #filesView.selection-mode .file-table td:nth-child(4) { grid-column: 2; }
   #filesView .file-table td:nth-child(5) { display: none; }
-  #filesView .file-table td:nth-child(6) {
+  #filesView .file-table td:nth-child(6) { display: none; }
+  #filesView .file-table td:nth-child(7) { display: none; }
+  #filesView .file-table td:nth-child(8) {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 1 / span 3;
     justify-content: center;
     padding: var(--space-8);
   }
-  #filesView.selection-mode .file-table td:nth-child(6) {
+  #filesView.selection-mode .file-table td:nth-child(8) {
     grid-column: 3;
   }
   #filesView .action-cell > div {
@@ -1909,4 +1914,133 @@ tr:hover .action-cell, tr:focus-within .action-cell, .action-cell.force { opacit
 @media (max-width: 767px) {
   .organize-arrow { display: none; }
   .organize-to::before { content: "→ "; }
+}
+
+/* ── Colonnes Type / Créé ── */
+.col-type { width: 120px; }
+.col-created { width: 150px; }
+.type-cell { color: var(--text-subtle); font-size: .82rem; white-space: nowrap; }
+.created-cell { color: var(--muted); white-space: nowrap; font-size: .82rem; }
+
+/* ── Checkbox / case à cocher ── */
+.checkbox-wrap { display: inline-flex; align-items: center; gap: var(--space-8); font-size: .82rem; color: var(--muted); cursor: pointer; user-select: none; min-height: 44px; }
+.checkbox-wrap input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.dialog .checkbox-wrap { min-height: 0; padding: var(--space-4) 0; }
+
+/* ── Chemin éditable ── */
+.path-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-12);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: .85rem;
+  outline: none;
+}
+
+/* ── Vue grille ── */
+.file-grid {
+  margin: 0 20px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-12);
+  padding-bottom: var(--space-8);
+}
+.grid-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
+  cursor: pointer;
+  min-height: 132px;
+  transition: border-color var(--motion-fast), background var(--motion-fast);
+  outline: none;
+}
+.grid-tile:hover { border-color: var(--border-strong); background: var(--surface-3); }
+.grid-tile.selected { border-color: var(--accent); background: var(--accent-soft); }
+.grid-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.grid-preview {
+  flex: 1;
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  overflow: hidden;
+}
+.grid-preview img { width: 100%; height: 100%; object-fit: cover; }
+.grid-icon { color: var(--muted); }
+.grid-icon svg { width: 40px; height: 40px; }
+.grid-icon.folder { color: var(--accent); }
+.grid-icon.video { color: var(--file-video); }
+.grid-icon.audio { color: var(--file-audio); }
+.grid-icon.image { color: var(--file-image); }
+.grid-icon.pdf { color: var(--file-pdf); }
+.grid-icon.archive { color: var(--file-archive); }
+.grid-meta { display: grid; gap: 2px; min-width: 0; }
+.grid-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .82rem; color: var(--text); }
+.grid-sub { font-size: .72rem; color: var(--text-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Éditeur de texte ── */
+.edit-dialog { width: min(720px, calc(100% - 32px)); height: min(78vh, 640px); display: flex; flex-direction: column; }
+.edit-dialog form { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; }
+.edit-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-16) var(--space-24); border-bottom: 1px solid var(--border); }
+.edit-head h2 { margin: 0; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edit-textarea {
+  flex: 1;
+  min-height: 0;
+  margin: var(--space-16) var(--space-24);
+  padding: var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: .82rem;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+.edit-textarea:focus { border-color: var(--accent); }
+.edit-dialog .field-message { padding: 0 var(--space-24); }
+
+/* ── Propriétés ── */
+.props-list { display: grid; grid-template-columns: auto 1fr; gap: var(--space-8) var(--space-16); margin: 0; padding: var(--space-8) 0; }
+.props-list dt { color: var(--text-subtle); font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding-top: 2px; }
+.props-list dd { margin: 0; font-size: .88rem; color: var(--text); overflow-wrap: anywhere; }
+
+/* ── Corbeille ── */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-12); flex-wrap: wrap; }
+.page-head-actions { display: flex; align-items: center; gap: var(--space-8); }
+.trash-origin { color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; max-width: 320px; }
+
+/* ── Upload: contrôles par fichier ── */
+.progress-row { grid-template-columns: minmax(0, 1fr) 80px 60px 84px; }
+.pcontrols { display: flex; gap: var(--space-4); justify-content: flex-end; }
+.mini-btn {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
+}
+.mini-btn:hover { color: var(--text); border-color: var(--accent); background: var(--surface-3); }
+
+@media (max-width: 767px) {
+  .file-grid { margin-inline: 0; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .progress-row { grid-template-columns: minmax(0, 1fr) 60px; grid-template-rows: auto auto; }
+  .progress-row .pstatus { grid-column: 2; grid-row: 1; }
+  .progress-row .pcontrols { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+  .page-head { flex-direction: column; align-items: stretch; }
 }

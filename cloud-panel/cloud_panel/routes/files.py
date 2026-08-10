@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import os
-import tempfile
-import zipfile
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response, Query
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from common import error_detail
 
-from ..config import MOUNT_PATH
-from ..security import resolve_path_within
+from ..config import SEARCH_MAX_RESULTS
 from ..storage import (
     list_directory,
     upload_file_streaming,
@@ -21,11 +19,29 @@ from ..storage import (
     clear_scandir_cache,
     get_folder_size,
     get_folder_sizes,
+    copy_item,
+    list_trash,
+    restore_item,
+    empty_trash,
+    create_text_file,
+    read_text_file,
+    write_text_file,
+    search_files,
+    get_file_properties,
 )
 from ..services.media import apply_organization_plan, build_organization_plan
 from .csrf_guard import require_action_guard, set_csrf_cookie
 
 router = APIRouter()
+
+
+def _read_limiter(request: Request):
+    limiter = getattr(request.app.state, "read_limiter", None)
+    if limiter is not None and not limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(
+            status_code=429,
+            detail=error_detail("rate_limited", "Trop de requêtes en peu de temps.", "Réessayer"),
+        )
 
 
 @router.get("/session")
@@ -43,19 +59,37 @@ async def get_files(
     search: str = Query("", max_length=200),
 ):
     """List directory contents."""
-    limiter = getattr(request.app.state, "read_limiter", None)
-    if limiter is not None and not limiter.allow(request.client.host if request.client else "unknown"):
-        raise HTTPException(
-            status_code=429,
-            detail=error_detail("rate_limited", "Trop de requêtes en peu de temps.", "Réessayer"),
-        )
+    _read_limiter(request)
     try:
-        result = list_directory(path, offset=offset, limit=limit, search=search)
-        return result
+        return await run_in_threadpool(list_directory, path, offset, limit, search)
     except ValueError:
         raise HTTPException(
             status_code=403,
             detail=error_detail("path_error", "Chemin non autorisé ou introuvable.", "Vérifier le chemin"),
+        )
+
+
+@router.get("/files/search")
+async def search(
+    request: Request,
+    q: str = Query(..., max_length=200),
+    path: str = "",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Recursively search file names."""
+    _read_limiter(request)
+    try:
+        return await run_in_threadpool(search_files, q, path, offset, limit, SEARCH_MAX_RESULTS)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Recherche non autorisée.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("search_error", "Recherche impossible.", "Réessayer"),
         )
 
 
@@ -64,11 +98,12 @@ async def upload_file(
     request: Request,
     _=Depends(require_action_guard),
     path: str = Form(""),
+    overwrite: str = Form("rename"),
     file: UploadFile = File(...),
 ):
     """Upload file with streaming."""
     try:
-        result = await upload_file_streaming(path, file)
+        result = await upload_file_streaming(path, file, overwrite=overwrite)
         return result
     except ValueError:
         raise HTTPException(
@@ -86,7 +121,7 @@ async def upload_file(
 async def download_file_endpoint(path: str):
     """Download file."""
     try:
-        file_path = download_file(path)
+        file_path = await run_in_threadpool(download_file, path)
         return FileResponse(file_path, filename=os.path.basename(file_path))
     except ValueError:
         raise HTTPException(
@@ -104,8 +139,7 @@ async def mkdir(
 ):
     """Create directory."""
     try:
-        result = create_directory(path, name)
-        return result
+        return await run_in_threadpool(create_directory, path, name)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -123,8 +157,7 @@ async def rename(
 ):
     """Rename file or directory."""
     try:
-        result = rename_item(path, old_name, new_name)
-        return result
+        return await run_in_threadpool(rename_item, path, old_name, new_name)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -142,8 +175,7 @@ async def move(
 ):
     """Move a file or directory to another folder."""
     try:
-        result = move_item(path, name, dest)
-        return result
+        return await run_in_threadpool(move_item, path, name, dest)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -156,17 +188,40 @@ async def move(
         )
 
 
+@router.post("/files/copy")
+async def copy(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(""),
+    name: str = Form(...),
+    dest: str = Form(""),
+):
+    """Copy a file or directory to another folder."""
+    try:
+        return await run_in_threadpool(copy_item, path, name, dest)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Copie impossible à cet emplacement.", "Vérifier le chemin et la destination"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("copy_error", "Copie impossible.", "Réessayer"),
+        )
+
+
 @router.post("/files/delete")
 async def delete(
     request: Request,
     _=Depends(require_action_guard),
     path: str = Form(""),
     name: str = Form(...),
+    permanent: bool = Form(False),
 ):
-    """Delete file or directory."""
+    """Delete file or directory (to trash unless permanent)."""
     try:
-        result = delete_item(path, name)
-        return result
+        return await run_in_threadpool(delete_item, path, name, permanent)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -174,49 +229,117 @@ async def delete(
         )
 
 
-@router.post("/files/download-zip")
-async def download_zip(
-    request: Request,
-    tasks: BackgroundTasks,
-    _=Depends(require_action_guard),
-    paths: str = Form(...),
-):
-    """Download multiple files as a ZIP archive."""
+@router.get("/files/trash")
+async def trash_list(request: Request):
+    """List trashed items."""
+    _read_limiter(request)
     try:
-        file_list = [p.strip() for p in paths.split("\n") if p.strip()]
-        if not file_list:
-            raise HTTPException(
-                status_code=400,
-                detail=error_detail("no_files", "Aucun fichier sélectionné.", "Sélectionner des fichiers"),
-            )
+        return {"items": await run_in_threadpool(list_trash)}
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("trash_error", "Corbeille indisponible.", "Réessayer"),
+        )
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-        seen: set[str] = set()
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
-            for rel_path in file_list:
-                abs_path = resolve_path_within(MOUNT_PATH, rel_path, must_exist=True)
-                if not os.path.isfile(abs_path):
-                    continue
-                arcname = os.path.relpath(abs_path, MOUNT_PATH).replace(os.sep, "/")
-                if arcname in seen:
-                    continue
-                seen.add(arcname)
-                zf.write(abs_path, arcname)
-        tmp.close()
-        tmp_path = tmp.name
-        tasks.add_task(os.unlink, tmp_path)
 
-        return FileResponse(tmp_path, filename="cloud-panel-bulk.zip", media_type="application/zip",
-                            headers={"Content-Disposition": "attachment; filename=cloud-panel-bulk.zip"})
+@router.post("/files/trash/restore")
+async def trash_restore(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(...),
+):
+    """Restore a trashed item to its original location."""
+    try:
+        return await run_in_threadpool(restore_item, path)
     except ValueError:
         raise HTTPException(
             status_code=403,
-            detail=error_detail("path_error", "Un fichier sélectionné n’est pas autorisé.", "Vérifier la sélection"),
+            detail=error_detail("trash_error", "Restauration impossible.", "Vérifier la corbeille"),
         )
     except Exception:
         raise HTTPException(
             status_code=500,
-            detail=error_detail("zip_error", "Création de l’archive impossible.", "Réessayer"),
+            detail=error_detail("trash_error", "Restauration impossible.", "Réessayer"),
+        )
+
+
+@router.post("/files/trash/empty")
+async def trash_empty(
+    request: Request,
+    _=Depends(require_action_guard),
+):
+    """Permanently delete everything in the trash."""
+    try:
+        return await run_in_threadpool(empty_trash)
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("trash_error", "Vidage de la corbeille impossible.", "Réessayer"),
+        )
+
+
+@router.post("/files/touch")
+async def touch(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(""),
+    name: str = Form(...),
+):
+    """Create an empty text file."""
+    try:
+        return await run_in_threadpool(create_text_file, path, name)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Création impossible à cet emplacement.", "Vérifier le chemin"),
+        )
+
+
+@router.get("/files/content")
+async def file_content(request: Request, path: str):
+    """Read the text content of a small file."""
+    _read_limiter(request)
+    try:
+        return await run_in_threadpool(read_text_file, path)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Fichier non autorisé, introuvable ou trop volumineux.", "Vérifier le chemin"),
+        )
+
+
+@router.post("/files/write")
+async def file_write(
+    request: Request,
+    _=Depends(require_action_guard),
+    path: str = Form(...),
+    content: str = Form(...),
+):
+    """Atomically overwrite a text file."""
+    try:
+        return await run_in_threadpool(write_text_file, path, content)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Écriture impossible à cet emplacement.", "Vérifier le chemin"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("write_error", "Écriture impossible.", "Réessayer"),
+        )
+
+
+@router.get("/files/properties")
+async def properties(request: Request, path: str):
+    """Detailed metadata for a file or directory."""
+    _read_limiter(request)
+    try:
+        return await run_in_threadpool(get_file_properties, path)
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Propriétés indisponibles.", "Vérifier le chemin"),
         )
 
 
@@ -239,7 +362,7 @@ async def folder_size(
 ):
     """Compute the recursive size of a folder."""
     try:
-        return get_folder_size(path, name)
+        return await run_in_threadpool(get_folder_size, path, name)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -266,7 +389,7 @@ async def folder_sizes(
             detail=error_detail("no_folders", "Aucun dossier sélectionné.", "Sélectionner des dossiers"),
         )
     try:
-        return get_folder_sizes(file_list)
+        return await run_in_threadpool(get_folder_sizes, file_list)
     except Exception:
         raise HTTPException(
             status_code=500,
@@ -282,7 +405,7 @@ async def organize_preview(
 ):
     """Preview how the directory would be reorganized (series, movies, parasites)."""
     try:
-        return build_organization_plan(path)
+        return await run_in_threadpool(build_organization_plan, path)
     except ValueError:
         raise HTTPException(
             status_code=403,
@@ -303,8 +426,7 @@ async def organize_apply(
 ):
     """Group seasons into series folders, rename them, and move movies to Films/."""
     try:
-        result = apply_organization_plan(path)
-        return result
+        return await run_in_threadpool(apply_organization_plan, path)
     except ValueError:
         raise HTTPException(
             status_code=403,
