@@ -483,6 +483,8 @@
 
 /* ── Drag & drop (déplacer) ── */
 .file-table tr[draggable="true"] { cursor: grab; }
+.file-table .file-name-cell[draggable="true"] { cursor: grab; }
+.file-table .file-name-cell[draggable="true"]:active { cursor: grabbing; }
 .file-table tr[draggable="true"]:active { cursor: grabbing; }
 .file-table tr.dragging { opacity: .45; }
 .file-table tr.dragging * { pointer-events: none; }
