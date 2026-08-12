@@ -517,6 +517,12 @@ suite('Drag & drop (move) logic', () => {
     assert.ok(appSource.includes("classList.add(\"drop-target\")"));
   });
 
+  test('grid tiles are draggable and MIME fallback uses the active drag state', () => {
+    assert.ok(appSource.includes('tile.draggable = true'));
+    assert.ok(appSource.includes('tile.addEventListener("dragstart", (e) => dragPayload(e, f))'));
+    assert.ok(appSource.includes('if (!raw) return dragItems'));
+  });
+
   test('breadcrumb crumbs and root/parent nav act as move drop targets', () => {
     assert.ok(appSource.includes("function makeDropTarget"));
     assert.ok(appSource.includes('makeDropTarget(rl, "")'));

@@ -488,6 +488,9 @@
 .file-table tr.dragging * { pointer-events: none; }
 .file-table tr.drop-target td { background: var(--accent-soft); }
 .file-table tr.drop-target .file-name-cell .file-icon { color: var(--accent-strong); }
+.grid-tile[draggable="true"] { cursor: grab; }
+.grid-tile.dragging { opacity: .45; }
+.grid-tile.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
 #filesView.upload-target {
   outline: 2px dashed var(--accent);
   outline-offset: -10px;

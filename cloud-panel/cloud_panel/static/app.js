@@ -411,6 +411,7 @@ function makeTile(f, i) {
   tile.className = "grid-tile";
   tile.dataset.path = f.path;
   tile.tabIndex = 0;
+  tile.draggable = true;
   if (S.selected.has(f.path)) tile.classList.add("selected");
   const isImg = !f.is_dir && ["jpg","jpeg","png","gif","webp","svg","bmp","ico"].includes((f.name.split(".").pop() || "").toLowerCase());
   const preview = document.createElement("div"); preview.className = "grid-preview";
@@ -444,6 +445,27 @@ function makeTile(f, i) {
     if (!S.selected.has(f.path)) { S.selected = new Set([f.path]); S.selectedItems = new Map([[f.path, f]]); S.selectionMode = true; renderFiles(); }
     openFileActionMenu(f, tile);
   });
+  tile.addEventListener("dragstart", (e) => dragPayload(e, f));
+  tile.addEventListener("dragend", clearDrag);
+  if (f.is_dir) {
+    tile.addEventListener("dragover", (e) => {
+      if (!dragItems.length) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      tile.classList.add("drop-target");
+    });
+    tile.addEventListener("dragleave", () => tile.classList.remove("drop-target"));
+    tile.addEventListener("drop", (e) => {
+      e.preventDefault();
+      tile.classList.remove("drop-target");
+      const items = readDragItems(e);
+      const dragged = items.length ? items : dragItems;
+      if (dragged.length) {
+        if (e.ctrlKey || e.metaKey) copyItems(dragged, f.path);
+        else moveItemsTo(f.path, dragged);
+      }
+    });
+  }
   return tile;
 }
 
@@ -528,12 +550,12 @@ function clearDrag() {
 
 function readDragItems(e) {
   const raw = e.dataTransfer.getData("application/x-cloud-item");
-  if (!raw) return [];
+  if (!raw) return dragItems;
   try {
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    return Array.isArray(arr) ? arr : dragItems;
   } catch {
-    return [];
+    return dragItems;
   }
 }
 
