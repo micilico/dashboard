@@ -529,11 +529,6 @@ def apply_organization_plan(relative_path: str) -> dict:
             errors.append(f"{movie['name']} : {exc}")
 
     clear_scandir_cache()
-    locations = []
-    for group in plan["series"]:
-        for item in group["items"]:
-            locations.append({"name": item["name"], "path": item["target"]})
-    locations.extend({"name": item["name"], "path": item["target"]} for item in plan["movies"])
     return {
         "success": True,
         "created_series": created_series,
@@ -544,6 +539,5 @@ def apply_organization_plan(relative_path: str) -> dict:
         "duplicates_skipped": duplicates_skipped,
         "duplicates_signaled": len(plan["duplicates"]),
         "errors": errors,
-        "locations": locations,
         "totals": plan["totals"],
     }

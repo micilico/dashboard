@@ -40,8 +40,6 @@ from ..config import (
     RCLONE_RC_TIMEOUT_SECONDS,
     RCLONE_REFRESH_MODE,
     RCLONE_SYSTEMD_RESTART_CMD,
-    MEDIA_ORGANIZER_URL,
-    MEDIA_ORGANIZER_TOKEN,
 )
 from ..qbittorrent import QbitError, QBittorrentClient
 from common import error_detail
@@ -90,8 +88,6 @@ class MediaAutomationConfig:
     jellyfin_library_map: dict[str, str]
     jellyfin_global_fallback: bool
     rclone_rc_timeout_seconds: float = 20.0
-    organizer_url: str = ""
-    organizer_token: str = ""
 
 
 def build_media_automation_config() -> MediaAutomationConfig:
@@ -116,8 +112,6 @@ def build_media_automation_config() -> MediaAutomationConfig:
         jellyfin_api_key=JELLYFIN_API_KEY,
         jellyfin_library_map=parse_category_library_map(JELLYFIN_LIBRARY_MAP),
         jellyfin_global_fallback=JELLYFIN_GLOBAL_FALLBACK,
-        organizer_url=MEDIA_ORGANIZER_URL,
-        organizer_token=MEDIA_ORGANIZER_TOKEN,
     )
 
 
@@ -264,7 +258,7 @@ class MediaAutomationManager:
             entries = [self._create_history_entry(torrent) for torrent in batch_torrents]
             refresh_dirs = self._refresh_dirs_for_torrents(batch_torrents)
             logger.info("Media automation: workflow lancé pour %d torrent(s), refresh dirs=%s", len(entries), refresh_dirs or ["(racine)"])
-            await self._run_full_workflow(entries, refresh_dirs, batch_torrents)
+            await self._run_full_workflow(entries, refresh_dirs)
             self._save_state()
             return entries
 
@@ -279,7 +273,6 @@ class MediaAutomationManager:
             "state": "pending",
             "stateLabel": "En attente",
             "rclone": {"status": "pending", "result": "En attente"},
-            "organizer": {"status": "pending", "result": "En attente"},
             "mount": {"status": "pending", "result": "En attente"},
             "jellyfin": {"status": "pending", "result": "En attente", "library": self._library_for_category(str(torrent.get("category") or ""))},
             "errorMessage": "",
@@ -327,14 +320,13 @@ class MediaAutomationManager:
             dirs.append(relative)
         return sorted(set(dirs))
 
-    async def _run_full_workflow(self, entries: list[dict[str, Any]], refresh_dirs: list[str] | None = None, torrents: list[dict[str, Any]] | None = None) -> None:
+    async def _run_full_workflow(self, entries: list[dict[str, Any]], refresh_dirs: list[str] | None = None) -> None:
         if not entries:
             return
         for entry in entries:
             self._update_entry_state(entry, "rclone_refresh", "Actualisation rclone")
             entry["retry"] = {"full": False, "jellyfin": False}
         self._set_notification("Téléchargement terminé — actualisation des médias…", entry_id=entries[0]["id"])
-        await self._organize_completed(entries, torrents or [])
         rclone_ok = await self._attempt_rclone(entries, refresh_dirs)
         if not rclone_ok:
             return
@@ -369,41 +361,6 @@ class MediaAutomationManager:
             self._update_entry_state(entry, "failed", "Échec définitif")
         self._set_notification("Actualisation impossible — intervention requise", "critical", entry_id=entries[0]["id"])
         return False
-
-    async def _organize_completed(self, entries: list[dict[str, Any]], torrents: list[dict[str, Any]]) -> None:
-        """Coordinate qBittorrent and Cloud Panel before any refresh or scan."""
-        if not self._config.organizer_url or not self._config.organizer_token:
-            for entry in entries:
-                self._mark_step(entry, "organizer", "skipped", "Organisation automatique non configurée.")
-            return
-        for torrent in torrents:
-            torrent_hash = str(torrent.get("hash") or "")
-            if not torrent_hash:
-                continue
-            category = str(torrent.get("category") or "").lower()
-            folder = "Films" if category in {"film", "films", "movie", "movies"} else "Series"
-            await self._qbit.set_location(torrent_hash, posixpath.join(self._config.mount_path, "qbittorrent", folder))
-        folders = {"Films" if str(t.get("category") or "").lower() in {"film", "films", "movie", "movies"} else "Series" for t in torrents}
-        final_locations: dict[str, str] = {}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for folder in folders:
-                response = await client.post(self._config.organizer_url, data={"path": posixpath.join("qbittorrent", folder)}, headers={"X-Cloud-Panel-Internal-Token": self._config.organizer_token})
-                if response.status_code >= 400:
-                    raise MediaAutomationError("Organisation automatique impossible.")
-                try:
-                    payload = response.json()
-                    for location in payload.get("locations", []):
-                        if isinstance(location, dict) and location.get("name") and location.get("path"):
-                            final_locations[str(location["name"])] = str(location["path"])
-                except (ValueError, AttributeError):
-                    raise MediaAutomationError("Réponse d’organisation invalide.")
-        for torrent in torrents:
-            torrent_hash = str(torrent.get("hash") or "")
-            final_path = final_locations.get(str(torrent.get("name") or ""))
-            if torrent_hash and final_path:
-                await self._qbit.set_location(torrent_hash, posixpath.join(self._config.mount_path, final_path))
-        for entry in entries:
-            self._mark_step(entry, "organizer", "success", "Organisation terminée.")
 
     async def _attempt_mount(self, entries: list[dict[str, Any]]) -> bool:
         last_error = "Montage indisponible."
