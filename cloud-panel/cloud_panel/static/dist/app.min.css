@@ -1569,6 +1569,12 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: var(--accent-soft); }
 .upload-zone .upload-hint { color: var(--muted); font-size: .85rem; margin-top: var(--space-8); }
 
+/* ── File drag and drop ── */
+#fileBody tr[draggable="true"] { cursor: grab; }
+#fileBody tr.dragging { opacity: .45; }
+#fileBody tr.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+#fileBody tr.drop-target .file-name { color: var(--accent); }
+
 /* ── Copy row ── */
 .copy-row { display: flex; gap: var(--space-8); }
 .copy-row input { flex: 1; min-height: 44px; font-size: .82rem; }
