@@ -541,11 +541,20 @@ function dragPayload(e, f) {
   qsa("#fileBody tr").forEach(tr => {
     if (dragItems.some(i => i.path === tr.dataset.path)) tr.classList.add("dragging");
   });
+  qsa(".grid-tile").forEach(tile => {
+    if (dragItems.some(i => i.path === tile.dataset.path)) tile.classList.add("dragging");
+  });
 }
 
 function clearDrag() {
-  qsa("#fileBody tr.dragging").forEach(tr => tr.classList.remove("dragging"));
-  dragItems = [];
+  // Keep the payload alive for the drop event: some browsers emit dragend
+  // immediately before the target's drop handler completes.
+  const endedItems = dragItems;
+  setTimeout(() => {
+    if (dragItems !== endedItems) return;
+    qsa("#fileBody tr.dragging, .grid-tile.dragging").forEach(el => el.classList.remove("dragging"));
+    dragItems = [];
+  }, 0);
 }
 
 function readDragItems(e) {
@@ -611,7 +620,8 @@ function makeDropTarget(el, destPathOrGetter) {
   el.classList.add("drop-crumb");
   const resolveDest = () => (typeof destPathOrGetter === "function" ? destPathOrGetter() : destPathOrGetter);
   el.addEventListener("dragover", (e) => {
-    if (!dragItems.length) return;
+    const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
+    if (!dragItems.length && !types.includes("application/x-cloud-item")) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     el.classList.add("drop-active");
