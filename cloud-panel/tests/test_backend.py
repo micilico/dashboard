@@ -1510,6 +1510,19 @@ class TestMediaOrganizer:
         assert result["errors"]
         assert (tmp_path / "qbittorrent" / "Dune.2021.1080p" / "Dune.mkv").exists()
 
+    def test_qbittorrent_plan_does_not_scan_nested_categories(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import build_organization_plan
+
+        (tmp_path / "qbittorrent" / "Films" / "Nested.Movie.2024.1080p").mkdir(parents=True)
+        (tmp_path / "qbittorrent" / "Series" / "Nested.Show.S01").mkdir(parents=True)
+        (tmp_path / "qbittorrent" / "Musique" / "Album.S01").mkdir(parents=True)
+        (tmp_path / "qbittorrent" / "Jeux" / "Game.2024.1080p").mkdir(parents=True)
+
+        plan = build_organization_plan("qbittorrent")
+        assert plan["series"] == []
+        assert plan["movies"] == []
+
     def test_apply_rejects_outside_path(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
         from cloud_panel.services.media import apply_organization_plan

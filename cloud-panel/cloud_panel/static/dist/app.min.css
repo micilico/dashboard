@@ -1791,7 +1791,6 @@ th[aria-sort="descending"]::after { content: " ▼"; }
 .file-table .file-name-cell[draggable="true"]:active { cursor: grabbing; }
 .file-table tr[draggable="true"]:active { cursor: grabbing; }
 .file-table tr.dragging { opacity: .45; }
-.file-table tr.dragging * { pointer-events: none; }
 .file-table tr.drop-target td { background: var(--accent-soft); }
 .file-table tr.drop-target .file-name-cell .file-icon { color: var(--accent-strong); }
 .grid-tile[draggable="true"] { cursor: grab; }
