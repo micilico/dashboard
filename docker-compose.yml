@@ -53,6 +53,7 @@ services:
       TORRENT_PANEL_MEDIA_AUTOMATION_STATE_PATH: /app/data/media-automation-state.json
       TORRENT_PANEL_NOTIFICATION_STATE_PATH: /app/data/notification-state.json
       TORRENT_PANEL_AUTOMATION_RULES_STATE_PATH: /app/data/automation-rules.json
+      TORRENT_PANEL_MEDIA_ORGANIZER_TOKEN: ${MEDIA_ORGANIZER_TOKEN:-}
     volumes:
       - torrent-panel-data:/app/data
       - /mnt/ultra-media:/mnt/ultra-media:ro
@@ -121,6 +122,7 @@ services:
       CLOUD_PANEL_HOST: 127.0.0.1
       CLOUD_PANEL_PORT: ${CLOUD_PANEL_PORT:-3130}
       CLOUD_PANEL_MOUNT_PATH: /mnt/ultra-media
+      CLOUD_PANEL_INTERNAL_AUTOMATION_TOKEN: ${MEDIA_ORGANIZER_TOKEN:-}
     volumes:
       - type: bind
         source: /mnt/ultra-media

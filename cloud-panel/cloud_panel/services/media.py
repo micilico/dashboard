@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import posixpath
 import re
@@ -25,6 +26,9 @@ _PARASITE_EXTS = {".txt", ".nfo", ".rar", ".sfv", ".md5", ".url", ".crc", ".log"
 _SAMPLE_RE = re.compile(r"(?i)(?:^|[\s._-])sample(?:[\s._-]|$)")
 _FILMS_DIRNAMES = {"films", "filmes", "film", "movie", "movies", "videos", "cinema", "movies_hd", "film_hd"}
 _SERIES_DIRNAMES = {"séries", "series", "serie", "tv", "shows", "tv-shows", "tv_shows", "saisons", "seasons"}
+_QB_ROOT = "qbittorrent"
+_QB_FILMS = "qbittorrent/film"
+_QB_SERIES = "qbittorrent/serie"
 
 
 def _rel(path: str, base: str) -> str:
@@ -113,6 +117,12 @@ def _inside(relative_path: str, category: str | None) -> bool:
 
 
 def _categories(relative_path: str, target_dir: str) -> dict:
+    normalized_path = posixpath.normpath(relative_path or ".")
+    if normalized_path == _QB_ROOT or normalized_path.startswith(_QB_ROOT + "/"):
+        current_name = os.path.basename(os.path.normpath(target_dir)).casefold()
+        in_series = current_name in _SERIES_DIRNAMES or normalized_path == _QB_SERIES or normalized_path.startswith(_QB_SERIES + "/")
+        in_films = current_name in _FILMS_DIRNAMES or normalized_path == _QB_FILMS or normalized_path.startswith(_QB_FILMS + "/")
+        return {"series": _QB_SERIES, "films": _QB_FILMS, "series_name": "serie", "films_name": "film", "in_place_series": in_series, "in_place_films": in_films}
     mount_real = os.path.realpath(MOUNT_PATH)
     series_name = _find_category_dir(mount_real, _SERIES_DIRNAMES)
     films_name = _find_category_dir(mount_real, _FILMS_DIRNAMES)
@@ -190,6 +200,27 @@ def _file_map(directory: str) -> dict[str, tuple[int, tuple[int, int] | None]]:
     return result
 
 
+def _same_file(left: str, right: str) -> bool:
+    """Require equal content before treating a duplicate as safe to remove."""
+    try:
+        if os.path.getsize(left) != os.path.getsize(right):
+            return False
+        left_hash = hashlib.sha256()
+        right_hash = hashlib.sha256()
+        with open(left, "rb") as left_stream, open(right, "rb") as right_stream:
+            while True:
+                left_chunk = left_stream.read(1024 * 1024)
+                right_chunk = right_stream.read(1024 * 1024)
+                if left_chunk != right_chunk:
+                    return False
+                if not left_chunk:
+                    return left_hash.digest() == right_hash.digest()
+                left_hash.update(left_chunk)
+                right_hash.update(right_chunk)
+    except OSError:
+        return False
+
+
 def _duplicate_entries(src_dir: str, dest_dir: str, source: str, target: str, kind: str) -> list[dict]:
     source_files = _file_map(src_dir)
     target_files = _file_map(dest_dir)
@@ -197,7 +228,7 @@ def _duplicate_entries(src_dir: str, dest_dir: str, source: str, target: str, ki
     duplicates = []
     for name, (size, episode) in source_files.items():
         if name in target_files:
-            status = "identique" if target_files[name][0] == size else "conflit"
+            status = "identique" if _same_file(os.path.join(src_dir, name), os.path.join(dest_dir, name)) else "conflit"
             duplicates.append({"kind": kind, "source": source, "target": target, "file": name, "status": status})
         elif episode and episode in target_episodes:
             duplicates.append({"kind": kind, "source": source, "target": target, "file": name, "status": "épisode similaire"})
@@ -263,7 +294,7 @@ def build_organization_plan(relative_path: str) -> dict:
                 source_size = entry.stat().st_size
                 target_files = _file_map(destination)
                 if entry.name in target_files:
-                    status = "identique" if target_files[entry.name][0] == source_size else "conflit"
+                    status = "identique" if _same_file(entry.path, os.path.join(destination, entry.name)) else "conflit"
                     duplicates.append({"kind": "série", "source": source, "target": target, "file": entry.name, "status": status})
                 episode = extract_episode_number(entry.name)
                 if episode and any(info[1] == episode and filename != entry.name for filename, info in target_files.items()):
@@ -311,7 +342,7 @@ def _move_children_deduplicated(src_dir: str, dest_dir_rel: str, source: str, ki
         except OSError:
             continue
         if child.name in existing:
-            if existing[child.name][0] != size:
+            if not _same_file(child.path, os.path.join(dest_dir, child.name)):
                 errors.append(f"{source}/{child.name} : conflit de contenu")
             else:
                 try:
@@ -366,11 +397,13 @@ def _place_loose(src_parent_rel: str, name: str, season_rel: str, errors: list[s
         target_size = os.path.getsize(target_file)
         if source_size != target_size:
             errors.append(f"{name} : conflit de contenu")
-        elif source_size == target_size:
+        elif source_size == target_size and _same_file(os.path.join(parent, name), target_file):
             try:
                 os.remove(os.path.join(parent, name))
             except OSError:
                 pass
+        else:
+            errors.append(f"{name} : conflit de contenu")
         return 0, 1
     episode = extract_episode_number(name)
     target_files = _file_map(target_dir)
@@ -392,11 +425,13 @@ def _merge_movie(src_parent_rel: str, name: str, destination_rel: str, is_dir: b
             if name in existing:
                 if existing[name][0] != size:
                     errors.append(f"{name} : conflit de contenu")
-                else:
+                elif _same_file(source_abs, os.path.join(destination, name)):
                     try:
                         os.remove(source_abs)
                     except OSError:
                         pass
+                else:
+                    errors.append(f"{name} : conflit de contenu")
                 return 0, 1
             try:
                 move_item(src_parent_rel, name, destination_rel)
@@ -407,7 +442,7 @@ def _merge_movie(src_parent_rel: str, name: str, destination_rel: str, is_dir: b
         if os.path.exists(destination):
             source_size = os.path.getsize(source_abs)
             target_size = os.path.getsize(destination)
-            if source_size != target_size:
+            if source_size != target_size or not _same_file(source_abs, destination):
                 errors.append(f"{name} : conflit de contenu")
             else:
                 try:
