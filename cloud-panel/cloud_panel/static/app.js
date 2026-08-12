@@ -1011,7 +1011,10 @@ function organizeSection(title, items, renderRow) {
   head.append(label, count);
   const ul = document.createElement("ul");
   ul.className = "organize-section-items";
-  items.forEach(renderRow);
+  items.forEach((item) => {
+    const row = renderRow(item);
+    if (row) ul.append(row);
+  });
   sec.append(head, ul);
   return sec;
 }
