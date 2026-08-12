@@ -27,8 +27,8 @@ _SAMPLE_RE = re.compile(r"(?i)(?:^|[\s._-])sample(?:[\s._-]|$)")
 _FILMS_DIRNAMES = {"films", "filmes", "film", "movie", "movies", "videos", "cinema", "movies_hd", "film_hd"}
 _SERIES_DIRNAMES = {"séries", "series", "serie", "tv", "shows", "tv-shows", "tv_shows", "saisons", "seasons"}
 _QB_ROOT = "qbittorrent"
-_QB_FILMS = "qbittorrent/film"
-_QB_SERIES = "qbittorrent/serie"
+_QB_FILMS = "qbittorrent/Films"
+_QB_SERIES = "qbittorrent/Series"
 
 
 def _rel(path: str, base: str) -> str:
@@ -122,7 +122,7 @@ def _categories(relative_path: str, target_dir: str) -> dict:
         current_name = os.path.basename(os.path.normpath(target_dir)).casefold()
         in_series = current_name in _SERIES_DIRNAMES or normalized_path == _QB_SERIES or normalized_path.startswith(_QB_SERIES + "/")
         in_films = current_name in _FILMS_DIRNAMES or normalized_path == _QB_FILMS or normalized_path.startswith(_QB_FILMS + "/")
-        return {"series": _QB_SERIES, "films": _QB_FILMS, "series_name": "serie", "films_name": "film", "in_place_series": in_series, "in_place_films": in_films}
+        return {"series": _QB_SERIES, "films": _QB_FILMS, "series_name": "Series", "films_name": "Films", "in_place_series": in_series, "in_place_films": in_films}
     mount_real = os.path.realpath(MOUNT_PATH)
     series_name = _find_category_dir(mount_real, _SERIES_DIRNAMES)
     films_name = _find_category_dir(mount_real, _FILMS_DIRNAMES)
@@ -529,6 +529,11 @@ def apply_organization_plan(relative_path: str) -> dict:
             errors.append(f"{movie['name']} : {exc}")
 
     clear_scandir_cache()
+    locations = []
+    for group in plan["series"]:
+        for item in group["items"]:
+            locations.append({"name": item["name"], "path": item["target"]})
+    locations.extend({"name": item["name"], "path": item["target"]} for item in plan["movies"])
     return {
         "success": True,
         "created_series": created_series,
@@ -539,5 +544,6 @@ def apply_organization_plan(relative_path: str) -> dict:
         "duplicates_skipped": duplicates_skipped,
         "duplicates_signaled": len(plan["duplicates"]),
         "errors": errors,
+        "locations": locations,
         "totals": plan["totals"],
     }

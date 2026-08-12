@@ -290,17 +290,6 @@ class QBittorrentClient:
             data={"hashes": "|".join(torrent_hashes), "category": category},
         )
 
-    async def set_location_many(self, torrent_hashes: list[str], location: str) -> None:
-        """Move torrent data through qBittorrent so its file map stays valid."""
-        await self._request(
-            "POST",
-            "/api/v2/torrents/setLocation",
-            data={"hashes": "|".join(torrent_hashes), "location": location},
-        )
-
-    async def set_location(self, torrent_hash: str, location: str) -> None:
-        await self.set_location_many([torrent_hash], location)
-
     async def add_tags_many(self, torrent_hashes: list[str], tags: str) -> None:
         await self._request(
             "POST",

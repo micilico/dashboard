@@ -14,7 +14,6 @@ def _strip_ultra_suffix(url: str) -> str:
             break
     return url.rstrip("/")
 PUBLIC_PREFIX = os.getenv("CLOUD_PANEL_PUBLIC_PREFIX", "/cloud-panel").rstrip("/")
-INTERNAL_AUTOMATION_TOKEN = os.getenv("CLOUD_PANEL_INTERNAL_AUTOMATION_TOKEN", "")
 MOUNT_PATH = os.getenv("CLOUD_PANEL_MOUNT_PATH", "/mnt/ultra-media")
 CSRF_COOKIE = "cloud_panel_csrf"
 CSRF_HEADER = "X-Cloud-Panel-CSRF"

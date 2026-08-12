@@ -381,14 +381,27 @@ class MediaAutomationManager:
             if not torrent_hash:
                 continue
             category = str(torrent.get("category") or "").lower()
-            folder = "film" if category in {"film", "films", "movie", "movies"} else "serie"
+            folder = "Films" if category in {"film", "films", "movie", "movies"} else "Series"
             await self._qbit.set_location(torrent_hash, posixpath.join(self._config.mount_path, "qbittorrent", folder))
-        folders = {"film" if str(t.get("category") or "").lower() in {"film", "films", "movie", "movies"} else "serie" for t in torrents}
+        folders = {"Films" if str(t.get("category") or "").lower() in {"film", "films", "movie", "movies"} else "Series" for t in torrents}
+        final_locations: dict[str, str] = {}
         async with httpx.AsyncClient(timeout=30.0) as client:
             for folder in folders:
                 response = await client.post(self._config.organizer_url, data={"path": posixpath.join("qbittorrent", folder)}, headers={"X-Cloud-Panel-Internal-Token": self._config.organizer_token})
                 if response.status_code >= 400:
                     raise MediaAutomationError("Organisation automatique impossible.")
+                try:
+                    payload = response.json()
+                    for location in payload.get("locations", []):
+                        if isinstance(location, dict) and location.get("name") and location.get("path"):
+                            final_locations[str(location["name"])] = str(location["path"])
+                except (ValueError, AttributeError):
+                    raise MediaAutomationError("Réponse d’organisation invalide.")
+        for torrent in torrents:
+            torrent_hash = str(torrent.get("hash") or "")
+            final_path = final_locations.get(str(torrent.get("name") or ""))
+            if torrent_hash and final_path:
+                await self._qbit.set_location(torrent_hash, posixpath.join(self._config.mount_path, final_path))
         for entry in entries:
             self._mark_step(entry, "organizer", "success", "Organisation terminée.")
 

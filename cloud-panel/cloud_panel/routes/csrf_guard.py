@@ -12,7 +12,6 @@ from common.csrf import cleanup_csrf_tokens as _common_cleanup
 from common.csrf import csrf_cookie_matches as _common_cookie_matches
 from common.csrf import csrf_token_is_valid as _common_csrf_valid
 from common.csrf import set_csrf_cookie as _common_set_csrf
-from ..config import INTERNAL_AUTOMATION_TOKEN
 
 from ..config import CSRF_COOKIE, CSRF_TOKEN_TTL_SECONDS, MAX_CSRF_TOKENS, TRUSTED_PROXY_IPS
 
@@ -43,9 +42,6 @@ def client_key(request):
 
 
 async def require_action_guard(request: Request, x_cloud_panel_csrf: Optional[str] = Header(default=None)) -> None:
-    internal_token = request.headers.get("X-Cloud-Panel-Internal-Token", "")
-    if INTERNAL_AUTOMATION_TOKEN and internal_token == INTERNAL_AUTOMATION_TOKEN and client_key(request) in {"127.0.0.1", "::1"}:
-        return
     require_csrf_token(
         request.app,
         request,

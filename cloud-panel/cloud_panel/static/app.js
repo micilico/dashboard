@@ -450,7 +450,8 @@ function makeTile(f, i) {
   tile.addEventListener("dragend", clearDrag);
   if (f.is_dir) {
     tile.addEventListener("dragover", (e) => {
-      if (!dragItems.length) return;
+      const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
+      if (!dragItems.length && !types.includes("application/x-cloud-item")) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       tile.classList.add("drop-target");
@@ -534,14 +535,17 @@ function renderFiles() {
 let dragItems = [];
 
 function dragPayload(e, f) {
+  if (!e.dataTransfer) return;
   const selectedPaths = [...S.selected];
   const items = selectedPaths.includes(f.path) && selectedPaths.length
     ? selectedPaths.map(p => S.selectedItems.get(p) || { path: p, name: p.split("/").pop(), is_dir: false })
     : [f];
   dragItems = items.map(i => ({ path: i.path, name: i.name, is_dir: Boolean(i.is_dir) }));
   e.dataTransfer.setData("application/x-cloud-item", JSON.stringify(dragItems));
-  e.dataTransfer.setData("text/plain", dragItems.map(i => i.name).join(", "));
+  // Keep a standards-compatible fallback for browsers that hide custom MIME types.
+  e.dataTransfer.setData("text/plain", JSON.stringify(dragItems));
   e.dataTransfer.effectAllowed = "move";
+  e.currentTarget.setAttribute("aria-grabbed", "true");
   qsa("#fileBody tr").forEach(tr => {
     if (dragItems.some(i => i.path === tr.dataset.path)) tr.classList.add("dragging");
   });
@@ -556,20 +560,31 @@ function clearDrag() {
   const endedItems = dragItems;
   setTimeout(() => {
     if (dragItems !== endedItems) return;
-    qsa("#fileBody tr.dragging, .grid-tile.dragging").forEach(el => el.classList.remove("dragging"));
+  qsa("#fileBody tr.dragging, .grid-tile.dragging").forEach(el => {
+    el.classList.remove("dragging");
+    el.removeAttribute("aria-grabbed");
+  });
     dragItems = [];
-  }, 0);
+  }, 250);
 }
 
 function readDragItems(e) {
-  const raw = e.dataTransfer.getData("application/x-cloud-item");
-  if (!raw) return dragItems;
+  let raw = e.dataTransfer.getData("application/x-cloud-item");
+  if (!raw) {
+    raw = e.dataTransfer.getData("text/plain");
+    if (!raw) return dragItems;
+  }
   try {
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr : dragItems;
   } catch {
     return dragItems;
   }
+}
+
+function isInternalDrag(e) {
+  const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
+  return dragItems.length > 0 || types.includes("application/x-cloud-item");
 }
 
 function dropLabel(destPath) {
@@ -621,8 +636,7 @@ function makeDropTarget(el, destPathOrGetter) {
   el.classList.add("drop-crumb");
   const resolveDest = () => (typeof destPathOrGetter === "function" ? destPathOrGetter() : destPathOrGetter);
   el.addEventListener("dragover", (e) => {
-    const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
-    if (!dragItems.length && !types.includes("application/x-cloud-item")) return;
+    if (!isInternalDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     el.classList.add("drop-active");
@@ -1131,7 +1145,7 @@ makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="parent"]'), () => S.path.s
   let depth = 0;
   const hasFiles = (e) => e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files");
   view.addEventListener("dragenter", (e) => {
-    if (dragItems.length || !hasFiles(e)) return;
+    if (isInternalDrag(e) || !hasFiles(e)) return;
     e.preventDefault();
     depth++;
     view.classList.add("upload-target");
@@ -1142,12 +1156,12 @@ makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="parent"]'), () => S.path.s
     if (depth === 0) view.classList.remove("upload-target");
   });
   view.addEventListener("dragover", (e) => {
-    if (dragItems.length || !hasFiles(e)) return;
+    if (isInternalDrag(e) || !hasFiles(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   });
   view.addEventListener("drop", (e) => {
-    if (dragItems.length) return;
+    if (isInternalDrag(e)) return;
     depth = 0;
     view.classList.remove("upload-target");
     if (hasFiles(e) && e.dataTransfer.files.length) {

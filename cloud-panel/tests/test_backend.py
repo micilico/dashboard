@@ -1478,6 +1478,38 @@ class TestMediaOrganizer:
         assert not (tmp_path / "films" / "Dune (2021)").exists(), "must reuse existing folder"
         assert not (tmp_path / "Dune.2021.1080p").exists()
 
+    def test_real_qbittorrent_tree_uses_nested_media_destinations(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan, build_organization_plan
+
+        source = tmp_path / "qbittorrent"
+        (source / "Dune.2021.1080p").mkdir(parents=True)
+        (source / "Dune.2021.1080p" / "Dune.mkv").write_text("movie")
+        (source / "Show.S01").mkdir()
+        (source / "Show.S01" / "Show.S01E01.mkv").write_text("episode")
+
+        plan = build_organization_plan("qbittorrent")
+        assert {item["target"] for item in plan["movies"]} == {"qbittorrent/Films/Dune (2021)"}
+        assert plan["series"][0]["items"][0]["target"] == "qbittorrent/Series/Show/Saison 1"
+        apply_organization_plan("qbittorrent")
+        assert (source / "Films" / "Dune (2021)").is_dir()
+        assert (source / "Series" / "Show" / "Saison 1" / "Show.S01E01.mkv").exists()
+        assert not (tmp_path / "films").exists()
+        assert not (tmp_path / "séries").exists()
+
+    def test_same_size_different_content_is_not_deleted(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "qbittorrent" / "film" / "Dune (2021)").mkdir(parents=True)
+        (tmp_path / "qbittorrent" / "film" / "Dune (2021)" / "Dune.mkv").write_bytes(b"keep")
+        (tmp_path / "qbittorrent" / "Dune.2021.1080p").mkdir()
+        (tmp_path / "qbittorrent" / "Dune.2021.1080p" / "Dune.mkv").write_bytes(b"drop")
+
+        result = apply_organization_plan("qbittorrent")
+        assert result["errors"]
+        assert (tmp_path / "qbittorrent" / "Dune.2021.1080p" / "Dune.mkv").exists()
+
     def test_apply_rejects_outside_path(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
         from cloud_panel.services.media import apply_organization_plan
