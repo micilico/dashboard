@@ -939,8 +939,8 @@ class RelinkTests(BackendTests):
         self.assertEqual(plan["relinkCount"], 1)
         self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films")
 
-    def test_files_directly_in_category_root_create_torrent_subfolder(self):
-        """Cas B : fichier directement dans Films → mkdir Films/<torrent> + move, jamais renommer Films."""
+    def test_single_file_in_category_root_stays_flat(self):
+        """Cas B mono-fichier : fichier directement dans Films → rename seul (pas de mkdir/move), layout NoSubfolder."""
         import shutil
 
         qbit_setup_dir = self.mount / "Qbittorrent"
@@ -967,13 +967,62 @@ class RelinkTests(BackendTests):
         self.assertEqual(plan["relinkCount"], 1)
         group = plan["relink"][0]
         self.assertEqual(group["location"], "/home/micilico/downloads/qbittorrent/Films")
+        self.assertEqual(group["layout"], "NoSubfolder")
+        ops = group["entries"][0]["renames"]
+        self.assertEqual(
+            ops,
+            [
+                {"op": "rename", "path": "qbittorrent/Films", "old_name": "Film.2026.MULTi.CA.mkv", "new_name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.mkv"},
+            ],
+        )
+        self.assertFalse(any(op.get("op") == "mkdir" for op in ops))
+        self.assertFalse(any(op.get("op") == "rename" and op.get("old_name") == "Films" for op in ops))
+
+    def test_multiple_files_in_category_root_create_torrent_subfolder(self):
+        """Cas B multi-fichiers : plusieurs fichiers dans Films → mkdir Films/<torrent> + move, jamais renommer Films."""
+        import shutil
+
+        qbit_setup_dir = self.mount / "Qbittorrent"
+        if qbit_setup_dir.exists():
+            shutil.rmtree(qbit_setup_dir)
+        films_dir = self.mount / "qbittorrent" / "Films"
+        films_dir.mkdir(parents=True, exist_ok=True)
+        (films_dir / "Film.2026.MULTi.CA.mkv").write_bytes(b"0123456789")
+        (films_dir / "Film.2026.MULTi.CA.srt").write_bytes(b"srt")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY",
+                "state": "pausedDL",
+                "category": "prowlarr",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Film.2026.MULTi.VFQ.2160p.H265-SUPPLY",
+            },
+        ]
+        app.state.qbit.files_payload = {
+            VALID_HASH: [
+                {"name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.mkv", "size": 10},
+                {"name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.srt", "size": 3},
+            ]
+        }
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        group = plan["relink"][0]
+        self.assertEqual(group["location"], "/home/micilico/downloads/qbittorrent/Films")
+        self.assertEqual(group["layout"], "Subfolder")
         ops = group["entries"][0]["renames"]
         self.assertEqual(ops[0], {"op": "mkdir", "path": "qbittorrent/Films", "name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY"})
         self.assertIn(
             {"op": "move", "path": "qbittorrent/Films", "old_name": "Film.2026.MULTi.CA.mkv", "new_name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.mkv", "dest": "qbittorrent/Films/Film.2026.MULTi.VFQ.2160p.H265-SUPPLY"},
             ops,
         )
-        self.assertTrue(all(op.get("op") != "rename" or op.get("path") != "qbittorrent" for op in ops))
+        self.assertIn(
+            {"op": "move", "path": "qbittorrent/Films", "old_name": "Film.2026.MULTi.CA.srt", "new_name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.srt", "dest": "qbittorrent/Films/Film.2026.MULTi.VFQ.2160p.H265-SUPPLY"},
+            ops,
+        )
         self.assertFalse(any(op.get("op") == "rename" and op.get("old_name") == "Films" for op in ops))
 
 

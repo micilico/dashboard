@@ -34,6 +34,7 @@ _SCAN_CACHE_TTL = 60.0
 _SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 
 _LAYOUT_SUBFOLDER = "Subfolder"
+_LAYOUT_NO_SUBFOLDER = "NoSubfolder"
 
 
 def _build_renames(
@@ -57,6 +58,7 @@ def _build_renames(
     parent_rel = posixpath.dirname(located)
     located_basename = posixpath.basename(located)
     is_category_root = bool(anchor_prefix) and parent_rel == anchor_prefix.rstrip("/")
+    is_single_file = len(specs) <= 1
 
     ops: list[dict[str, str]] = []
     disk_files = index.get("dir_files", {}).get(located, {})
@@ -81,20 +83,24 @@ def _build_renames(
             continue
         used.add(matched)
         if is_category_root:
-            ops.append(
-                {
-                    "op": "move",
-                    "path": located,
-                    "old_name": matched,
-                    "new_name": torrent_file if matched != torrent_file else "",
-                    "dest": posixpath.join(located, torrent_name),
-                }
-            )
+            if is_single_file:
+                if matched != torrent_file:
+                    ops.append({"op": "rename", "path": located, "old_name": matched, "new_name": torrent_file})
+            else:
+                ops.append(
+                    {
+                        "op": "move",
+                        "path": located,
+                        "old_name": matched,
+                        "new_name": torrent_file if matched != torrent_file else "",
+                        "dest": posixpath.join(located, torrent_name),
+                    }
+                )
         elif matched != torrent_file:
             ops.append({"op": "rename", "path": located, "old_name": matched, "new_name": torrent_file})
 
     if is_category_root:
-        if located_basename != torrent_name:
+        if not is_single_file and located_basename != torrent_name:
             ops.insert(0, {"op": "mkdir", "path": located, "name": torrent_name})
     elif located_basename != torrent_name:
         ops.append({"op": "rename", "path": parent_rel, "old_name": located_basename, "new_name": torrent_name})
@@ -399,6 +405,7 @@ async def build_relink_plan(
             continue
 
         included += 1
+        entry_layout = _LAYOUT_NO_SUBFOLDER if (is_category_root and len(specs) <= 1) else _LAYOUT_SUBFOLDER
         entry = {
             "hash": torrent_hash,
             "name": torrent_name,
@@ -407,6 +414,7 @@ async def build_relink_plan(
             "targetPath": target,
             "located": located,
             "renames": renames,
+            "layout": entry_layout,
         }
         if not renames and current == target:
             logger.debug("relink: %s (%s) déjà au bon endroit (%s)", torrent_name, torrent_hash[:8], target)
@@ -414,16 +422,18 @@ async def build_relink_plan(
             continue
 
         logger.info(
-            "relink: %s (%s) %s → %s (%d renommage(s))",
+            "relink: %s (%s) %s → %s (%d renommage(s), layout %s)",
             torrent_name,
             torrent_hash[:8],
             current,
             target,
             len(renames),
+            entry_layout,
         )
+        group_key = (target, entry_layout)
         group = by_location.setdefault(
-            target,
-            {"location": target, "hashes": [], "names": [], "entries": []},
+            group_key,
+            {"location": target, "layout": entry_layout, "hashes": [], "names": [], "entries": []},
         )
         group["hashes"].append(torrent_hash)
         group["names"].append(entry["name"])
@@ -492,6 +502,16 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any], *, recheck: bool = 
                 result = await arrange_batch(entry_ops)
                 failed = int(result.get("failed", 0))
                 if failed:
+                    for item in result.get("results", []):
+                        if not item.get("success"):
+                            logger.warning(
+                                "relink: op refusée %s → %s (%s%s%s)",
+                                item.get("op"),
+                                item.get("path"),
+                                item.get("old_name") or "",
+                                " → " + item.get("new_name") if item.get("new_name") else "",
+                                " (dest " + item.get("dest") + ")" if item.get("dest") else "",
+                            )
                     raise CloudPanelError(f"{failed} opération(s) refusée(s)")
                 logger.info("relink: %d opération(s) fichier(s) pour %s", len(entry_ops), entry["name"])
             except CloudPanelError as exc:
@@ -506,10 +526,11 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any], *, recheck: bool = 
 
         try:
             await qbit.set_location_many(hashes, group["location"])
-            await qbit.set_content_layout_many(hashes, _LAYOUT_SUBFOLDER)
+            group_layout = group.get("layout", _LAYOUT_SUBFOLDER)
+            await qbit.set_content_layout_many(hashes, group_layout)
             relinked += len(hashes)
-            details.append({"location": group["location"], "count": len(hashes), "ok": True})
-            logger.info("relink: %d torrent(s) → %s (layout Subfolder)", len(hashes), group["location"])
+            details.append({"location": group["location"], "layout": group_layout, "count": len(hashes), "ok": True})
+            logger.info("relink: %d torrent(s) → %s (layout %s)", len(hashes), group["location"], group_layout)
         except QbitError as exc:
             details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": exc.public_message})
             failures.extend(

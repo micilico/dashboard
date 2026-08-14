@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile, File, Form, Response, Query
@@ -36,6 +37,7 @@ from ..services.media import apply_organization_plan, build_organization_plan
 from .csrf_guard import require_action_guard, set_csrf_cookie
 
 router = APIRouter()
+logger = logging.getLogger("cloud_panel.routes.files")
 
 
 def _read_limiter(request: Request):
@@ -221,8 +223,10 @@ async def internal_arrange_batch(
             else:
                 result = await run_in_threadpool(rename_item, path, old_name, new_name)
                 results.append({"success": bool(result.get("success", True)), "op": "rename", "path": path, "old_name": old_name, "new_name": new_name})
-        except ValueError:
-            results.append({"success": False, "op": op, "path": path, "old_name": old_name, "new_name": new_name, "dest": dest, "error": "Opération refusée"})
+        except ValueError as exc:
+            reason = exc.args[0] if exc.args else "Opération refusée"
+            logger.warning("internal-arrange-batch: op %s refusée (%s)", op, reason)
+            results.append({"success": False, "op": op, "path": path, "old_name": old_name, "new_name": new_name, "dest": dest, "error": reason})
     failed = sum(1 for result in results if not result.get("success"))
     return {"results": results, "failed": failed}
 
