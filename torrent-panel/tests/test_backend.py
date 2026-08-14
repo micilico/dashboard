@@ -587,6 +587,8 @@ class BackendTests(unittest.TestCase):
 
 
 class RelinkTests(BackendTests):
+    QBIT_ROOT = "/home/micilico/downloads/qbittorrent"
+
     def setUp(self):
         super().setUp()
         self.mount = Path(tempfile.mkdtemp())
@@ -597,46 +599,48 @@ class RelinkTests(BackendTests):
         series_dir.mkdir(parents=True)
         (series_dir / "Show.S01E01.mkv").write_bytes(b"episode")
         self._original_mount = relink_service.MEDIA_MOUNT_PATH
+        self._original_qbit_root = relink_service.QBIT_SAVE_PATH
+        self._original_config_qbit_root = panel_config.QBIT_SAVE_PATH
         relink_service.MEDIA_MOUNT_PATH = str(self.mount)
+        relink_service.QBIT_SAVE_PATH = self.QBIT_ROOT
+        panel_config.QBIT_SAVE_PATH = self.QBIT_ROOT
         relink_service._SCAN_CACHE["data"] = None
         relink_service._SCAN_CACHE["ts"] = 0.0
 
     def tearDown(self):
         relink_service.MEDIA_MOUNT_PATH = self._original_mount
+        relink_service.QBIT_SAVE_PATH = self._original_qbit_root
+        panel_config.QBIT_SAVE_PATH = self._original_config_qbit_root
         relink_service._SCAN_CACHE["data"] = None
         relink_service._SCAN_CACHE["ts"] = 0.0
         super().tearDown()
 
     def build_payload(self):
-        app.state.qbit.categories_payload = {
-            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
-            "Series": {"savePath": "/mnt/ultra-media/Qbittorrent/Series", "name": "Series"},
-        }
         app.state.qbit.torrents_payload = [
             {
                 "hash": VALID_HASH,
                 "name": "Dune.2021.1080p",
                 "state": "pausedDL",
                 "category": "Films",
-                "savePath": "/mnt/ultra-media/Qbittorrent/Films",
-                "contentPath": "/mnt/ultra-media/Qbittorrent/Dune.2021.1080p",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Dune.2021.1080p",
             },
             {
                 "hash": "b" * 40,
                 "name": "Show.S01",
                 "state": "missingFiles",
                 "category": "Series",
-                "savePath": "/mnt/ultra-media/Qbittorrent/Series",
-                "contentPath": "/mnt/ultra-media/Qbittorrent/Show.S01",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Show.S01",
             },
             {
                 "hash": "c" * 40,
                 "name": "Déjà aligné",
                 "state": "uploading",
                 "category": "Films",
-                "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
+                "savePath": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
             },
-            {"hash": "d" * 40, "name": "Sans catégorie", "state": "missingFiles", "category": "", "savePath": "/old/downloads/Other"},
+            {"hash": "d" * 40, "name": "Hors racine", "state": "uploading", "category": "", "savePath": "/old/downloads/Other"},
         ]
         app.state.qbit.files_payload = {
             VALID_HASH: [{"name": "Dune.mkv", "size": 4}],
@@ -649,17 +653,16 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 2)
-        self.assertEqual(plan["skippedCount"], 1)
+        self.assertEqual(plan["skippedCount"], 0)
         self.assertEqual(plan["layout"], "NoSubfolder")
         locations = sorted(group["location"] for group in plan["relink"])
         self.assertEqual(
             locations,
             [
-                "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
-                "/mnt/ultra-media/Qbittorrent/Series/Show/Saison 1/Show.S01",
+                "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
+                "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1/Show.S01",
             ],
         )
-        self.assertEqual(plan["skipped"][0]["reason"], "Sans catégorie ou chemin configuré")
 
     def test_apply_pauses_then_relinks_with_no_subfolder(self):
         self.build_payload()
@@ -671,9 +674,9 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["result"]["rechecked"], 2)
         calls = app.state.qbit.calls
         self.assertIn(("pause", [VALID_HASH, "b" * 40]), calls)
-        self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p")))
-        self.assertIn(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), calls)
-        self.assertIn(("set_location", ["b" * 40], "/mnt/ultra-media/Qbittorrent/Series/Show/Saison 1/Show.S01"), calls)
+        self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p")))
+        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), calls)
+        self.assertIn(("set_location", ["b" * 40], "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1/Show.S01"), calls)
         self.assertIn(("set_content_layout", [VALID_HASH], "NoSubfolder"), calls)
         self.assertIn(("set_content_layout", ["b" * 40], "NoSubfolder"), calls)
         self.assertEqual(calls[-1], ("recheck", [VALID_HASH, "b" * 40]))
@@ -699,12 +702,9 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["plan"]["relinkCount"], 1)
         self.assertEqual(body["result"]["relinked"], 1)
         self.assertIn(("pause", [VALID_HASH]), app.state.qbit.calls)
-        self.assertIn(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), app.state.qbit.calls)
+        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), app.state.qbit.calls)
 
     def test_locates_files_directly_when_no_preserved_folder(self):
-        app.state.qbit.categories_payload = {
-            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
-        }
         nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
         if nested_dir.exists():
             import shutil
@@ -719,8 +719,8 @@ class RelinkTests(BackendTests):
                 "name": "Dune.2021.1080p",
                 "state": "pausedDL",
                 "category": "Films",
-                "savePath": "/mnt/ultra-media/Qbittorrent/Films",
-                "contentPath": "/mnt/ultra-media/Qbittorrent/autre-nom",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/autre-nom",
             },
         ]
         app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
@@ -729,19 +729,16 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
-        self.assertEqual(plan["relink"][0]["location"], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)")
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
 
     def test_no_relink_when_nothing_affected(self):
-        app.state.qbit.categories_payload = {
-            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
-        }
         app.state.qbit.torrents_payload = [
             {
                 "hash": VALID_HASH,
                 "name": "Sain",
                 "state": "uploading",
                 "category": "Films",
-                "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
+                "savePath": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
             },
         ]
         response = self.client.get("/torrent-panel/api/torrents/relink-preview")
@@ -750,123 +747,80 @@ class RelinkTests(BackendTests):
         self.assertEqual(plan["total"], 0)
         self.assertEqual(plan["relinkCount"], 0)
 
-    def test_relink_status_counts_missing_and_relinked_roots(self):
-        app.state.qbit.categories_payload = {
-            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
-        }
+    def test_relink_status_counts_missing_and_shallow_roots(self):
         app.state.qbit.torrents_payload = [
             {"hash": VALID_HASH, "name": "Manquant", "state": "missingFiles", "category": "Films", "savePath": "/old/thing"},
-            {"hash": "b" * 40, "name": "Repos à la racine", "state": "pausedDL", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films"},
-            {"hash": "c" * 40, "name": "Sain", "state": "uploading", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)"},
-            {"hash": "e" * 40, "name": "En pause hors racine", "state": "stoppedDL", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p"},
+            {"hash": "b" * 40, "name": "Racine qbit", "state": "uploading", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent"},
+            {"hash": "c" * 40, "name": "Dans Films", "state": "uploading", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"},
+            {"hash": "e" * 40, "name": "En pause", "state": "stoppedDL", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p"},
         ]
         response = self.client.get("/torrent-panel/api/torrents/relink-status")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 3)
 
-    def test_relink_status_counts_torrents_at_qbit_root_without_category_savepath(self):
-        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
-        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
-        try:
-            app.state.qbit.categories_payload = {
-                "Films": {"savePath": "", "name": "Films"},
-            }
-            app.state.qbit.torrents_payload = [
-                {"hash": VALID_HASH, "name": "À la racine", "state": "uploading", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent"},
-                {"hash": "b" * 40, "name": "Dans Films", "state": "uploading", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"},
-            ]
-            response = self.client.get("/torrent-panel/api/torrents/relink-status")
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.json()["count"], 1)
-        finally:
-            relink_service.QBIT_SAVE_PATH = ""
-            panel_config.QBIT_SAVE_PATH = ""
-
     def test_relink_plan_anchors_via_qbit_root_subfolder(self):
-        """Scénario réel : mount contient qbittorrent/Films, torrent à la racine qBittorrent, catégorie sans savePath."""
-        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
-        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
-        try:
-            import shutil
+        """Scénario réel : mount contient qbittorrent/Films, torrent à la racine qBittorrent."""
+        import shutil
 
-            qbit_setup_dir = self.mount / "Qbittorrent"
-            if qbit_setup_dir.exists():
-                shutil.rmtree(qbit_setup_dir)
-            film_dir = self.mount / "qbittorrent" / "Films" / "Dune (2021)"
-            film_dir.mkdir(parents=True, exist_ok=True)
-            (film_dir / "Dune.mkv").write_bytes(b"keep")
-            app.state.qbit.categories_payload = {
-                "Films": {"savePath": "", "name": "Films"},
-            }
-            app.state.qbit.torrents_payload = [
-                {
-                    "hash": VALID_HASH,
-                    "name": "Dune.2021.1080p",
-                    "state": "pausedDL",
-                    "category": "Films",
-                    "savePath": "/home/micilico/downloads/qbittorrent",
-                    "contentPath": "/home/micilico/downloads/qbittorrent/Dune.2021.1080p",
-                },
-            ]
-            app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
-            relink_service._SCAN_CACHE["data"] = None
-            response = self.client.get("/torrent-panel/api/torrents/relink-preview")
-            self.assertEqual(response.status_code, 200)
-            plan = response.json()["plan"]
-            self.assertEqual(plan["relinkCount"], 1)
-            self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
-        finally:
-            relink_service.QBIT_SAVE_PATH = ""
-            panel_config.QBIT_SAVE_PATH = ""
+        qbit_setup_dir = self.mount / "Qbittorrent"
+        if qbit_setup_dir.exists():
+            shutil.rmtree(qbit_setup_dir)
+        film_dir = self.mount / "qbittorrent" / "Films" / "Dune (2021)"
+        film_dir.mkdir(parents=True, exist_ok=True)
+        (film_dir / "Dune.mkv").write_bytes(b"keep")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Dune.2021.1080p",
+                "state": "pausedDL",
+                "category": "Films",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Dune.2021.1080p",
+            },
+        ]
+        app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
 
-    def test_relink_locates_renamed_files_in_different_category(self):
+    def test_relink_locates_renamed_files_in_organized_folder(self):
         """Cas réel : fichiers renommés par le rangement + catégorie prowlarr mais contenu rangé dans Films."""
-        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
-        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
-        try:
-            import shutil
+        import shutil
 
-            qbit_setup_dir = self.mount / "Qbittorrent"
-            if qbit_setup_dir.exists():
-                shutil.rmtree(qbit_setup_dir)
-            film_dir = self.mount / "qbittorrent" / "Films" / "Backrooms (2026)"
-            film_dir.mkdir(parents=True, exist_ok=True)
-            (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv").write_bytes(b"0123456789")
-            (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.nfo").write_bytes(b"nfo")
-            app.state.qbit.categories_payload = {
-                "prowlarr": {"savePath": "", "name": "prowlarr"},
-                "Films": {"savePath": "", "name": "Films"},
-            }
-            app.state.qbit.torrents_payload = [
-                {
-                    "hash": VALID_HASH,
-                    "name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
-                    "state": "pausedDL",
-                    "category": "prowlarr",
-                    "savePath": "/home/micilico/downloads/qbittorrent",
-                    "contentPath": "/home/micilico/downloads/qbittorrent/Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
-                },
+        qbit_setup_dir = self.mount / "Qbittorrent"
+        if qbit_setup_dir.exists():
+            shutil.rmtree(qbit_setup_dir)
+        film_dir = self.mount / "qbittorrent" / "Films" / "Backrooms (2026)"
+        film_dir.mkdir(parents=True, exist_ok=True)
+        (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv").write_bytes(b"0123456789")
+        (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.nfo").write_bytes(b"nfo")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
+                "state": "pausedDL",
+                "category": "prowlarr",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
+            },
+        ]
+        app.state.qbit.files_payload = {
+            VALID_HASH: [
+                {"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv", "size": 10},
+                {"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.nfo", "size": 3},
             ]
-            app.state.qbit.files_payload = {
-                VALID_HASH: [
-                    {"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv", "size": 10},
-                    {"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.nfo", "size": 3},
-                ]
-            }
-            relink_service._SCAN_CACHE["data"] = None
-            response = self.client.get("/torrent-panel/api/torrents/relink-preview")
-            self.assertEqual(response.status_code, 200)
-            plan = response.json()["plan"]
-            self.assertEqual(plan["relinkCount"], 1)
-            self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Backrooms (2026)")
-        finally:
-            relink_service.QBIT_SAVE_PATH = ""
-            panel_config.QBIT_SAVE_PATH = ""
+        }
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Backrooms (2026)")
 
     def test_relink_plan_includes_paused_downloads(self):
-        app.state.qbit.categories_payload = {
-            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
-        }
         nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
         if nested_dir.exists():
             import shutil
@@ -881,8 +835,8 @@ class RelinkTests(BackendTests):
                 "name": "Dune.2021.1080p",
                 "state": "stoppedDL",
                 "category": "Films",
-                "savePath": "/mnt/ultra-media/Qbittorrent/Films",
-                "contentPath": "/mnt/ultra-media/Qbittorrent/Films/Dune.2021.1080p",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Films/Dune.2021.1080p",
             },
         ]
         app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
@@ -891,7 +845,7 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
-        self.assertEqual(plan["relink"][0]["location"], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)")
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
 
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):

@@ -1,14 +1,15 @@
 """Relink service – reattach torrents whose data was moved to organized media folders.
 
-The cloud-panel "rangement" moves torrent content into category folders and
-renames the containing folders (e.g. ``qbittorrent/Films/Movie (2021)``,
-``qbittorrent/Series/Show/Saison 1``) while preserving file names. qBittorrent
-then reports ``missingFiles`` or re-downloads because its save path (category
-root) no longer matches the per-torrent folder.
+The cloud-panel "rangement" moves torrent content into organized folders under
+the qBittorrent download root (e.g. ``qbittorrent/Films/Movie (2021)``,
+``qbittorrent/Series/Show/Saison 1``) and may rename files. qBittorrent then
+reports ``missingFiles`` or re-downloads because its save path (the qBittorrent
+root or a too-shallow folder) no longer matches the per-torrent folder.
 
-The repair is: locate each torrent's files on the mount, set the torrent's save
-path to that exact folder, switch content layout to ``NoSubfolder`` (the
-organized folders are flat) and force a recheck.
+The repair is: locate each torrent's files on the mount (by folder name, file
+name + size, or size only since renamed files keep their size), set the
+torrent's save path to that exact folder, switch content layout to
+``NoSubfolder`` (the organized folders are flat) and force a recheck.
 """
 
 from __future__ import annotations
@@ -52,17 +53,10 @@ def _skipped_entry(torrent: dict[str, Any], reason: str) -> dict[str, Any]:
     }
 
 
-def _category_entry(categories: dict[str, dict[str, Any]], category: str) -> dict[str, Any] | None:
-    for key, item in categories.items():
-        if key == category or key.strip().lower() == category.strip().lower():
-            return item
-    return None
+def _scan_index(mount_root: str, qbit_root: str) -> dict[str, Any]:
+    """Index every file under the qBittorrent download root on the mount.
 
-
-def _scan_index(mount_root: str, category_save_paths: list[str], category_names: list[str] | None = None) -> dict[str, Any]:
-    """Index organized folders once per cache window.
-
-    Returns ``{"scope_dirs": [...], "files": {basename.casefold(): {dir_rel: size}},
+    Returns ``{"anchor_prefix": str, "files": {basename.casefold(): {dir_rel: size}},
     "sizes": {size: [dir_rel, ...]}, "dir_basenames": {basename.casefold(): [dir_rel, ...]}}``
     where ``dir_rel`` paths are relative to ``mount_root``.
     """
@@ -71,40 +65,43 @@ def _scan_index(mount_root: str, category_save_paths: list[str], category_names:
     if cache["data"] is not None and now - cache["ts"] < _SCAN_CACHE_TTL:
         return cache["data"]
 
-    target_names = {posixpath.basename(path.rstrip("/")).casefold() for path in category_save_paths if path.strip()}
-    target_names.update(str(name or "").strip().casefold() for name in (category_names or []) if str(name or "").strip())
     mount_root = os.path.realpath(mount_root)
-    scope_dirs: list[str] = []
-    if target_names:
+    target_name = posixpath.basename(qbit_root.rstrip("/")).casefold() if qbit_root else ""
+
+    anchor_prefix = ""
+    scan_root = mount_root
+    if target_name:
         for dirpath, dirnames, _files in os.walk(mount_root):
             rel = os.path.relpath(dirpath, mount_root)
             depth = 0 if rel == "." else len(rel.split(os.sep))
             if depth > 6:
                 dirnames[:] = []
                 continue
-            for name in list(dirnames):
-                if name.casefold() in target_names:
-                    scope_dirs.append(os.path.relpath(os.path.join(dirpath, name), mount_root).replace(os.sep, "/"))
+            for name in dirnames:
+                if name.casefold() == target_name:
+                    anchor_prefix = os.path.relpath(os.path.join(dirpath, name), mount_root).replace(os.sep, "/")
+                    scan_root = os.path.join(dirpath, name)
+                    break
+            if anchor_prefix:
+                break
 
     files: dict[str, dict[str, int]] = {}
     sizes: dict[int, list[str]] = {}
     dir_basenames: dict[str, list[str]] = {}
-    for scope_rel in scope_dirs:
-        scope_abs = os.path.join(mount_root, *scope_rel.split("/"))
-        for dirpath, _dirnames, filenames in os.walk(scope_abs):
-            dir_rel = os.path.relpath(dirpath, mount_root).replace(os.sep, "/")
-            dir_basenames.setdefault(posixpath.basename(dir_rel).casefold(), []).append(dir_rel)
-            for filename in filenames:
-                try:
-                    size = os.path.getsize(os.path.join(dirpath, filename))
-                except OSError:
-                    size = -1
-                files.setdefault(filename.casefold(), {})[dir_rel] = size
-                if size > 0:
-                    sizes.setdefault(size, []).append(dir_rel)
+    for dirpath, _dirnames, filenames in os.walk(scan_root):
+        dir_rel = os.path.relpath(dirpath, mount_root).replace(os.sep, "/")
+        dir_basenames.setdefault(posixpath.basename(dir_rel).casefold(), []).append(dir_rel)
+        for filename in filenames:
+            try:
+                size = os.path.getsize(os.path.join(dirpath, filename))
+            except OSError:
+                size = -1
+            files.setdefault(filename.casefold(), {})[dir_rel] = size
+            if size > 0:
+                sizes.setdefault(size, []).append(dir_rel)
 
     data = {
-        "scope_dirs": sorted(set(scope_dirs)),
+        "anchor_prefix": anchor_prefix,
         "files": files,
         "sizes": sizes,
         "dir_basenames": dir_basenames,
@@ -128,7 +125,7 @@ def _locate_folder(
 
     Matching strategies, tried in order:
     1. Exact basename match (the "rangement" keeps the torrent's folder intact
-       but nests it under the category structure).
+       but nests it under the organized structure).
     2. Folder basename == torrent name (``folder_hint``), e.g. the preserved
        content path basename.
     3. Fuzzy folder-name similarity against the hint (files were renamed too).
@@ -204,17 +201,21 @@ def _size_match_dir(index: dict[str, Any], file_specs: list[tuple[str, int]], pr
     return max(scored.items(), key=lambda item: (item[1], -len(item[0])))[0]
 
 
-def _anchor_target(category_qbit_path: str, scope_mount_rel: str, located_mount_rel: str) -> str | None:
-    """Convert a located mount-relative folder into a qBittorrent absolute path."""
-    category_path = _normalize_path(category_qbit_path)
-    scope = scope_mount_rel.rstrip("/")
+def _anchor_target(qbit_root: str, anchor_prefix: str, located_mount_rel: str) -> str | None:
+    """Convert a located mount-relative folder into a qBittorrent absolute path.
+
+    ``anchor_prefix`` is the mount-relative path of the qBittorrent download
+    root folder (e.g. ``qbittorrent``). When found, the suffix after it is
+    appended to ``qbit_root``; otherwise the located path is treated as already
+    relative to ``qbit_root`` (the mount root is the qBittorrent root).
+    """
+    qbit_root = _normalize_path(qbit_root)
     located = located_mount_rel.rstrip("/")
-    if located == scope:
-        return category_path
-    if located.startswith(scope + "/"):
-        suffix = located[len(scope):].lstrip("/")
-        return _normalize_path(posixpath.join(category_path, suffix))
-    return None
+    prefix = (anchor_prefix or "").rstrip("/")
+    if prefix and (located == prefix or located.startswith(prefix + "/")):
+        suffix = located[len(prefix):].lstrip("/")
+        return qbit_root if not suffix else _normalize_path(posixpath.join(qbit_root, suffix))
+    return _normalize_path(posixpath.join(qbit_root, located))
 
 
 async def _torrent_file_specs(qbit: Any, torrent_hash: str) -> list[tuple[str, int]]:
@@ -234,6 +235,20 @@ async def _torrent_file_specs(qbit: Any, torrent_hash: str) -> list[tuple[str, i
     return specs
 
 
+def _is_shallow_save_path(qbit_root: str, current: str) -> bool:
+    """True when the torrent sits at the qBittorrent root or a direct subfolder.
+
+    A torrent whose save path is the root or ``root/Films``, ``root/Series`` …
+    has probably been left there by the rangement while its content was moved
+    deeper; it is a relink candidate regardless of state.
+    """
+    if not qbit_root or not current:
+        return False
+    if current == qbit_root:
+        return True
+    return posixpath.dirname(current) == qbit_root
+
+
 async def build_relink_plan(
     qbit: Any,
     *,
@@ -243,19 +258,16 @@ async def build_relink_plan(
     """Build the repair plan without mutating qBittorrent."""
     mount_root = mount_root or MEDIA_MOUNT_PATH
     torrents = await qbit.torrents()
-    categories = await qbit.categories()
     selected_hashes = {str(item).lower() for item in (hashes or [])} if hashes else None
     qbit_root = _normalize_path(QBIT_SAVE_PATH)
 
-    category_save_paths = [str(item.get("savePath") or "") for item in categories.values() if isinstance(item, dict)]
-    category_names = [str(name).strip() for name in categories.keys()]
-    index = _scan_index(mount_root, category_save_paths, category_names)
+    index = _scan_index(mount_root, qbit_root)
     logger.info(
-        "relink: mount=%s qbit_root=%s scopes=%d categories=%s",
+        "relink: mount=%s qbit_root=%s anchor=%s fichiers=%d",
         mount_root,
         qbit_root or "(non configuré)",
-        len(index["scope_dirs"]),
-        ", ".join(sorted(category_names)),
+        index["anchor_prefix"] or "(racine du mount)",
+        len(index["files"]),
     )
 
     by_location: dict[str, dict[str, Any]] = {}
@@ -271,19 +283,11 @@ async def build_relink_plan(
         if selected_hashes is not None and torrent_hash not in selected_hashes:
             continue
 
-        category = str(torrent.get("category") or "").strip()
         current = _normalize_path(str(torrent.get("savePath") or torrent.get("save_path") or ""))
         state = str(torrent.get("state") or "")
 
-        if not category:
-            logger.info("relink: %s (%s) ignoré — sans catégorie", torrent_name, torrent_hash[:8])
-            skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
-            continue
-
         if selected_hashes is None:
-            at_category_root = bool(current and current == _normalize_path(posixpath.join(qbit_root or "", category)))
-            at_qbit_root = bool(qbit_root and current == qbit_root)
-            if state not in MISSING_STATES and state not in PAUSED_DL_STATES and not at_category_root and not at_qbit_root:
+            if state not in MISSING_STATES and state not in PAUSED_DL_STATES and not _is_shallow_save_path(qbit_root, current):
                 logger.debug(
                     "relink: %s (%s) ignoré — état %s non concerné, savePath=%s",
                     torrent_name,
@@ -302,26 +306,16 @@ async def build_relink_plan(
         folder_hint = _file_basename(torrent.get("contentPath") or torrent.get("name") or "")
         located = _locate_folder(index, specs, folder_hint)
         if not located:
-            logger.info("relink: %s (%s) ignoré — contenu non localisé (cat=%s savePath=%s)", torrent_name, torrent_hash[:8], category, current)
+            logger.info("relink: %s (%s) ignoré — contenu non localisé (savePath=%s)", torrent_name, torrent_hash[:8], current)
             skipped.append(_skipped_entry(torrent, "Contenu organisé non localisé"))
             continue
 
-        scope_dir = next(
-            (scope for scope in index["scope_dirs"] if located == scope.rstrip("/") or located.startswith(scope.rstrip("/") + "/")),
-            None,
-        )
-        if scope_dir is None:
-            logger.info("relink: %s (%s) ignoré — scope catégorie non résolu pour %s", torrent_name, torrent_hash[:8], located)
-            skipped.append(_skipped_entry(torrent, "Dossier catégorie non résolu"))
+        if not qbit_root:
+            logger.info("relink: %s (%s) ignoré — racine qBittorrent non configurée", torrent_name, torrent_hash[:8])
+            skipped.append(_skipped_entry(torrent, "Sans racine qBittorrent configurée"))
             continue
 
-        scope_basename = posixpath.basename(scope_dir.rstrip("/"))
-        scope_category_info = _category_entry(categories, scope_basename) if scope_basename else None
-        anchor_base = str(scope_category_info.get("savePath") or "").strip() if scope_category_info else ""
-        if not anchor_base:
-            anchor_base = _normalize_path(posixpath.join(qbit_root or current, scope_basename))
-
-        target = _anchor_target(anchor_base, scope_dir, located)
+        target = _anchor_target(qbit_root, index["anchor_prefix"], located)
         if not target:
             logger.info("relink: %s (%s) ignoré — cible non résolue (locate=%s)", torrent_name, torrent_hash[:8], located)
             skipped.append(_skipped_entry(torrent, "Chemin cible non résolu"))
@@ -331,7 +325,7 @@ async def build_relink_plan(
         entry = {
             "hash": torrent_hash,
             "name": torrent_name,
-            "category": category,
+            "category": str(torrent.get("category") or ""),
             "currentPath": current,
             "targetPath": target,
         }

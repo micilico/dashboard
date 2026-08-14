@@ -353,25 +353,28 @@ curl -I http://127.0.0.1:3130/healthz
 ### Relink des torrents (réparation sans re-téléchargement)
 
 Le cloud-panel « rangement » déplace les contenus vers des dossiers organisés
-(`Qbittorrent/Films/Movie (2021)`, `Qbittorrent/Series/Show/Saison 1`) en
-préservant les noms de fichiers. qBittorrent, pointé sur la racine de catégorie
-en layout Subfolder, ne retrouve plus rien → 0 % → re-téléchargement.
+sous la racine de téléchargement qBittorrent (`qbittorrent/Films/Movie (2021)`,
+`qbittorrent/Series/Show/Saison 1`) et peut renommer les fichiers. qBittorrent,
+pointé sur la racine ou un dossier trop haut, ne retrouve plus rien → 0 % →
+re-téléchargement.
 
-La réparation v2 (`services/relink.py`) :
-- Scanne `TORRENT_PANEL_MEDIA_MOUNT_PATH` (défaut `/mnt/ultra-media`, monté `:ro`).
-- Indexe basename + taille des fichiers sous les dossiers de catégorie (cache TTL 60 s).
-- Localise le dossier réel de chaque torrent (d'abord par le nom du dossier
-  préservé via `contentPath`, sinon par nom/taille de fichiers).
-- Ancre le chemin cible : `savePath` de la catégorie si configuré, sinon
-  `TORRENT_PANEL_QBIT_SAVE_PATH` + nom de catégorie (ex
-  `/home/micilico/downloads/qbittorrent` → `.../qbittorrent/Films`).
+La réparation (`services/relink.py`) est **indépendante des catégories
+qBittorrent** :
+- Scanne `TORRENT_PANEL_MEDIA_MOUNT_PATH` (défaut `/mnt/ultra-media`, monté `:ro`)
+  sous la racine `TORRENT_PANEL_QBIT_SAVE_PATH` (ex `/home/micilico/downloads/qbittorrent`).
+- Indexe basename + taille des fichiers (cache TTL 60 s).
+- Localise le dossier réel de chaque torrent : basename exact → nom du dossier
+  préservé (`contentPath`) → similarité floue de nom de dossier → matching par
+  taille seule (les fichiers renommés gardent leur taille).
+- Ancre le chemin cible via `TORRENT_PANEL_QBIT_SAVE_PATH` + suffixe du dossier
+  trouvé (le dossier qBittorrent est détecté sur le mount par son basename).
 - Applique : **pause → setLocation → setContentLayout("NoSubfolder") → recheck**.
   Les torrents **restent en pause** pour vérification manuelle avant reprise du seed.
 
 Candidats au relink (`build_relink_plan`, sans sélection explicite) :
 `missingFiles`/`error`, états pause `pausedDL`/`stoppedDL` (fichiers déplacés
-mais re-téléchargement en cours), `savePath` à la racine de catégorie, ou
-`savePath` à la racine de téléchargement qBittorrent (`TORRENT_PANEL_QBIT_SAVE_PATH`).
+mais re-téléchargement en cours), ou `savePath` à la racine qBittorrent ou dans
+un sous-dossier direct (`qbittorrent/Films`, `qbittorrent/Series`).
 `GET /api/torrents/relink-status` reproduit ce critère sans scan disque (léger)
 pour alimenter le bouton « Réparer les fichiers manquants (N) ».
 
