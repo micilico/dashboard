@@ -338,6 +338,7 @@ curl -I http://127.0.0.1:3130/healthz
 | `QBITTORRENT_URL` | URL qBittorrent (tunnel) |
 | `QBITTORRENT_USERNAME/PASSWORD` | Authentification backend uniquement |
 | `TORRENT_PANEL_MEDIA_AUTOMATION_ENABLED` | Automatisation médias |
+| `TORRENT_PANEL_QBIT_SAVE_PATH` | Racine de téléchargement qBittorrent (ex `/home/micilico/downloads/qbittorrent`) — utilisée par le relink pour ancrer la nouvelle localisation quand la catégorie n'a pas de `savePath` configuré |
 | `TORRENT_PANEL_RCLONE_REFRESH_MODE` | `rc` = vfs/refresh via l'API rc locale (non destructif) ; `systemd` = restart explicite (opt-in) |
 | `TORRENT_PANEL_JELLYFIN_LIBRARY_MAP` | Mapping catégories → IDs Jellyfin |
 | `TORRENT_PANEL_JELLYFIN_API_URL/API_KEY` | Backend uniquement |
@@ -361,13 +362,16 @@ La réparation v2 (`services/relink.py`) :
 - Indexe basename + taille des fichiers sous les dossiers de catégorie (cache TTL 60 s).
 - Localise le dossier réel de chaque torrent (d'abord par le nom du dossier
   préservé via `contentPath`, sinon par nom/taille de fichiers).
-- Ancre le chemin cible via le `savePath` de la catégorie qBittorrent.
+- Ancre le chemin cible : `savePath` de la catégorie si configuré, sinon
+  `TORRENT_PANEL_QBIT_SAVE_PATH` + nom de catégorie (ex
+  `/home/micilico/downloads/qbittorrent` → `.../qbittorrent/Films`).
 - Applique : **pause → setLocation → setContentLayout("NoSubfolder") → recheck**.
   Les torrents **restent en pause** pour vérification manuelle avant reprise du seed.
 
 Candidats au relink (`build_relink_plan`, sans sélection explicite) :
 `missingFiles`/`error`, états pause `pausedDL`/`stoppedDL` (fichiers déplacés
-mais re-téléchargement en cours), ou `savePath` à la racine de catégorie.
+mais re-téléchargement en cours), `savePath` à la racine de catégorie, ou
+`savePath` à la racine de téléchargement qBittorrent (`TORRENT_PANEL_QBIT_SAVE_PATH`).
 `GET /api/torrents/relink-status` reproduit ce critère sans scan disque (léger)
 pour alimenter le bouton « Réparer les fichiers manquants (N) ».
 

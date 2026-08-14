@@ -33,6 +33,7 @@ from torrent_panel.services.monitoring import (
     storage_snapshot,
 )  # noqa: E402
 from torrent_panel.services import relink as relink_service  # noqa: E402
+from torrent_panel import config as panel_config  # noqa: E402
 from torrent_panel.services.ratio_monitor import MAX_THRESHOLD, MIN_THRESHOLD, RatioMonitor, RatioThresholdError  # noqa: E402
 from torrent_panel.services.stats import StatsStore  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
@@ -762,6 +763,61 @@ class RelinkTests(BackendTests):
         response = self.client.get("/torrent-panel/api/torrents/relink-status")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 3)
+
+    def test_relink_status_counts_torrents_at_qbit_root_without_category_savepath(self):
+        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        try:
+            app.state.qbit.categories_payload = {
+                "Films": {"savePath": "", "name": "Films"},
+            }
+            app.state.qbit.torrents_payload = [
+                {"hash": VALID_HASH, "name": "À la racine", "state": "uploading", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent"},
+                {"hash": "b" * 40, "name": "Dans Films", "state": "uploading", "category": "Films", "savePath": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"},
+            ]
+            response = self.client.get("/torrent-panel/api/torrents/relink-status")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["count"], 1)
+        finally:
+            relink_service.QBIT_SAVE_PATH = ""
+            panel_config.QBIT_SAVE_PATH = ""
+
+    def test_relink_plan_anchors_via_qbit_root_subfolder(self):
+        """Scénario réel : mount contient qbittorrent/Films, torrent à la racine qBittorrent, catégorie sans savePath."""
+        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        try:
+            import shutil
+
+            qbit_setup_dir = self.mount / "Qbittorrent"
+            if qbit_setup_dir.exists():
+                shutil.rmtree(qbit_setup_dir)
+            film_dir = self.mount / "qbittorrent" / "Films" / "Dune (2021)"
+            film_dir.mkdir(parents=True, exist_ok=True)
+            (film_dir / "Dune.mkv").write_bytes(b"keep")
+            app.state.qbit.categories_payload = {
+                "Films": {"savePath": "", "name": "Films"},
+            }
+            app.state.qbit.torrents_payload = [
+                {
+                    "hash": VALID_HASH,
+                    "name": "Dune.2021.1080p",
+                    "state": "pausedDL",
+                    "category": "Films",
+                    "savePath": "/home/micilico/downloads/qbittorrent",
+                    "contentPath": "/home/micilico/downloads/qbittorrent/Dune.2021.1080p",
+                },
+            ]
+            app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
+            relink_service._SCAN_CACHE["data"] = None
+            response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+            self.assertEqual(response.status_code, 200)
+            plan = response.json()["plan"]
+            self.assertEqual(plan["relinkCount"], 1)
+            self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
+        finally:
+            relink_service.QBIT_SAVE_PATH = ""
+            panel_config.QBIT_SAVE_PATH = ""
 
     def test_relink_plan_includes_paused_downloads(self):
         app.state.qbit.categories_payload = {

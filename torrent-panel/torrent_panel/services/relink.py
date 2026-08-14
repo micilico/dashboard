@@ -18,7 +18,7 @@ import posixpath
 import time
 from typing import Any
 
-from ..config import MEDIA_MOUNT_PATH
+from ..config import MEDIA_MOUNT_PATH, QBIT_SAVE_PATH
 from ..qbittorrent import QbitError
 from .media_automation import now_iso
 
@@ -55,7 +55,7 @@ def _category_entry(categories: dict[str, dict[str, Any]], category: str) -> dic
     return None
 
 
-def _scan_index(mount_root: str, category_save_paths: list[str]) -> dict[str, Any]:
+def _scan_index(mount_root: str, category_save_paths: list[str], category_names: list[str] | None = None) -> dict[str, Any]:
     """Index organized folders once per cache window.
 
     Returns ``{"scope_dirs": [...], "files": {basename.casefold(): {dir_rel: size}}}``
@@ -67,6 +67,7 @@ def _scan_index(mount_root: str, category_save_paths: list[str]) -> dict[str, An
         return cache["data"]
 
     target_names = {posixpath.basename(path.rstrip("/")).casefold() for path in category_save_paths if path.strip()}
+    target_names.update(str(name or "").strip().casefold() for name in (category_names or []) if str(name or "").strip())
     mount_root = os.path.realpath(mount_root)
     scope_dirs: list[str] = []
     if target_names:
@@ -187,7 +188,8 @@ async def build_relink_plan(
     selected_hashes = {str(item).lower() for item in (hashes or [])} if hashes else None
 
     category_save_paths = [str(item.get("savePath") or "") for item in categories.values() if isinstance(item, dict)]
-    index = _scan_index(mount_root, category_save_paths)
+    category_names = [str(name).strip() for name in categories.keys()]
+    index = _scan_index(mount_root, category_save_paths, category_names)
 
     by_location: dict[str, dict[str, Any]] = {}
     recheck_only: list[dict[str, Any]] = []
@@ -203,16 +205,23 @@ async def build_relink_plan(
 
         category = str(torrent.get("category") or "").strip()
         category_info = _category_entry(categories, category) if category else None
-        if not category_info or not (category_info.get("savePath") or ""):
+        current = _normalize_path(str(torrent.get("savePath") or torrent.get("save_path") or ""))
+        state = str(torrent.get("state") or "")
+        qbit_root = _normalize_path(QBIT_SAVE_PATH)
+
+        if not category:
             skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
             continue
 
-        category_qbit_path = str(category_info["savePath"]).strip()
-        current = _normalize_path(str(torrent.get("savePath") or torrent.get("save_path") or ""))
-        state = str(torrent.get("state") or "")
+        category_qbit_path = str(category_info.get("savePath") or "").strip() if category_info else ""
+        if not category_qbit_path and category:
+            category_qbit_path = _normalize_path(posixpath.join(qbit_root or current, category))
 
-        if selected_hashes is None and state not in MISSING_STATES and state not in PAUSED_DL_STATES and current != _normalize_path(category_qbit_path):
-            continue
+        if selected_hashes is None:
+            at_category_root = bool(category_qbit_path and current == _normalize_path(category_qbit_path))
+            at_qbit_root = bool(qbit_root and current == qbit_root)
+            if state not in MISSING_STATES and state not in PAUSED_DL_STATES and not at_category_root and not at_qbit_root:
+                continue
 
         specs = await _torrent_file_specs(qbit, torrent_hash)
         if not specs:
@@ -231,6 +240,10 @@ async def build_relink_plan(
         )
         if scope_dir is None:
             skipped.append(_skipped_entry(torrent, "Dossier catégorie non résolu"))
+            continue
+
+        if not category_qbit_path:
+            skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
             continue
 
         target = _anchor_target(category_qbit_path, scope_dir, located)
