@@ -26,9 +26,8 @@ from ..models import (
     TorrentTagsUpdate,
 )
 from ..qbittorrent import QbitError
-from ..services.relink import build_relink_plan, relink_missing
+from ..services.relink import relink_missing
 from common import error_detail
-
 logger = logging.getLogger("torrent_panel.routes.trackers")
 
 _TRACKER_SPECIAL_PREFIXES = ("** [DHT]", "** [PeX]", "** [LSD]", "** [Metadata]")
@@ -194,11 +193,38 @@ async def set_torrent_upload_limit(request: Request, payload: TorrentRateLimitUp
 @router.get("/torrents/relink-preview")
 async def relink_preview(request: Request) -> dict[str, Any]:
     try:
-        torrents = await request.app.state.qbit.torrents()
-        categories = await request.app.state.qbit.categories()
-        return {"plan": build_relink_plan(torrents, categories)}
+        return await relink_missing(request.app.state.qbit, preview=True)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
+
+
+@router.get("/torrents/relink-status")
+async def relink_status(request: Request) -> dict[str, Any]:
+    """Cheap indicator (no filesystem scan) of torrents that likely need relinking."""
+    from ..services.relink import MISSING_STATES, _normalize_path
+
+    try:
+        torrents = await request.app.state.qbit.torrents()
+        categories = await request.app.state.qbit.categories()
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+    category_paths = {
+        name.strip().lower(): _normalize_path(str(item.get("savePath") or ""))
+        for name, item in categories.items()
+        if isinstance(item, dict)
+    }
+    count = 0
+    for torrent in torrents:
+        state = str(torrent.get("state") or "")
+        if state in MISSING_STATES:
+            count += 1
+            continue
+        category = str(torrent.get("category") or "").strip().lower()
+        current = _normalize_path(str(torrent.get("savePath") or ""))
+        if category and current and current == category_paths.get(category, ""):
+            count += 1
+    return {"count": count}
 
 
 @router.post("/torrents/relink", dependencies=[Depends(require_action_guard)])
@@ -316,7 +342,13 @@ def _sanitize_tracker_for_logs(url: str) -> str:
 
 @router.get("/trackers/index")
 async def tracker_index(request: Request) -> dict[str, Any]:
-    return await _tracker_index_payload(request)
+    try:
+        return await _tracker_index_payload(request)
+    except QbitError as exc:
+        cache = _TRACKER_INDEX_CACHE
+        if cache["data"] is not None:
+            return cache["data"]
+        raise qbit_error_response(exc) from exc
 
 
 async def _tracker_index_payload(request: Request, torrents: list[dict[str, Any]] | None = None) -> dict[str, Any]:

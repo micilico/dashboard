@@ -1441,13 +1441,15 @@ async function loadTorrents({ silent = false, force = false } = {}) {
     state.backendStatus = BACKEND_STATES.loading;
     renderHome();
     try {
-      const [dashboardPayload, torrentPayload, storagePayload, activityPayload, trackerStatsPayload] = await Promise.all([
+      const [dashboardPayload, torrentPayload, storagePayload, activityPayload, trackerStatsPayload, relinkStatusPayload] = await Promise.all([
         api(route("/api/dashboard"), { cache: "no-store" }),
         api(route("/api/torrents"), { cache: "no-store" }),
         api(route("/api/storage"), { cache: "no-store" }).catch(() => ({ disk: state.storage.disk || {}, rclone: state.storage.rclone || {} })),
         api(route("/api/activity"), { cache: "no-store" }).catch(() => ({ summary: state.activity.summary || {}, timeline: state.activity.timeline || [] })),
         api(route("/api/torrents/stats/trackers"), { cache: "no-store" }).catch(() => ({ stats: state.trackerStats })),
+        api(route("/api/torrents/relink-status"), { cache: "no-store" }).catch(() => ({ count: 0 })),
       ]);
+      state.relinkStatus = { count: Number(relinkStatusPayload?.count) || 0 };
       state.dashboard = {
         alerts: Array.isArray(dashboardPayload.alerts) ? dashboardPayload.alerts : [],
         criticalCount: Number(dashboardPayload.criticalCount) || 0,
@@ -1922,7 +1924,7 @@ function cancelAddTracker() {
 
 function renderRelinkButton() {
   if (!els.relinkMissingButton) return;
-  const count = state.torrents.filter((torrent) => torrent.state === "missingFiles" || torrent.state === "error").length;
+  const count = Number(state.relinkStatus?.count) || 0;
   els.relinkMissingButton.hidden = count === 0;
   els.relinkMissingButton.textContent = count ? `Réparer les fichiers manquants (${count})` : "Réparer les fichiers manquants";
 }
@@ -1939,10 +1941,11 @@ async function runRelink(hashes = []) {
       return false;
     }
     const parts = [`${result.relinked} repositionné${result.relinked > 1 ? "s" : ""}`];
+    if (result.paused) parts.push(`${result.paused} mis en pause`);
     if (result.rechecked) parts.push(`${result.rechecked} revérifié${result.rechecked > 1 ? "s" : ""}`);
     if (result.failed) parts.push(`${result.failed} échec${result.failed > 1 ? "s" : ""}`);
     if (result.skipped) parts.push(`${result.skipped} ignoré${result.skipped > 1 ? "s" : ""}`);
-    showToast(`Réparation : ${parts.join(", ")}.`);
+    showToast(`Réparation : ${parts.join(", ")}. Vérifiez avant de reprendre.`);
     await loadTorrents({ silent: true, force: true });
     return true;
   } catch (error) {

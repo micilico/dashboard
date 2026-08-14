@@ -315,6 +315,13 @@ class QBittorrentClient:
             data={"hashes": "|".join(torrent_hashes), "location": location},
         )
 
+    async def set_content_layout_many(self, torrent_hashes: list[str], layout: str) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/setContentLayout",
+            data={"hashes": "|".join(torrent_hashes), "layout": layout},
+        )
+
     async def set_download_limit_many(self, torrent_hashes: list[str], limit_bytes: int) -> None:
         await self._request(
             "POST",
