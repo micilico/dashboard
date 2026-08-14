@@ -671,7 +671,7 @@ class RelinkTests(BackendTests):
         body = response.json()
         self.assertEqual(body["result"]["relinked"], 2)
         self.assertEqual(body["result"]["paused"], 2)
-        self.assertEqual(body["result"]["rechecked"], 2)
+        self.assertEqual(body["result"]["rechecked"], 0)
         calls = app.state.qbit.calls
         self.assertIn(("pause", [VALID_HASH, "b" * 40]), calls)
         self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")))
@@ -679,6 +679,17 @@ class RelinkTests(BackendTests):
         self.assertIn(("set_location", ["b" * 40], "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1"), calls)
         self.assertIn(("set_content_layout", [VALID_HASH], "Subfolder"), calls)
         self.assertIn(("set_content_layout", ["b" * 40], "Subfolder"), calls)
+        self.assertNotIn(("recheck", [VALID_HASH, "b" * 40]), calls)
+        self.assertNotIn("recheck", [call[0] for call in calls])
+
+    def test_apply_recheck_only_when_requested(self):
+        self.build_payload()
+        response = self.post_action("/torrent-panel/api/torrents/relink", {"recheck": True})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result"]["relinked"], 2)
+        self.assertEqual(body["result"]["rechecked"], 2)
+        calls = app.state.qbit.calls
         self.assertEqual(calls[-1], ("recheck", [VALID_HASH, "b" * 40]))
 
     def test_apply_renames_before_set_location(self):

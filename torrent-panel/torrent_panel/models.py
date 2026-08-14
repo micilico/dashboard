@@ -87,6 +87,7 @@ class AddTrackerPayload(TorrentHashesAction):
 class RelinkRequest(BaseModel):
     hashes: list[str] = Field(default_factory=list, max_length=500)
     preview: bool = False
+    recheck: bool = False
 
 
 class AutomationRulePayload(BaseModel):

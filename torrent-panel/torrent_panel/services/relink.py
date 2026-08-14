@@ -450,13 +450,17 @@ async def build_relink_plan(
     }
 
 
-async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
-    """Apply a plan: rename + pause + set location/layout, then force recheck.
+async def apply_relink_plan(qbit: Any, plan: dict[str, Any], *, recheck: bool = False) -> dict[str, Any]:
+    """Apply a plan: rename + pause + set location/layout.
 
     Files are renamed to match the torrent (folder = torrent name, files = the
     torrent content names) via the cloud-panel (which has write access to the
     mount), then qBittorrent is pointed at the parent folder with the Subfolder
     layout. Torrents are left paused so the user can verify before resuming.
+
+    No mass recheck is triggered by default: rechecking every torrent at once
+    saturates disk access (FUSE mount). Pass ``recheck=True`` to force a
+    ``recheck_many`` afterwards (opt-in, e.g. a single torrent).
     """
     from .cloud_panel import CloudPanelError, arrange_batch
 
@@ -519,7 +523,7 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
             logger.warning("relink: échec setLocation → %s : %s", group["location"], exc.public_message)
 
     failed_rechecks = 0
-    if all_hashes:
+    if recheck and all_hashes:
         try:
             await qbit.recheck_many(all_hashes)
             logger.info("relink: recheck demandé sur %d torrent(s)", len(all_hashes))
@@ -530,7 +534,7 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "relinked": relinked,
         "paused": len(all_hashes),
-        "rechecked": len(all_hashes),
+        "rechecked": len(all_hashes) if recheck else 0,
         "recheckFailed": failed_rechecks,
         "failed": len(failures),
         "skipped": plan.get("skippedCount", 0),
@@ -544,10 +548,11 @@ async def relink_missing(
     *,
     hashes: list[str] | None = None,
     preview: bool = False,
+    recheck: bool = False,
 ) -> dict[str, Any]:
     """Build the plan and optionally apply it to the affected torrents."""
     plan = await build_relink_plan(qbit, hashes=hashes)
     if preview or not plan["relink"]:
         return {"plan": plan, "result": None}
-    result = await apply_relink_plan(qbit, plan)
+    result = await apply_relink_plan(qbit, plan, recheck=recheck)
     return {"plan": plan, "result": result}
