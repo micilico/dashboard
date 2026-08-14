@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response, Query
 from fastapi.responses import FileResponse
@@ -15,6 +16,7 @@ from ..storage import (
     create_directory,
     rename_item,
     move_item,
+    move_items,
     delete_item,
     clear_scandir_cache,
     get_folder_size,
@@ -177,6 +179,31 @@ async def move(
     try:
         return await run_in_threadpool(move_item, path, name, dest)
     except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Déplacement impossible à cet emplacement.", "Vérifier le chemin et la destination"),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail=error_detail("move_error", "Déplacement impossible.", "Réessayer"),
+        )
+
+
+@router.post("/files/move-batch")
+async def move_batch(
+    request: Request,
+    _=Depends(require_action_guard),
+    items: str = Form(...),
+    dest: str = Form(""),
+):
+    """Move a selection in one rate-limited mutation."""
+    try:
+        parsed = json.loads(items)
+        if not isinstance(parsed, list) or not parsed or any(not isinstance(item, dict) for item in parsed):
+            raise ValueError("Sélection invalide")
+        return await run_in_threadpool(move_items, parsed, dest)
+    except (ValueError, json.JSONDecodeError):
         raise HTTPException(
             status_code=403,
             detail=error_detail("path_error", "Déplacement impossible à cet emplacement.", "Vérifier le chemin et la destination"),

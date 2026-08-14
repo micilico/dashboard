@@ -540,6 +540,37 @@ def move_item(source_path: str, name: str, dest_path: str) -> dict:
     }
 
 
+def move_items(source_items: list[dict[str, str]], dest_path: str) -> dict:
+    """Move several items after validating the complete operation."""
+    dest_dir = resolve_path_within(MOUNT_PATH, dest_path, must_exist=True)
+    if not os.path.isdir(dest_dir):
+        raise ValueError('Dossier destination introuvable')
+    prepared: list[tuple[str, str]] = []
+    seen_destinations: set[str] = set()
+    for item in source_items:
+        source_path = str(item.get('path', ''))
+        name = str(item.get('name', ''))
+        if not name:
+            raise ValueError('Nom d élément invalide')
+        source_dir = resolve_path_within(MOUNT_PATH, source_path, must_exist=True)
+        if not os.path.isdir(source_dir):
+            raise ValueError('Dossier source introuvable')
+        src = resolve_path_within(MOUNT_PATH, posixpath.join(source_path, name), must_exist=True)
+        dest = resolve_path_within(MOUNT_PATH, posixpath.join(dest_path, name), must_exist=False)
+        src_real = os.path.realpath(src)
+        if os.path.realpath(dest_dir) == os.path.realpath(source_dir):
+            raise ValueError('Deja au meme emplacement')
+        if os.path.isdir(src) and (os.path.realpath(dest_dir) == src_real or os.path.realpath(dest_dir).startswith(src_real + os.sep)):
+            raise ValueError('Deplacement impossible dans lui-meme')
+        dest_key = os.path.realpath(dest)
+        if os.path.exists(dest) or dest_key in seen_destinations:
+            raise ValueError('Un element portant ce nom existe deja ici')
+        seen_destinations.add(dest_key)
+        prepared.append((source_path, name))
+    results = [move_item(source_path, name, dest_path) for source_path, name in prepared]
+    return {'success': True, 'moved': len(results), 'items': results}
+
+
 def _trash_unique_target(trashed_rel: str) -> str:
     """Resolve a unique absolute path inside the trash mirroring ``trashed_rel``."""
     trash_root = _trash_root()

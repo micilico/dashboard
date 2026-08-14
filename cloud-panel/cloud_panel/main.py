@@ -74,7 +74,12 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    if "/api/" in request.url.path:
+    if (
+        "/api/" in request.url.path
+        or request.url.path == "/"
+        or request.url.path.endswith("/")
+        or request.url.path.endswith("/config.js")
+    ):
         response.headers["Cache-Control"] = "no-store"
     now = time.monotonic()
     if now - request.app.state.last_csrf_cleanup > 300:

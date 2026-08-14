@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cloud · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260810-p1p2p3">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260812-dnd-fix-1">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -218,6 +218,7 @@
           <div id="bulkBar" class="bulk-bar" hidden>
             <span id="bulkCount">0 sélectionné</span>
             <button id="bulkPaste" class="button secondary" type="button" hidden>Coller ici</button>
+            <button id="bulkMove" class="button secondary" type="button">Déplacer vers…</button>
             <button id="bulkCopy" class="button secondary" type="button">Copier la sélection</button>
             <button id="bulkShare" class="button secondary" type="button">Générer les liens</button>
             <button id="bulkShareFolder" class="button secondary" type="button" hidden>Dossier navigable</button>
@@ -322,6 +323,17 @@
           <button id="cancelShareBtn" class="button secondary" type="button">Fermer</button>
           <button id="confirmShareBtn" class="button primary" type="button">Générer le lien</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="moveDialog" class="dialog">
+      <form method="dialog" id="moveForm"><h2>Déplacer la sélection</h2>
+        <p id="moveDescription" class="dialog-name"></p>
+        <label>Destination
+          <input id="movePathInput" type="text" autocomplete="off" spellcheck="false" placeholder="Laisser vide pour la racine">
+        </label>
+        <p id="moveMessage" class="field-message" aria-live="polite"></p>
+        <div class="dialog-actions"><button id="cancelMoveBtn" class="button secondary" type="button">Annuler</button><button id="confirmMoveBtn" class="button primary" type="submit">Déplacer</button></div>
       </form>
     </dialog>
 
@@ -432,7 +444,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <div id="fileActionMenu" class="action-menu" role="menu" hidden></div>
 
-    <script src="./config.js?v=20260810-p1p2p3"></script>
-    <script src="./static/dist/app.min.js?v=20260810-p1p2p3" defer></script>
+    <script src="./config.js?v=20260812-dnd-fix-1"></script>
+    <script src="./static/dist/app.min.js?v=20260812-dnd-fix-1" defer></script>
   </body>
 </html>
