@@ -13,6 +13,7 @@ organized folders are flat) and force a recheck.
 
 from __future__ import annotations
 
+import logging
 import os
 import posixpath
 import time
@@ -21,6 +22,8 @@ from typing import Any
 from ..config import MEDIA_MOUNT_PATH, QBIT_SAVE_PATH
 from ..qbittorrent import QbitError
 from .media_automation import now_iso
+
+logger = logging.getLogger("torrent_panel.relink")
 
 MISSING_STATES = {"missingFiles", "error"}
 PAUSED_DL_STATES = {"pausedDL", "stoppedDL"}
@@ -186,10 +189,18 @@ async def build_relink_plan(
     torrents = await qbit.torrents()
     categories = await qbit.categories()
     selected_hashes = {str(item).lower() for item in (hashes or [])} if hashes else None
+    qbit_root = _normalize_path(QBIT_SAVE_PATH)
 
     category_save_paths = [str(item.get("savePath") or "") for item in categories.values() if isinstance(item, dict)]
     category_names = [str(name).strip() for name in categories.keys()]
     index = _scan_index(mount_root, category_save_paths, category_names)
+    logger.info(
+        "relink: mount=%s qbit_root=%s scopes=%d categories=%s",
+        mount_root,
+        qbit_root or "(non configuré)",
+        len(index["scope_dirs"]),
+        ", ".join(sorted(category_names)),
+    )
 
     by_location: dict[str, dict[str, Any]] = {}
     recheck_only: list[dict[str, Any]] = []
@@ -198,6 +209,7 @@ async def build_relink_plan(
 
     for torrent in torrents:
         torrent_hash = str(torrent.get("hash") or "").lower()
+        torrent_name = str(torrent.get("name") or "Torrent")
         if not torrent_hash or not torrent.get("name"):
             continue
         if selected_hashes is not None and torrent_hash not in selected_hashes:
@@ -207,9 +219,9 @@ async def build_relink_plan(
         category_info = _category_entry(categories, category) if category else None
         current = _normalize_path(str(torrent.get("savePath") or torrent.get("save_path") or ""))
         state = str(torrent.get("state") or "")
-        qbit_root = _normalize_path(QBIT_SAVE_PATH)
 
         if not category:
+            logger.info("relink: %s (%s) ignoré — sans catégorie", torrent_name, torrent_hash[:8])
             skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
             continue
 
@@ -221,16 +233,25 @@ async def build_relink_plan(
             at_category_root = bool(category_qbit_path and current == _normalize_path(category_qbit_path))
             at_qbit_root = bool(qbit_root and current == qbit_root)
             if state not in MISSING_STATES and state not in PAUSED_DL_STATES and not at_category_root and not at_qbit_root:
+                logger.debug(
+                    "relink: %s (%s) ignoré — état %s non concerné, savePath=%s",
+                    torrent_name,
+                    torrent_hash[:8],
+                    state,
+                    current,
+                )
                 continue
 
         specs = await _torrent_file_specs(qbit, torrent_hash)
         if not specs:
+            logger.info("relink: %s (%s) ignoré — aucun fichier connu", torrent_name, torrent_hash[:8])
             skipped.append(_skipped_entry(torrent, "Aucun fichier connu"))
             continue
 
         folder_hint = _file_basename(torrent.get("contentPath") or torrent.get("name") or "")
         located = _locate_folder(index, specs, folder_hint)
         if not located:
+            logger.info("relink: %s (%s) ignoré — contenu non localisé (cat=%s savePath=%s)", torrent_name, torrent_hash[:8], category, current)
             skipped.append(_skipped_entry(torrent, "Contenu organisé non localisé"))
             continue
 
@@ -239,30 +260,35 @@ async def build_relink_plan(
             None,
         )
         if scope_dir is None:
+            logger.info("relink: %s (%s) ignoré — scope catégorie non résolu pour %s", torrent_name, torrent_hash[:8], located)
             skipped.append(_skipped_entry(torrent, "Dossier catégorie non résolu"))
             continue
 
         if not category_qbit_path:
+            logger.info("relink: %s (%s) ignoré — pas de chemin de catégorie", torrent_name, torrent_hash[:8])
             skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
             continue
 
         target = _anchor_target(category_qbit_path, scope_dir, located)
         if not target:
+            logger.info("relink: %s (%s) ignoré — cible non résolue (locate=%s)", torrent_name, torrent_hash[:8], located)
             skipped.append(_skipped_entry(torrent, "Chemin cible non résolu"))
             continue
 
         included += 1
         entry = {
             "hash": torrent_hash,
-            "name": str(torrent.get("name") or "Torrent"),
+            "name": torrent_name,
             "category": category,
             "currentPath": current,
             "targetPath": target,
         }
         if current == target:
+            logger.debug("relink: %s (%s) déjà au bon endroit (%s)", torrent_name, torrent_hash[:8], target)
             recheck_only.append(entry)
             continue
 
+        logger.info("relink: %s (%s) %s → %s", torrent_name, torrent_hash[:8], current, target)
         group = by_location.setdefault(
             target,
             {"location": target, "hashes": [], "names": [], "entries": []},
@@ -271,12 +297,20 @@ async def build_relink_plan(
         group["names"].append(entry["name"])
         group["entries"].append(entry)
 
+    relink_count = sum(len(group["hashes"]) for group in by_location.values())
+    logger.info(
+        "relink: plan prêt — %d à repositionner, %d déjà alignés (recheck), %d ignorés, %d fichiers indexés",
+        relink_count,
+        len(recheck_only),
+        len(skipped),
+        len(index["files"]),
+    )
     return {
         "relink": sorted(by_location.values(), key=lambda group: group["location"]),
         "recheckOnly": recheck_only,
         "skipped": skipped,
         "total": included,
-        "relinkCount": sum(len(group["hashes"]) for group in by_location.values()),
+        "relinkCount": relink_count,
         "recheckOnlyCount": len(recheck_only),
         "skippedCount": len(skipped),
         "layout": _LAYOUT_NO_SUBFOLDER,
@@ -300,6 +334,7 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
     if all_hashes:
         try:
             await qbit.pause_many(all_hashes)
+            logger.info("relink: %d torrent(s) mis en pause", len(all_hashes))
         except QbitError:
             pass
 
@@ -310,6 +345,7 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
             await qbit.set_content_layout_many(hashes, _LAYOUT_NO_SUBFOLDER)
             relinked += len(hashes)
             details.append({"location": group["location"], "count": len(hashes), "ok": True})
+            logger.info("relink: %d torrent(s) → %s (layout NoSubfolder)", len(hashes), group["location"])
         except QbitError as exc:
             details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": exc.public_message})
             failures.extend(
@@ -320,13 +356,16 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
                 }
                 for torrent_hash, name in zip(hashes, group["names"])
             )
+            logger.warning("relink: échec setLocation → %s : %s", group["location"], exc.public_message)
 
     failed_rechecks = 0
     if all_hashes:
         try:
             await qbit.recheck_many(all_hashes)
+            logger.info("relink: recheck demandé sur %d torrent(s)", len(all_hashes))
         except QbitError:
             failed_rechecks = len(all_hashes)
+            logger.warning("relink: recheck impossible sur %d torrent(s)", len(all_hashes))
 
     return {
         "relinked": relinked,
