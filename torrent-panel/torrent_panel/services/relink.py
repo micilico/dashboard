@@ -33,7 +33,48 @@ PAUSED_DL_STATES = {"pausedDL", "stoppedDL"}
 _SCAN_CACHE_TTL = 60.0
 _SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 
-_LAYOUT_NO_SUBFOLDER = "NoSubfolder"
+_LAYOUT_SUBFOLDER = "Subfolder"
+
+
+def _build_renames(index: dict[str, Any], located: str, torrent_name: str, specs: list[tuple[str, int]]) -> list[dict[str, str]]:
+    """Compute rename operations that align the located folder with the torrent.
+
+    The cloud-panel "rangement" renames the containing folder and the files
+    (e.g. ``Backrooms (2026)`` with ``…CA….mkv`` while the torrent is named
+    ``…VFQ…``). To make qBittorrent find everything we rename:
+    - the folder to the exact torrent name,
+    - each file to the exact name qBittorrent expects (matched by size).
+    """
+    renames: list[dict[str, str]] = []
+    located = located.rstrip("/")
+    parent_rel = posixpath.dirname(located)
+    located_basename = posixpath.basename(located)
+
+    disk_files = index.get("dir_files", {}).get(located, {})
+    used: set[str] = set()
+    for spec_name, spec_size in specs:
+        torrent_file = posixpath.basename(spec_name)
+        matched: str | None = None
+        for disk_name, disk_size in disk_files.items():
+            if disk_name in used:
+                continue
+            if spec_size > 0 and disk_size == spec_size:
+                matched = disk_name
+                break
+        if matched is None:
+            for disk_name in disk_files:
+                if disk_name in used:
+                    continue
+                if _name_tokens(disk_name) == _name_tokens(torrent_file):
+                    matched = disk_name
+                    break
+        if matched is not None and matched != torrent_file:
+            renames.append({"path": located, "old_name": matched, "new_name": torrent_file})
+            used.add(matched)
+
+    if located_basename != torrent_name:
+        renames.append({"path": parent_rel, "old_name": located_basename, "new_name": torrent_name})
+    return renames
 
 
 def _normalize_path(value: str) -> str:
@@ -88,15 +129,18 @@ def _scan_index(mount_root: str, qbit_root: str) -> dict[str, Any]:
     files: dict[str, dict[str, int]] = {}
     sizes: dict[int, list[str]] = {}
     dir_basenames: dict[str, list[str]] = {}
+    dir_files: dict[str, dict[str, int]] = {}
     for dirpath, _dirnames, filenames in os.walk(scan_root):
         dir_rel = os.path.relpath(dirpath, mount_root).replace(os.sep, "/")
         dir_basenames.setdefault(posixpath.basename(dir_rel).casefold(), []).append(dir_rel)
+        dir_files.setdefault(dir_rel, {})
         for filename in filenames:
             try:
                 size = os.path.getsize(os.path.join(dirpath, filename))
             except OSError:
                 size = -1
             files.setdefault(filename.casefold(), {})[dir_rel] = size
+            dir_files[dir_rel][filename] = size
             if size > 0:
                 sizes.setdefault(size, []).append(dir_rel)
 
@@ -105,6 +149,7 @@ def _scan_index(mount_root: str, qbit_root: str) -> dict[str, Any]:
         "files": files,
         "sizes": sizes,
         "dir_basenames": dir_basenames,
+        "dir_files": dir_files,
     }
     cache["data"] = data
     cache["ts"] = now
@@ -315,7 +360,9 @@ async def build_relink_plan(
             skipped.append(_skipped_entry(torrent, "Sans racine qBittorrent configurée"))
             continue
 
-        target = _anchor_target(qbit_root, index["anchor_prefix"], located)
+        renames = _build_renames(index, located, torrent_name, specs)
+        parent_rel = posixpath.dirname(located.rstrip("/")) or located.rstrip("/")
+        target = _anchor_target(qbit_root, index["anchor_prefix"], parent_rel)
         if not target:
             logger.info("relink: %s (%s) ignoré — cible non résolue (locate=%s)", torrent_name, torrent_hash[:8], located)
             skipped.append(_skipped_entry(torrent, "Chemin cible non résolu"))
@@ -328,13 +375,22 @@ async def build_relink_plan(
             "category": str(torrent.get("category") or ""),
             "currentPath": current,
             "targetPath": target,
+            "located": located,
+            "renames": renames,
         }
-        if current == target:
+        if not renames and current == target:
             logger.debug("relink: %s (%s) déjà au bon endroit (%s)", torrent_name, torrent_hash[:8], target)
             recheck_only.append(entry)
             continue
 
-        logger.info("relink: %s (%s) %s → %s", torrent_name, torrent_hash[:8], current, target)
+        logger.info(
+            "relink: %s (%s) %s → %s (%d renommage(s))",
+            torrent_name,
+            torrent_hash[:8],
+            current,
+            target,
+            len(renames),
+        )
         group = by_location.setdefault(
             target,
             {"location": target, "hashes": [], "names": [], "entries": []},
@@ -359,16 +415,21 @@ async def build_relink_plan(
         "relinkCount": relink_count,
         "recheckOnlyCount": len(recheck_only),
         "skippedCount": len(skipped),
-        "layout": _LAYOUT_NO_SUBFOLDER,
+        "layout": _LAYOUT_SUBFOLDER,
         "generatedAt": now_iso(),
     }
 
 
 async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
-    """Apply a plan: pause, set location + layout, then force recheck. Never raises.
+    """Apply a plan: rename + pause + set location/layout, then force recheck.
 
-    Torrents are left paused so the user can verify before resuming seeding.
+    Files are renamed to match the torrent (folder = torrent name, files = the
+    torrent content names) via the cloud-panel (which has write access to the
+    mount), then qBittorrent is pointed at the parent folder with the Subfolder
+    layout. Torrents are left paused so the user can verify before resuming.
     """
+    from .cloud_panel import CloudPanelError, rename_batch
+
     all_hashes = [entry["hash"] for group in plan.get("relink", []) for entry in group["entries"]]
     all_hashes.extend(entry["hash"] for entry in plan.get("recheckOnly", []))
     all_hashes = list(dict.fromkeys(all_hashes))
@@ -386,12 +447,35 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
 
     for group in plan.get("relink", []):
         hashes = list(group["hashes"])
+        entries = list(group["entries"])
+        rename_ok = True
+
+        for entry in entries:
+            entry_renames = entry.get("renames") or []
+            if not entry_renames:
+                continue
+            try:
+                result = await rename_batch(entry_renames)
+                failed = int(result.get("failed", 0))
+                if failed:
+                    raise CloudPanelError(f"{failed} renommage(s) refusé(s)")
+                logger.info("relink: %d renommage(s) pour %s", len(entry_renames), entry["name"])
+            except CloudPanelError as exc:
+                rename_ok = False
+                failures.append({"hash": entry["hash"], "name": entry["name"], "message": exc.message})
+                logger.warning("relink: échec renommage %s : %s", entry["name"], exc.message)
+                continue
+
+        if not rename_ok:
+            details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": "Renommage refusé"})
+            continue
+
         try:
             await qbit.set_location_many(hashes, group["location"])
-            await qbit.set_content_layout_many(hashes, _LAYOUT_NO_SUBFOLDER)
+            await qbit.set_content_layout_many(hashes, _LAYOUT_SUBFOLDER)
             relinked += len(hashes)
             details.append({"location": group["location"], "count": len(hashes), "ok": True})
-            logger.info("relink: %d torrent(s) → %s (layout NoSubfolder)", len(hashes), group["location"])
+            logger.info("relink: %d torrent(s) → %s (layout Subfolder)", len(hashes), group["location"])
         except QbitError as exc:
             details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": exc.public_message})
             failures.extend(

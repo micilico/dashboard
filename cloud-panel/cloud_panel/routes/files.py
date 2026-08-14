@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form, Response, Query
+import secrets
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile, File, Form, Response, Query
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from common import error_detail
 
-from ..config import SEARCH_MAX_RESULTS
+from ..config import INTERNAL_TOKEN, SEARCH_MAX_RESULTS
 from ..storage import (
     list_directory,
     upload_file_streaming,
@@ -165,6 +166,46 @@ async def rename(
             status_code=403,
             detail=error_detail("path_error", "Renommage impossible à cet emplacement.", "Vérifier le chemin"),
         )
+
+
+@router.post("/files/internal-rename-batch")
+async def internal_rename_batch(
+    request: Request,
+    items: str = Form(...),
+    x_internal_token: str = Header(default=""),
+):
+    """Server-to-server batch rename used by the torrent-panel relink.
+
+    Guarded by a shared token (``CLOUD_PANEL_INTERNAL_TOKEN``), not by CSRF,
+    because this endpoint is called by another panel, not by a browser.
+    """
+    if not INTERNAL_TOKEN or not secrets.compare_digest(x_internal_token, INTERNAL_TOKEN):
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("internal_token_invalid", "Jeton interne invalide.", "Réessayer"),
+        )
+    try:
+        parsed = json.loads(items)
+        if not isinstance(parsed, list):
+            raise ValueError("Sélection invalide")
+    except (ValueError, json.JSONDecodeError):
+        raise HTTPException(
+            status_code=403,
+            detail=error_detail("path_error", "Renommage impossible à cet emplacement.", "Vérifier le chemin"),
+        )
+
+    results: list[dict[str, object]] = []
+    for item in parsed if isinstance(parsed, list) else []:
+        path = str(item.get("path") or "")
+        old_name = str(item.get("old_name") or "")
+        new_name = str(item.get("new_name") or "")
+        try:
+            result = await run_in_threadpool(rename_item, path, old_name, new_name)
+            results.append({"success": bool(result.get("success", True)), "path": path, "old_name": old_name, "new_name": new_name})
+        except ValueError:
+            results.append({"success": False, "path": path, "old_name": old_name, "new_name": new_name, "error": "Renommage refusé"})
+    failed = sum(1 for result in results if not result.get("success"))
+    return {"results": results, "failed": failed}
 
 
 @router.post("/files/move")

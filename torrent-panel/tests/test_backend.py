@@ -654,17 +654,17 @@ class RelinkTests(BackendTests):
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 2)
         self.assertEqual(plan["skippedCount"], 0)
-        self.assertEqual(plan["layout"], "NoSubfolder")
+        self.assertEqual(plan["layout"], "Subfolder")
         locations = sorted(group["location"] for group in plan["relink"])
         self.assertEqual(
             locations,
             [
-                "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
-                "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1/Show.S01",
+                "/home/micilico/downloads/qbittorrent/Films/Dune (2021)",
+                "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1",
             ],
         )
 
-    def test_apply_pauses_then_relinks_with_no_subfolder(self):
+    def test_apply_pauses_then_relinks_with_subfolder(self):
         self.build_payload()
         response = self.post_action("/torrent-panel/api/torrents/relink", {})
         self.assertEqual(response.status_code, 200)
@@ -674,12 +674,84 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["result"]["rechecked"], 2)
         calls = app.state.qbit.calls
         self.assertIn(("pause", [VALID_HASH, "b" * 40]), calls)
-        self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p")))
-        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), calls)
-        self.assertIn(("set_location", ["b" * 40], "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1/Show.S01"), calls)
-        self.assertIn(("set_content_layout", [VALID_HASH], "NoSubfolder"), calls)
-        self.assertIn(("set_content_layout", ["b" * 40], "NoSubfolder"), calls)
+        self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")))
+        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"), calls)
+        self.assertIn(("set_location", ["b" * 40], "/home/micilico/downloads/qbittorrent/Series/Show/Saison 1"), calls)
+        self.assertIn(("set_content_layout", [VALID_HASH], "Subfolder"), calls)
+        self.assertIn(("set_content_layout", ["b" * 40], "Subfolder"), calls)
         self.assertEqual(calls[-1], ("recheck", [VALID_HASH, "b" * 40]))
+
+    def test_apply_renames_before_set_location(self):
+        from torrent_panel.services import cloud_panel as cloud_panel_service
+
+        self.build_payload()
+        renamed: list[dict[str, str]] = []
+        calls = app.state.qbit.calls
+
+        async def fake_rename_batch(items):
+            renamed.extend(items)
+            return {"results": [{"success": True} for _ in items], "failed": 0}
+
+        import unittest.mock as _mock
+
+        with _mock.patch.object(cloud_panel_service, "rename_batch", side_effect=fake_rename_batch):
+            response = self.post_action("/torrent-panel/api/torrents/relink", {})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result"]["relinked"], 2)
+        self.assertEqual(renamed, [])
+        self.assertIn(("set_content_layout", [VALID_HASH], "Subfolder"), calls)
+
+    def test_apply_renames_folder_and_files_for_renamed_torrent(self):
+        import shutil
+
+        from torrent_panel.services import cloud_panel as cloud_panel_service
+
+        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        qbit_setup_dir = self.mount / "Qbittorrent"
+        if qbit_setup_dir.exists():
+            shutil.rmtree(qbit_setup_dir)
+        film_dir = self.mount / "qbittorrent" / "Films" / "Backrooms (2026)"
+        film_dir.mkdir(parents=True, exist_ok=True)
+        (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv").write_bytes(b"0123456789")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
+                "state": "pausedDL",
+                "category": "prowlarr",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
+            },
+        ]
+        app.state.qbit.files_payload = {
+            VALID_HASH: [{"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv", "size": 10}],
+        }
+        relink_service._SCAN_CACHE["data"] = None
+        renamed: list[dict[str, str]] = []
+
+        async def fake_rename_batch(items):
+            renamed.extend(items)
+            return {"results": [{"success": True} for _ in items], "failed": 0}
+
+        import unittest.mock as _mock
+
+        with _mock.patch.object(cloud_panel_service, "rename_batch", side_effect=fake_rename_batch):
+            response = self.post_action("/torrent-panel/api/torrents/relink", {})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result"]["relinked"], 1)
+        self.assertIn(
+            {"path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv"},
+            renamed,
+        )
+        self.assertIn(
+            {"path": "qbittorrent/Films", "old_name": "Backrooms (2026)", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY"},
+            renamed,
+        )
+        relink_service.QBIT_SAVE_PATH = ""
+        panel_config.QBIT_SAVE_PATH = ""
 
     def test_preview_mode_never_mutates(self):
         self.build_payload()
@@ -702,7 +774,7 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["plan"]["relinkCount"], 1)
         self.assertEqual(body["result"]["relinked"], 1)
         self.assertIn(("pause", [VALID_HASH]), app.state.qbit.calls)
-        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), app.state.qbit.calls)
+        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"), app.state.qbit.calls)
 
     def test_locates_files_directly_when_no_preserved_folder(self):
         nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
@@ -729,7 +801,7 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
-        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films")
 
     def test_no_relink_when_nothing_affected(self):
         app.state.qbit.torrents_payload = [
@@ -784,7 +856,7 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
-        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films")
 
     def test_relink_locates_renamed_files_in_organized_folder(self):
         """Cas réel : fichiers renommés par le rangement + catégorie prowlarr mais contenu rangé dans Films."""
@@ -818,7 +890,16 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
-        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Backrooms (2026)")
+        group = plan["relink"][0]
+        self.assertEqual(group["location"], "/home/micilico/downloads/qbittorrent/Films")
+        self.assertEqual(
+            group["entries"][0]["renames"],
+            [
+                {"path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv"},
+                {"path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.nfo", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.nfo"},
+                {"path": "qbittorrent/Films", "old_name": "Backrooms (2026)", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY"},
+            ],
+        )
 
     def test_relink_plan_includes_paused_downloads(self):
         nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
@@ -845,7 +926,7 @@ class RelinkTests(BackendTests):
         self.assertEqual(response.status_code, 200)
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
-        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")
+        self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films")
 
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):

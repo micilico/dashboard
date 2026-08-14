@@ -338,7 +338,9 @@ curl -I http://127.0.0.1:3130/healthz
 | `QBITTORRENT_URL` | URL qBittorrent (tunnel) |
 | `QBITTORRENT_USERNAME/PASSWORD` | Authentification backend uniquement |
 | `TORRENT_PANEL_MEDIA_AUTOMATION_ENABLED` | Automatisation médias |
-| `TORRENT_PANEL_QBIT_SAVE_PATH` | Racine de téléchargement qBittorrent (ex `/home/micilico/downloads/qbittorrent`) — utilisée par le relink pour ancrer la nouvelle localisation quand la catégorie n'a pas de `savePath` configuré |
+| `TORRENT_PANEL_QBIT_SAVE_PATH` | Racine de téléchargement qBittorrent (ex `/home/micilico/downloads/qbittorrent`) — ancrage du relink |
+| `TORRENT_PANEL_CLOUD_PANEL_API_URL` | URL interne du cloud-panel (défaut `http://127.0.0.1:3130`) |
+| `TORRENT_PANEL_CLOUD_PANEL_INTERNAL_TOKEN` | Token partagé pour le renommage serveur→serveur (doit correspondre à `CLOUD_PANEL_INTERNAL_TOKEN`) |
 | `TORRENT_PANEL_RCLONE_REFRESH_MODE` | `rc` = vfs/refresh via l'API rc locale (non destructif) ; `systemd` = restart explicite (opt-in) |
 | `TORRENT_PANEL_JELLYFIN_LIBRARY_MAP` | Mapping catégories → IDs Jellyfin |
 | `TORRENT_PANEL_JELLYFIN_API_URL/API_KEY` | Backend uniquement |
@@ -366,10 +368,13 @@ qBittorrent** :
 - Localise le dossier réel de chaque torrent : basename exact → nom du dossier
   préservé (`contentPath`) → similarité floue de nom de dossier → matching par
   taille seule (les fichiers renommés gardent leur taille).
-- Ancre le chemin cible via `TORRENT_PANEL_QBIT_SAVE_PATH` + suffixe du dossier
-  trouvé (le dossier qBittorrent est détecté sur le mount par son basename).
-- Applique : **pause → setLocation → setContentLayout("NoSubfolder") → recheck**.
-  Les torrents **restent en pause** pour vérification manuelle avant reprise du seed.
+- **Renomme** (via l'API interne cloud-panel, qui a l'accès écriture) :
+  le dossier vers le nom exact du torrent et chaque fichier vers le nom exact
+  attendu par qBittorrent (matching par taille).
+- Applique : **pause → renommages → setLocation(parent) →
+  setContentLayout("Subfolder") → recheck**. Le contenu se retrouve donc dans
+  `<parent>/<nom exact du torrent>/` avec les bons noms de fichiers.
+  Les torrents **restent en pause** pour vérification manuelle avant reprise.
 
 Candidats au relink (`build_relink_plan`, sans sélection explicite) :
 `missingFiles`/`error`, états pause `pausedDL`/`stoppedDL` (fichiers déplacés
@@ -383,6 +388,7 @@ pour alimenter le bouton « Réparer les fichiers manquants (N) ».
 | Variable | Rôle |
 |---|---|
 | `CLOUD_PANEL_MOUNT_PATH` | Chemin du montage rclone (défaut `/mnt/ultra-media`) |
+| `CLOUD_PANEL_INTERNAL_TOKEN` | Token interne serveur→serveur (renommage relink depuis le torrent-panel) |
 | `CLOUD_PANEL_RATE_LIMIT_CALLS` | Limite d'appels (défaut 40) |
 | `CLOUD_PANEL_RATE_LIMIT_SECONDS` | Fenêtre de temps (défaut 60) |
 | `CLOUD_PANEL_CSRF_TOKEN_TTL_SECONDS` | Durée de vie du token CSRF (défaut 43200) |

@@ -17,6 +17,7 @@ PUBLIC_PREFIX = os.getenv("CLOUD_PANEL_PUBLIC_PREFIX", "/cloud-panel").rstrip("/
 MOUNT_PATH = os.getenv("CLOUD_PANEL_MOUNT_PATH", "/mnt/ultra-media")
 CSRF_COOKIE = "cloud_panel_csrf"
 CSRF_HEADER = "X-Cloud-Panel-CSRF"
+INTERNAL_TOKEN = os.getenv("CLOUD_PANEL_INTERNAL_TOKEN", "").strip()
 MAX_RATE_KEYS = int(os.getenv("CLOUD_PANEL_RATE_LIMIT_KEYS", "2048"))
 RATE_LIMIT_CALLS = int(os.getenv("CLOUD_PANEL_RATE_LIMIT_CALLS", "40"))
 RATE_LIMIT_SECONDS = int(os.getenv("CLOUD_PANEL_RATE_LIMIT_SECONDS", "60"))
