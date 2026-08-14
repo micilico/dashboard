@@ -482,16 +482,52 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any], *, recheck: bool = 
     relinked = 0
     details: list[dict[str, Any]] = []
 
+    # qBittorrent answers 404 on hash-bearing endpoints (setLocation,
+    # setContentLayout, pause) when any hash is unknown, failing the whole
+    # batch. Re-sync the known torrent list so a single stale hash (torrent
+    # removed between the plan build and the apply, e.g. by auto_relink) does
+    # not block the valid torrents of the same group.
+    current_hashes: set[str] | None = None
+    try:
+        current_hashes = {str(t.get("hash") or "").lower() for t in await qbit.torrents()}
+    except QbitError:
+        current_hashes = None
+
     if all_hashes:
-        try:
-            await qbit.pause_many(all_hashes)
-            logger.info("relink: %d torrent(s) mis en pause", len(all_hashes))
-        except QbitError:
-            pass
+        pause_hashes = [h for h in all_hashes if current_hashes is None or h in current_hashes]
+        if pause_hashes:
+            try:
+                await qbit.pause_many(pause_hashes)
+                logger.info("relink: %d torrent(s) mis en pause", len(pause_hashes))
+            except QbitError:
+                pass
 
     for group in plan.get("relink", []):
         hashes = list(group["hashes"])
-        entries = list(group["entries"])
+        names_by_hash = dict(zip(hashes, group["names"]))
+        if current_hashes is not None:
+            known = [h for h in hashes if h in current_hashes]
+            for stale_hash in (h for h in hashes if h not in current_hashes):
+                failures.append(
+                    {
+                        "hash": stale_hash,
+                        "name": names_by_hash[stale_hash],
+                        "message": "Torrent inconnu côté qBittorrent.",
+                    }
+                )
+                logger.warning(
+                    "relink: %s (%s) ignoré — torrent absent côté qBittorrent",
+                    names_by_hash[stale_hash],
+                    stale_hash[:8],
+                )
+        else:
+            known = list(hashes)
+        entries = [entry for entry in group["entries"] if entry["hash"] in known]
+
+        if not entries:
+            details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": "Aucun torrent restant"})
+            continue
+
         rename_ok = True
 
         for entry in entries:
@@ -524,33 +560,70 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any], *, recheck: bool = 
             details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": "Renommage refusé"})
             continue
 
+        group_layout = group.get("layout", _LAYOUT_SUBFOLDER)
+
+        ok_hashes: list[str] = []
+        failure_error: str | None = None
         try:
-            await qbit.set_location_many(hashes, group["location"])
-            group_layout = group.get("layout", _LAYOUT_SUBFOLDER)
-            await qbit.set_content_layout_many(hashes, group_layout)
-            relinked += len(hashes)
-            details.append({"location": group["location"], "layout": group_layout, "count": len(hashes), "ok": True})
-            logger.info("relink: %d torrent(s) → %s (layout %s)", len(hashes), group["location"], group_layout)
+            await qbit.set_location_many(known, group["location"])
+            ok_hashes = list(known)
         except QbitError as exc:
-            details.append({"location": group["location"], "count": len(hashes), "ok": False, "error": exc.public_message})
-            failures.extend(
+            if exc.code == "qbit_action_unavailable" and len(known) > 1:
+                # One or more hashes vanished between the reconcile and the
+                # call: retry one by one so the valid torrents still relocate.
+                for torrent_hash in known:
+                    try:
+                        await qbit.set_location_many([torrent_hash], group["location"])
+                        ok_hashes.append(torrent_hash)
+                    except QbitError as per_exc:
+                        per_msg = (
+                            "Torrent inconnu côté qBittorrent."
+                            if per_exc.code == "qbit_action_unavailable"
+                            else per_exc.public_message
+                        )
+                        failures.append({"hash": torrent_hash, "name": names_by_hash[torrent_hash], "message": per_msg})
+                        logger.warning(
+                            "relink: échec setLocation %s → %s : %s",
+                            torrent_hash[:8],
+                            group["location"],
+                            per_msg,
+                        )
+            else:
+                failure_error = exc.public_message
+                for torrent_hash in known:
+                    failures.append({"hash": torrent_hash, "name": names_by_hash[torrent_hash], "message": exc.public_message})
+                logger.warning("relink: échec setLocation → %s : %s", group["location"], exc.public_message)
+
+        if not ok_hashes:
+            details.append(
                 {
-                    "hash": torrent_hash,
-                    "name": name,
-                    "message": exc.public_message,
+                    "location": group["location"],
+                    "count": len(known),
+                    "ok": False,
+                    "error": failure_error or "Aucun torrent repositionné",
                 }
-                for torrent_hash, name in zip(hashes, group["names"])
             )
-            logger.warning("relink: échec setLocation → %s : %s", group["location"], exc.public_message)
+            continue
+
+        try:
+            await qbit.set_content_layout_many(ok_hashes, group_layout)
+        except QbitError as exc:
+            logger.warning("relink: échec setContentLayout → %s : %s", group["location"], exc.public_message)
+
+        relinked += len(ok_hashes)
+        details.append({"location": group["location"], "layout": group_layout, "count": len(ok_hashes), "ok": True})
+        logger.info("relink: %d torrent(s) → %s (layout %s)", len(ok_hashes), group["location"], group_layout)
 
     failed_rechecks = 0
     if recheck and all_hashes:
-        try:
-            await qbit.recheck_many(all_hashes)
-            logger.info("relink: recheck demandé sur %d torrent(s)", len(all_hashes))
-        except QbitError:
-            failed_rechecks = len(all_hashes)
-            logger.warning("relink: recheck impossible sur %d torrent(s)", len(all_hashes))
+        recheck_hashes = [h for h in all_hashes if current_hashes is None or h in current_hashes]
+        if recheck_hashes:
+            try:
+                await qbit.recheck_many(recheck_hashes)
+                logger.info("relink: recheck demandé sur %d torrent(s)", len(recheck_hashes))
+            except QbitError:
+                failed_rechecks = len(recheck_hashes)
+                logger.warning("relink: recheck impossible sur %d torrent(s)", len(recheck_hashes))
 
     return {
         "relinked": relinked,

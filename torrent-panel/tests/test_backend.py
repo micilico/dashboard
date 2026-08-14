@@ -59,6 +59,7 @@ class FakeQbit:
         self.trackers_payload = []
         self.categories_payload = {}
         self.files_payload = {}
+        self.fail_location_hashes: set[str] = set()
 
     async def torrents(self):
         return list(self.torrents_payload)
@@ -94,6 +95,13 @@ class FakeQbit:
 
     async def set_location_many(self, hashes, location):
         self.calls.append(("set_location", list(hashes), location))
+        if self.fail_location_hashes and self.fail_location_hashes.intersection(hashes):
+            raise QbitError(
+                404,
+                "Torrent inconnu ou action qBittorrent indisponible.",
+                code="qbit_action_unavailable",
+                recovery="Réessayer",
+            )
 
     async def set_content_layout_many(self, hashes, layout):
         self.calls.append(("set_content_layout", list(hashes), layout))
@@ -786,6 +794,63 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["result"]["relinked"], 1)
         self.assertIn(("pause", [VALID_HASH]), app.state.qbit.calls)
         self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"), app.state.qbit.calls)
+
+    def test_apply_isolates_stale_hash_when_setlocation_returns_404(self):
+        app.state.qbit.torrents_payload = [
+            {"hash": VALID_HASH, "name": "Dune.2021.1080p"},
+            {"hash": "b" * 40, "name": "Show.S01"},
+        ]
+        app.state.qbit.fail_location_hashes = {"b" * 40}
+        plan = {
+            "relink": [
+                {
+                    "location": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)",
+                    "layout": "Subfolder",
+                    "hashes": [VALID_HASH, "b" * 40],
+                    "names": ["Dune.2021.1080p", "Show.S01"],
+                    "entries": [
+                        {"hash": VALID_HASH, "name": "Dune.2021.1080p", "renames": []},
+                        {"hash": "b" * 40, "name": "Show.S01", "renames": []},
+                    ],
+                }
+            ],
+            "recheckOnly": [],
+        }
+        result = asyncio.run(relink_service.apply_relink_plan(app.state.qbit, plan, recheck=False))
+        self.assertEqual(result["relinked"], 1)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["failures"][0]["hash"], "b" * 40)
+        self.assertEqual(result["failures"][0]["message"], "Torrent inconnu côté qBittorrent.")
+        calls = [call for call in app.state.qbit.calls if call[0] == "set_location"]
+        self.assertIn(("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)"), calls)
+
+    def test_apply_skips_torrent_removed_since_plan_build(self):
+        app.state.qbit.torrents_payload = [
+            {"hash": VALID_HASH, "name": "Dune.2021.1080p"},
+        ]
+        plan = {
+            "relink": [
+                {
+                    "location": "/home/micilico/downloads/qbittorrent/Films/Dune (2021)",
+                    "layout": "Subfolder",
+                    "hashes": [VALID_HASH, "b" * 40],
+                    "names": ["Dune.2021.1080p", "Show.S01"],
+                    "entries": [
+                        {"hash": VALID_HASH, "name": "Dune.2021.1080p", "renames": []},
+                        {"hash": "b" * 40, "name": "Show.S01", "renames": []},
+                    ],
+                }
+            ],
+            "recheckOnly": [],
+        }
+        result = asyncio.run(relink_service.apply_relink_plan(app.state.qbit, plan, recheck=False))
+        self.assertEqual(result["relinked"], 1)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["failures"][0]["hash"], "b" * 40)
+        self.assertEqual(result["failures"][0]["message"], "Torrent inconnu côté qBittorrent.")
+        self.assertEqual(app.state.qbit.calls[0], ("pause", [VALID_HASH]))
+        calls = [call for call in app.state.qbit.calls if call[0] == "set_location"]
+        self.assertEqual(calls, [("set_location", [VALID_HASH], "/home/micilico/downloads/qbittorrent/Films/Dune (2021)")])
 
     def test_locates_files_directly_when_no_preserved_folder(self):
         nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"

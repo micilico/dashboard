@@ -144,10 +144,10 @@ class QBittorrentClient:
             return await self._request(method, path, params=params, data=data, retry_auth=False)
 
         if response.status_code == 404:
-            logger.warning("qBittorrent endpoint not found on %s %s", method, path)
+            logger.warning("qBittorrent 404 on %s %s", method, path)
             raise QbitError(
                 404,
-                "Action qBittorrent indisponible.",
+                "Torrent inconnu ou action qBittorrent indisponible.",
                 code="qbit_action_unavailable",
                 recovery="Réessayer",
             )
