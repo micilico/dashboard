@@ -259,7 +259,7 @@ curl -I http://127.0.0.1:3130/healthz
 | POST | `/api/torrents/delete` | Supprimer |
 | GET | `/api/torrents/relink-preview` | Plan de réparation des torrents en fichiers manquants (lecture seule) |
 | GET | `/api/torrents/relink-status` | Compteur léger (sans scan disque) des torrents à réparer : `missingFiles`/`error` + états pause (`pausedDL`/`stoppedDL`) + `savePath == racine de catégorie` |
-| POST | `/api/torrents/relink` | Repositionner les torrents manquants sur le chemin de leur catégorie puis recheck (corps : `{hashes?: [], preview?: bool}`) |
+| POST | `/api/torrents/relink` | Réorganiser les torrents manquants (dossier + fichiers au nom du torrent via cloud-panel), `setLocation(parent)` + layout `Subfolder`, recheck, pause (corps : `{hashes?: [], preview?: bool}`) |
 | GET | `/api/dashboard` | Snapshot vue d'ensemble |
 | GET | `/api/health` | État de santé complet |
 | GET | `/api/activity` | Activité récente |
@@ -368,10 +368,15 @@ qBittorrent** :
 - Localise le dossier réel de chaque torrent : basename exact → nom du dossier
   préservé (`contentPath`) → similarité floue de nom de dossier → matching par
   taille seule (les fichiers renommés gardent leur taille).
-- **Renomme** (via l'API interne cloud-panel, qui a l'accès écriture) :
-  le dossier vers le nom exact du torrent et chaque fichier vers le nom exact
-  attendu par qBittorrent (matching par taille).
-- Applique : **pause → renommages → setLocation(parent) →
+- **Réorganise** (via l'API interne cloud-panel `internal-arrange-batch`, qui a
+  l'accès écriture) pour que le contenu finisse dans `<catégorie>/<nom exact du
+  torrent>/` avec les fichiers aux noms exacts attendus par qBittorrent :
+  - fichier dans un sous-dossier (`Films/Movie (2021)`) → **renommer** le
+    dossier `Movie (2021)` → nom du torrent, puis renommer les fichiers ;
+  - fichier **directement dans** la catégorie (`Films/`) → **jamais renommer**
+    `Films` : `mkdir Films/<nom du torrent>/` puis `move` des fichiers dedans
+    (renommés si besoin).
+- Applique : **pause → opérations fichiers → setLocation(parent) →
   setContentLayout("Subfolder") → recheck**. Le contenu se retrouve donc dans
   `<parent>/<nom exact du torrent>/` avec les bons noms de fichiers.
   Les torrents **restent en pause** pour vérification manuelle avant reprise.

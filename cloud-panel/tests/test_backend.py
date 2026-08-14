@@ -1051,7 +1051,7 @@ class TestSharePasswordRateLimit:
         assert good.status_code == 303, "correct password must bypass the limiter"
 
 
-class TestInternalRenameBatch:
+class TestInternalArrangeBatch:
     def _reload_app(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
         monkeypatch.setattr("cloud_panel.config.INTERNAL_TOKEN", "secret-token")
@@ -1067,18 +1067,18 @@ class TestInternalRenameBatch:
         from fastapi.testclient import TestClient
         return TestClient(app)
 
-    def test_internal_rename_batch_renames_items(self, tmp_path, monkeypatch):
+    def test_internal_arrange_batch_renames_items(self, tmp_path, monkeypatch):
         client = self._reload_app(tmp_path, monkeypatch)
         (tmp_path / "Backrooms (2026)").mkdir()
         (tmp_path / "Backrooms (2026)" / "old.mkv").write_bytes(b"data")
 
-        url = "/cloud-panel/api/files/internal-rename-batch"
+        url = "/cloud-panel/api/files/internal-arrange-batch"
         no_token = client.post(url, data={"items": "[]"})
         assert no_token.status_code == 403
 
         items = [
-            {"path": "Backrooms (2026)", "old_name": "old.mkv", "new_name": "film.mkv"},
-            {"path": "", "old_name": "Backrooms (2026)", "new_name": "Film.2026.MULTi-SUPPLY"},
+            {"op": "rename", "path": "Backrooms (2026)", "old_name": "old.mkv", "new_name": "film.mkv"},
+            {"op": "rename", "path": "", "old_name": "Backrooms (2026)", "new_name": "Film.2026.MULTi-SUPPLY"},
         ]
         response = client.post(
             url,
@@ -1090,16 +1090,16 @@ class TestInternalRenameBatch:
         assert body["failed"] == 0
         assert (tmp_path / "Film.2026.MULTi-SUPPLY" / "film.mkv").exists()
 
-    def test_internal_rename_batch_reports_failures(self, tmp_path, monkeypatch):
+    def test_internal_arrange_batch_reports_failures(self, tmp_path, monkeypatch):
         client = self._reload_app(tmp_path, monkeypatch)
         (tmp_path / "a.txt").write_text("a")
 
         items = [
-            {"path": "", "old_name": "a.txt", "new_name": "b.txt"},
-            {"path": "", "old_name": "nope.txt", "new_name": "c.txt"},
+            {"op": "rename", "path": "", "old_name": "a.txt", "new_name": "b.txt"},
+            {"op": "rename", "path": "", "old_name": "nope.txt", "new_name": "c.txt"},
         ]
         response = client.post(
-            "/cloud-panel/api/files/internal-rename-batch",
+            "/cloud-panel/api/files/internal-arrange-batch",
             data={"items": __import__("json").dumps(items)},
             headers={"X-Internal-Token": "secret-token"},
         )
@@ -1107,6 +1107,25 @@ class TestInternalRenameBatch:
         body = response.json()
         assert body["failed"] == 1
         assert (tmp_path / "b.txt").exists()
+
+    def test_internal_arrange_batch_mkdir_and_move(self, tmp_path, monkeypatch):
+        client = self._reload_app(tmp_path, monkeypatch)
+        (tmp_path / "Films").mkdir()
+        (tmp_path / "Films" / "old.mkv").write_bytes(b"data")
+
+        items = [
+            {"op": "mkdir", "path": "Films", "name": "Film.2026-MULTi"},
+            {"op": "move", "path": "Films", "old_name": "old.mkv", "new_name": "Film.mkv", "dest": "Films/Film.2026-MULTi"},
+        ]
+        response = client.post(
+            "/cloud-panel/api/files/internal-arrange-batch",
+            data={"items": __import__("json").dumps(items)},
+            headers={"X-Internal-Token": "secret-token"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["failed"] == 0
+        assert (tmp_path / "Films" / "Film.2026-MULTi" / "Film.mkv").exists()
 
 
 class TestEdgeCases:

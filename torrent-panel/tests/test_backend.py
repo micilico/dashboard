@@ -688,13 +688,13 @@ class RelinkTests(BackendTests):
         renamed: list[dict[str, str]] = []
         calls = app.state.qbit.calls
 
-        async def fake_rename_batch(items):
+        async def fake_arrange_batch(items):
             renamed.extend(items)
             return {"results": [{"success": True} for _ in items], "failed": 0}
 
         import unittest.mock as _mock
 
-        with _mock.patch.object(cloud_panel_service, "rename_batch", side_effect=fake_rename_batch):
+        with _mock.patch.object(cloud_panel_service, "arrange_batch", side_effect=fake_arrange_batch):
             response = self.post_action("/torrent-panel/api/torrents/relink", {})
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -731,23 +731,23 @@ class RelinkTests(BackendTests):
         relink_service._SCAN_CACHE["data"] = None
         renamed: list[dict[str, str]] = []
 
-        async def fake_rename_batch(items):
+        async def fake_arrange_batch(items):
             renamed.extend(items)
             return {"results": [{"success": True} for _ in items], "failed": 0}
 
         import unittest.mock as _mock
 
-        with _mock.patch.object(cloud_panel_service, "rename_batch", side_effect=fake_rename_batch):
+        with _mock.patch.object(cloud_panel_service, "arrange_batch", side_effect=fake_arrange_batch):
             response = self.post_action("/torrent-panel/api/torrents/relink", {})
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["result"]["relinked"], 1)
         self.assertIn(
-            {"path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv"},
+            {"op": "rename", "path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv"},
             renamed,
         )
         self.assertIn(
-            {"path": "qbittorrent/Films", "old_name": "Backrooms (2026)", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY"},
+            {"op": "rename", "path": "qbittorrent/Films", "old_name": "Backrooms (2026)", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY"},
             renamed,
         )
         relink_service.QBIT_SAVE_PATH = ""
@@ -895,9 +895,9 @@ class RelinkTests(BackendTests):
         self.assertEqual(
             group["entries"][0]["renames"],
             [
-                {"path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv"},
-                {"path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.nfo", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.nfo"},
-                {"path": "qbittorrent/Films", "old_name": "Backrooms (2026)", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY"},
+                {"op": "rename", "path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv"},
+                {"op": "rename", "path": "qbittorrent/Films/Backrooms (2026)", "old_name": "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.nfo", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.nfo"},
+                {"op": "rename", "path": "qbittorrent/Films", "old_name": "Backrooms (2026)", "new_name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY"},
             ],
         )
 
@@ -927,6 +927,43 @@ class RelinkTests(BackendTests):
         plan = response.json()["plan"]
         self.assertEqual(plan["relinkCount"], 1)
         self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films")
+
+    def test_files_directly_in_category_root_create_torrent_subfolder(self):
+        """Cas B : fichier directement dans Films → mkdir Films/<torrent> + move, jamais renommer Films."""
+        import shutil
+
+        qbit_setup_dir = self.mount / "Qbittorrent"
+        if qbit_setup_dir.exists():
+            shutil.rmtree(qbit_setup_dir)
+        films_dir = self.mount / "qbittorrent" / "Films"
+        films_dir.mkdir(parents=True, exist_ok=True)
+        (films_dir / "Film.2026.MULTi.CA.mkv").write_bytes(b"0123456789")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY",
+                "state": "pausedDL",
+                "category": "prowlarr",
+                "savePath": "/home/micilico/downloads/qbittorrent",
+                "contentPath": "/home/micilico/downloads/qbittorrent/Film.2026.MULTi.VFQ.2160p.H265-SUPPLY",
+            },
+        ]
+        app.state.qbit.files_payload = {VALID_HASH: [{"name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.mkv", "size": 10}]}
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        group = plan["relink"][0]
+        self.assertEqual(group["location"], "/home/micilico/downloads/qbittorrent/Films")
+        ops = group["entries"][0]["renames"]
+        self.assertEqual(ops[0], {"op": "mkdir", "path": "qbittorrent/Films", "name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY"})
+        self.assertIn(
+            {"op": "move", "path": "qbittorrent/Films", "old_name": "Film.2026.MULTi.CA.mkv", "new_name": "Film.2026.MULTi.VFQ.2160p.H265-SUPPLY.mkv", "dest": "qbittorrent/Films/Film.2026.MULTi.VFQ.2160p.H265-SUPPLY"},
+            ops,
+        )
+        self.assertTrue(all(op.get("op") != "rename" or op.get("path") != "qbittorrent" for op in ops))
+        self.assertFalse(any(op.get("op") == "rename" and op.get("old_name") == "Films" for op in ops))
 
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):

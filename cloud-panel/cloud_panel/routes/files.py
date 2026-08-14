@@ -166,16 +166,23 @@ async def rename(
             status_code=403,
             detail=error_detail("path_error", "Renommage impossible à cet emplacement.", "Vérifier le chemin"),
         )
+    except OSError:
+        raise HTTPException(
+            status_code=409,
+            detail=error_detail("rename_conflict", "Un élément portant ce nom existe déjà ici.", "Choisir un autre nom"),
+        )
 
 
-@router.post("/files/internal-rename-batch")
-async def internal_rename_batch(
+@router.post("/files/internal-arrange-batch")
+async def internal_arrange_batch(
     request: Request,
     items: str = Form(...),
     x_internal_token: str = Header(default=""),
 ):
-    """Server-to-server batch rename used by the torrent-panel relink.
+    """Server-to-server batch arrange used by the torrent-panel relink.
 
+    Each item is an operation: ``{"op": "rename", path, old_name, new_name}``,
+    ``{"op": "mkdir", path, name}`` or ``{"op": "move", path, old_name, new_name, dest}``.
     Guarded by a shared token (``CLOUD_PANEL_INTERNAL_TOKEN``), not by CSRF,
     because this endpoint is called by another panel, not by a browser.
     """
@@ -191,19 +198,31 @@ async def internal_rename_batch(
     except (ValueError, json.JSONDecodeError):
         raise HTTPException(
             status_code=403,
-            detail=error_detail("path_error", "Renommage impossible à cet emplacement.", "Vérifier le chemin"),
+            detail=error_detail("path_error", "Opération impossible à cet emplacement.", "Vérifier le chemin"),
         )
 
     results: list[dict[str, object]] = []
     for item in parsed if isinstance(parsed, list) else []:
+        op = str(item.get("op") or "rename")
         path = str(item.get("path") or "")
         old_name = str(item.get("old_name") or "")
         new_name = str(item.get("new_name") or "")
+        dest = str(item.get("dest") or "")
+        folder_name = str(item.get("name") or "")
         try:
-            result = await run_in_threadpool(rename_item, path, old_name, new_name)
-            results.append({"success": bool(result.get("success", True)), "path": path, "old_name": old_name, "new_name": new_name})
+            if op == "mkdir":
+                result = await run_in_threadpool(create_directory, path, folder_name)
+                results.append({"success": bool(result.get("success", True)), "op": op, "path": path, "new_name": folder_name})
+            elif op == "move":
+                await run_in_threadpool(move_item, path, old_name, dest)
+                if new_name and new_name != old_name:
+                    await run_in_threadpool(rename_item, dest, old_name, new_name)
+                results.append({"success": True, "op": op, "path": path, "old_name": old_name, "dest": dest, "new_name": new_name})
+            else:
+                result = await run_in_threadpool(rename_item, path, old_name, new_name)
+                results.append({"success": bool(result.get("success", True)), "op": "rename", "path": path, "old_name": old_name, "new_name": new_name})
         except ValueError:
-            results.append({"success": False, "path": path, "old_name": old_name, "new_name": new_name, "error": "Renommage refusé"})
+            results.append({"success": False, "op": op, "path": path, "old_name": old_name, "new_name": new_name, "dest": dest, "error": "Opération refusée"})
     failed = sum(1 for result in results if not result.get("success"))
     return {"results": results, "failed": failed}
 

@@ -36,20 +36,29 @@ _SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
 _LAYOUT_SUBFOLDER = "Subfolder"
 
 
-def _build_renames(index: dict[str, Any], located: str, torrent_name: str, specs: list[tuple[str, int]]) -> list[dict[str, str]]:
-    """Compute rename operations that align the located folder with the torrent.
+def _build_renames(
+    index: dict[str, Any],
+    located: str,
+    torrent_name: str,
+    specs: list[tuple[str, int]],
+    anchor_prefix: str,
+) -> list[dict[str, str]]:
+    """Compute filesystem operations aligning the located folder with the torrent.
 
-    The cloud-panel "rangement" renames the containing folder and the files
-    (e.g. ``Backrooms (2026)`` with ``…CA….mkv`` while the torrent is named
-    ``…VFQ…``). To make qBittorrent find everything we rename:
-    - the folder to the exact torrent name,
-    - each file to the exact name qBittorrent expects (matched by size).
+    Returns a list of cloud-panel operations (``rename``, ``mkdir``, ``move``)
+    so the torrent content ends up in a folder named exactly like the torrent,
+    with files named exactly as qBittorrent expects (matched by size).
+
+    A category root (``qbittorrent/Films``) is **never renamed** — when files
+    sit directly in the category folder, they are moved into a new
+    ``<category>/<torrent name>/`` subfolder instead.
     """
-    renames: list[dict[str, str]] = []
     located = located.rstrip("/")
     parent_rel = posixpath.dirname(located)
     located_basename = posixpath.basename(located)
+    is_category_root = bool(anchor_prefix) and parent_rel == anchor_prefix.rstrip("/")
 
+    ops: list[dict[str, str]] = []
     disk_files = index.get("dir_files", {}).get(located, {})
     used: set[str] = set()
     for spec_name, spec_size in specs:
@@ -68,17 +77,35 @@ def _build_renames(index: dict[str, Any], located: str, torrent_name: str, specs
                 if _name_tokens(disk_name) == _name_tokens(torrent_file):
                     matched = disk_name
                     break
-        if matched is not None and matched != torrent_file:
-            renames.append({"path": located, "old_name": matched, "new_name": torrent_file})
-            used.add(matched)
+        if matched is None:
+            continue
+        used.add(matched)
+        if is_category_root:
+            ops.append(
+                {
+                    "op": "move",
+                    "path": located,
+                    "old_name": matched,
+                    "new_name": torrent_file if matched != torrent_file else "",
+                    "dest": posixpath.join(located, torrent_name),
+                }
+            )
+        elif matched != torrent_file:
+            ops.append({"op": "rename", "path": located, "old_name": matched, "new_name": torrent_file})
 
-    if located_basename != torrent_name:
-        renames.append({"path": parent_rel, "old_name": located_basename, "new_name": torrent_name})
-    return renames
+    if is_category_root:
+        if located_basename != torrent_name:
+            ops.insert(0, {"op": "mkdir", "path": located, "name": torrent_name})
+    elif located_basename != torrent_name:
+        ops.append({"op": "rename", "path": parent_rel, "old_name": located_basename, "new_name": torrent_name})
+
+    return ops
 
 
 def _normalize_path(value: str) -> str:
-    return posixpath.normpath(str(value or "").strip().replace(os.sep, "/")).rstrip("/")
+    if not value:
+        return ""
+    return posixpath.normpath(str(value).strip().replace(os.sep, "/")).rstrip("/")
 
 
 def _file_basename(name: str) -> str:
@@ -360,9 +387,12 @@ async def build_relink_plan(
             skipped.append(_skipped_entry(torrent, "Sans racine qBittorrent configurée"))
             continue
 
-        renames = _build_renames(index, located, torrent_name, specs)
-        parent_rel = posixpath.dirname(located.rstrip("/")) or located.rstrip("/")
-        target = _anchor_target(qbit_root, index["anchor_prefix"], parent_rel)
+        renames = _build_renames(index, located, torrent_name, specs, index["anchor_prefix"])
+        anchor = index["anchor_prefix"]
+        located_clean = located.rstrip("/")
+        is_category_root = bool(anchor) and posixpath.dirname(located_clean) == anchor.rstrip("/")
+        parent_rel = located_clean if is_category_root else (posixpath.dirname(located_clean) or located_clean)
+        target = _anchor_target(qbit_root, anchor, parent_rel)
         if not target:
             logger.info("relink: %s (%s) ignoré — cible non résolue (locate=%s)", torrent_name, torrent_hash[:8], located)
             skipped.append(_skipped_entry(torrent, "Chemin cible non résolu"))
@@ -428,7 +458,7 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
     mount), then qBittorrent is pointed at the parent folder with the Subfolder
     layout. Torrents are left paused so the user can verify before resuming.
     """
-    from .cloud_panel import CloudPanelError, rename_batch
+    from .cloud_panel import CloudPanelError, arrange_batch
 
     all_hashes = [entry["hash"] for group in plan.get("relink", []) for entry in group["entries"]]
     all_hashes.extend(entry["hash"] for entry in plan.get("recheckOnly", []))
@@ -451,19 +481,19 @@ async def apply_relink_plan(qbit: Any, plan: dict[str, Any]) -> dict[str, Any]:
         rename_ok = True
 
         for entry in entries:
-            entry_renames = entry.get("renames") or []
-            if not entry_renames:
+            entry_ops = entry.get("renames") or []
+            if not entry_ops:
                 continue
             try:
-                result = await rename_batch(entry_renames)
+                result = await arrange_batch(entry_ops)
                 failed = int(result.get("failed", 0))
                 if failed:
-                    raise CloudPanelError(f"{failed} renommage(s) refusé(s)")
-                logger.info("relink: %d renommage(s) pour %s", len(entry_renames), entry["name"])
+                    raise CloudPanelError(f"{failed} opération(s) refusée(s)")
+                logger.info("relink: %d opération(s) fichier(s) pour %s", len(entry_ops), entry["name"])
             except CloudPanelError as exc:
                 rename_ok = False
                 failures.append({"hash": entry["hash"], "name": entry["name"], "message": exc.message})
-                logger.warning("relink: échec renommage %s : %s", entry["name"], exc.message)
+                logger.warning("relink: échec opération %s : %s", entry["name"], exc.message)
                 continue
 
         if not rename_ok:

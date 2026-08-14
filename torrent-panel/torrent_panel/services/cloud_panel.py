@@ -20,10 +20,10 @@ class CloudPanelError(Exception):
         self.message = message
 
 
-async def rename_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Rename a batch of mount-relative items via the cloud-panel.
+async def arrange_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply filesystem operations via the cloud-panel internal API.
 
-    Each item is ``{"path": mount_rel_parent, "old_name": ..., "new_name": ...}``.
+    Each item is ``{"op": "rename"|"mkdir"|"move", path, old_name?, new_name?, dest?}``.
     """
     if not CLOUD_PANEL_API_URL:
         raise CloudPanelError("CLOUD_PANEL_API_URL non configuré.")
@@ -32,7 +32,7 @@ async def rename_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
     if not items:
         return {"results": [], "failed": 0}
 
-    endpoint = f"{CLOUD_PANEL_API_URL}{CLOUD_PANEL_PUBLIC_PREFIX}/api/files/internal-rename-batch"
+    endpoint = f"{CLOUD_PANEL_API_URL}{CLOUD_PANEL_PUBLIC_PREFIX}/api/files/internal-arrange-batch"
     async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
         try:
             response = await client.post(
@@ -41,16 +41,16 @@ async def rename_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
                 headers={"X-Internal-Token": CLOUD_PANEL_INTERNAL_TOKEN},
             )
         except httpx.RequestError as exc:
-            logger.warning("cloud-panel rename-batch request failed: %s", exc.__class__.__name__)
+            logger.warning("cloud-panel arrange-batch request failed: %s", exc.__class__.__name__)
             raise CloudPanelError("cloud-panel est injoignable.") from exc
 
     if response.status_code != 200:
-        logger.warning("cloud-panel rename-batch refused with status %s", response.status_code)
-        raise CloudPanelError("cloud-panel a refusé le renommage.")
+        logger.warning("cloud-panel arrange-batch refused with status %s", response.status_code)
+        raise CloudPanelError("cloud-panel a refusé l'opération.")
 
     try:
         payload = response.json()
     except ValueError as exc:
-        logger.warning("cloud-panel rename-batch returned invalid JSON")
+        logger.warning("cloud-panel arrange-batch returned invalid JSON")
         raise CloudPanelError("Réponse cloud-panel invalide.") from exc
     return payload
