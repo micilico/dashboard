@@ -1703,7 +1703,7 @@ function updateDetails() {
   const actions = document.createElement("div");
   actions.className = "action-row";
   actions.append(
-    ...(torrent.state === "missingFiles" || torrent.state === "error"
+    ...(["missingFiles", "error", "pausedDL", "stoppedDL"].includes(torrent.state)
       ? [button("Réparer l'emplacement", "primary", () => runRelink([torrent.hash]))]
       : []),
     button("Revérifier", "secondary", () => runAdvancedAction(torrent.hash, "recheck", {}, "Revérification demandée.")),

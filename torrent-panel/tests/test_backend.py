@@ -589,10 +589,10 @@ class RelinkTests(BackendTests):
     def setUp(self):
         super().setUp()
         self.mount = Path(tempfile.mkdtemp())
-        film_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)"
+        film_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
         film_dir.mkdir(parents=True)
         (film_dir / "Dune.mkv").write_bytes(b"keep")
-        series_dir = self.mount / "Qbittorrent" / "Series" / "Show" / "Saison 1"
+        series_dir = self.mount / "Qbittorrent" / "Series" / "Show" / "Saison 1" / "Show.S01"
         series_dir.mkdir(parents=True)
         (series_dir / "Show.S01E01.mkv").write_bytes(b"episode")
         self._original_mount = relink_service.MEDIA_MOUNT_PATH
@@ -612,9 +612,29 @@ class RelinkTests(BackendTests):
             "Series": {"savePath": "/mnt/ultra-media/Qbittorrent/Series", "name": "Series"},
         }
         app.state.qbit.torrents_payload = [
-            {"hash": VALID_HASH, "name": "Un film", "state": "pausedDL", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films"},
-            {"hash": "b" * 40, "name": "Une série", "state": "missingFiles", "category": "Series", "savePath": "/mnt/ultra-media/Qbittorrent/Series"},
-            {"hash": "c" * 40, "name": "Déjà aligné", "state": "uploading", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)"},
+            {
+                "hash": VALID_HASH,
+                "name": "Dune.2021.1080p",
+                "state": "pausedDL",
+                "category": "Films",
+                "savePath": "/mnt/ultra-media/Qbittorrent/Films",
+                "contentPath": "/mnt/ultra-media/Qbittorrent/Dune.2021.1080p",
+            },
+            {
+                "hash": "b" * 40,
+                "name": "Show.S01",
+                "state": "missingFiles",
+                "category": "Series",
+                "savePath": "/mnt/ultra-media/Qbittorrent/Series",
+                "contentPath": "/mnt/ultra-media/Qbittorrent/Show.S01",
+            },
+            {
+                "hash": "c" * 40,
+                "name": "Déjà aligné",
+                "state": "uploading",
+                "category": "Films",
+                "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
+            },
             {"hash": "d" * 40, "name": "Sans catégorie", "state": "missingFiles", "category": "", "savePath": "/old/downloads/Other"},
         ]
         app.state.qbit.files_payload = {
@@ -633,7 +653,10 @@ class RelinkTests(BackendTests):
         locations = sorted(group["location"] for group in plan["relink"])
         self.assertEqual(
             locations,
-            ["/mnt/ultra-media/Qbittorrent/Films/Dune (2021)", "/mnt/ultra-media/Qbittorrent/Series/Show/Saison 1"],
+            [
+                "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
+                "/mnt/ultra-media/Qbittorrent/Series/Show/Saison 1/Show.S01",
+            ],
         )
         self.assertEqual(plan["skipped"][0]["reason"], "Sans catégorie ou chemin configuré")
 
@@ -647,9 +670,9 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["result"]["rechecked"], 2)
         calls = app.state.qbit.calls
         self.assertIn(("pause", [VALID_HASH, "b" * 40]), calls)
-        self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)")))
-        self.assertIn(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)"), calls)
-        self.assertIn(("set_location", ["b" * 40], "/mnt/ultra-media/Qbittorrent/Series/Show/Saison 1"), calls)
+        self.assertLess(calls.index(("pause", [VALID_HASH, "b" * 40])), calls.index(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p")))
+        self.assertIn(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), calls)
+        self.assertIn(("set_location", ["b" * 40], "/mnt/ultra-media/Qbittorrent/Series/Show/Saison 1/Show.S01"), calls)
         self.assertIn(("set_content_layout", [VALID_HASH], "NoSubfolder"), calls)
         self.assertIn(("set_content_layout", ["b" * 40], "NoSubfolder"), calls)
         self.assertEqual(calls[-1], ("recheck", [VALID_HASH, "b" * 40]))
@@ -675,14 +698,50 @@ class RelinkTests(BackendTests):
         self.assertEqual(body["plan"]["relinkCount"], 1)
         self.assertEqual(body["result"]["relinked"], 1)
         self.assertIn(("pause", [VALID_HASH]), app.state.qbit.calls)
-        self.assertIn(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)"), app.state.qbit.calls)
+        self.assertIn(("set_location", [VALID_HASH], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p"), app.state.qbit.calls)
+
+    def test_locates_files_directly_when_no_preserved_folder(self):
+        app.state.qbit.categories_payload = {
+            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
+        }
+        nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
+        if nested_dir.exists():
+            import shutil
+
+            shutil.rmtree(nested_dir)
+        loose_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)"
+        loose_dir.mkdir(parents=True, exist_ok=True)
+        (loose_dir / "Dune.mkv").write_bytes(b"keep")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Dune.2021.1080p",
+                "state": "pausedDL",
+                "category": "Films",
+                "savePath": "/mnt/ultra-media/Qbittorrent/Films",
+                "contentPath": "/mnt/ultra-media/Qbittorrent/autre-nom",
+            },
+        ]
+        app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        self.assertEqual(plan["relink"][0]["location"], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)")
 
     def test_no_relink_when_nothing_affected(self):
         app.state.qbit.categories_payload = {
             "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
         }
         app.state.qbit.torrents_payload = [
-            {"hash": VALID_HASH, "name": "Sain", "state": "uploading", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)"},
+            {
+                "hash": VALID_HASH,
+                "name": "Sain",
+                "state": "uploading",
+                "category": "Films",
+                "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p",
+            },
         ]
         response = self.client.get("/torrent-panel/api/torrents/relink-preview")
         self.assertEqual(response.status_code, 200)
@@ -698,10 +757,41 @@ class RelinkTests(BackendTests):
             {"hash": VALID_HASH, "name": "Manquant", "state": "missingFiles", "category": "Films", "savePath": "/old/thing"},
             {"hash": "b" * 40, "name": "Repos à la racine", "state": "pausedDL", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films"},
             {"hash": "c" * 40, "name": "Sain", "state": "uploading", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)"},
+            {"hash": "e" * 40, "name": "En pause hors racine", "state": "stoppedDL", "category": "Films", "savePath": "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)/Dune.2021.1080p"},
         ]
         response = self.client.get("/torrent-panel/api/torrents/relink-status")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["count"], 2)
+        self.assertEqual(response.json()["count"], 3)
+
+    def test_relink_plan_includes_paused_downloads(self):
+        app.state.qbit.categories_payload = {
+            "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},
+        }
+        nested_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)" / "Dune.2021.1080p"
+        if nested_dir.exists():
+            import shutil
+
+            shutil.rmtree(nested_dir)
+        loose_dir = self.mount / "Qbittorrent" / "Films" / "Dune (2021)"
+        loose_dir.mkdir(parents=True, exist_ok=True)
+        (loose_dir / "Dune.mkv").write_bytes(b"keep")
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Dune.2021.1080p",
+                "state": "stoppedDL",
+                "category": "Films",
+                "savePath": "/mnt/ultra-media/Qbittorrent/Films",
+                "contentPath": "/mnt/ultra-media/Qbittorrent/Films/Dune.2021.1080p",
+            },
+        ]
+        app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.mkv", "size": 4}]}
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        self.assertEqual(plan["relink"][0]["location"], "/mnt/ultra-media/Qbittorrent/Films/Dune (2021)")
 
 
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):

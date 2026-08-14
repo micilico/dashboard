@@ -196,6 +196,7 @@ class QBittorrentClient:
                 "category": item.get("category", ""),
                 "tags": item.get("tags", ""),
                 "savePath": item.get("save_path", ""),
+                "contentPath": item.get("content_path", ""),
                 "tracker": public_tracker_host(str(item.get("tracker") or "")),
                 "priority": item.get("priority", 0),
                 "message": item.get("last_activity") or "",

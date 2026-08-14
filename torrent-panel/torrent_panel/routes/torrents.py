@@ -201,7 +201,7 @@ async def relink_preview(request: Request) -> dict[str, Any]:
 @router.get("/torrents/relink-status")
 async def relink_status(request: Request) -> dict[str, Any]:
     """Cheap indicator (no filesystem scan) of torrents that likely need relinking."""
-    from ..services.relink import MISSING_STATES, _normalize_path
+    from ..services.relink import MISSING_STATES, PAUSED_DL_STATES, _normalize_path
 
     try:
         torrents = await request.app.state.qbit.torrents()
@@ -217,7 +217,7 @@ async def relink_status(request: Request) -> dict[str, Any]:
     count = 0
     for torrent in torrents:
         state = str(torrent.get("state") or "")
-        if state in MISSING_STATES:
+        if state in MISSING_STATES or state in PAUSED_DL_STATES:
             count += 1
             continue
         category = str(torrent.get("category") or "").strip().lower()

@@ -45,12 +45,10 @@ class AutoRelinkManager:
 
     async def run_once(self) -> dict[str, Any] | None:
         try:
-            torrents = await self._qbit.torrents()
-            categories = await self._qbit.categories()
+            plan = await build_relink_plan(self._qbit)
         except QbitError as exc:
             logger.warning("Auto-relink skipped: %s", exc.code)
             return None
-        plan = build_relink_plan(torrents, categories)
         if not plan["relink"]:
             self._last_run_at = now_iso()
             self._last_result = {"relinked": 0, "failed": 0, "skipped": plan["skippedCount"]}

@@ -23,6 +23,7 @@ from ..qbittorrent import QbitError
 from .media_automation import now_iso
 
 MISSING_STATES = {"missingFiles", "error"}
+PAUSED_DL_STATES = {"pausedDL", "stoppedDL"}
 
 _SCAN_CACHE_TTL = 60.0
 _SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
@@ -80,10 +81,12 @@ def _scan_index(mount_root: str, category_save_paths: list[str]) -> dict[str, An
                     scope_dirs.append(os.path.relpath(os.path.join(dirpath, name), mount_root).replace(os.sep, "/"))
 
     files: dict[str, dict[str, int]] = {}
+    dir_basenames: dict[str, list[str]] = {}
     for scope_rel in scope_dirs:
         scope_abs = os.path.join(mount_root, *scope_rel.split("/"))
         for dirpath, _dirnames, filenames in os.walk(scope_abs):
             dir_rel = os.path.relpath(dirpath, mount_root).replace(os.sep, "/")
+            dir_basenames.setdefault(posixpath.basename(dir_rel).casefold(), []).append(dir_rel)
             for filename in filenames:
                 try:
                     size = os.path.getsize(os.path.join(dirpath, filename))
@@ -91,14 +94,28 @@ def _scan_index(mount_root: str, category_save_paths: list[str]) -> dict[str, An
                     size = -1
                 files.setdefault(filename.casefold(), {})[dir_rel] = size
 
-    data = {"scope_dirs": sorted(set(scope_dirs)), "files": files}
+    data = {
+        "scope_dirs": sorted(set(scope_dirs)),
+        "files": files,
+        "dir_basenames": dir_basenames,
+    }
     cache["data"] = data
     cache["ts"] = now
     return data
 
 
-def _locate_folder(index: dict[str, Any], file_specs: list[tuple[str, int]]) -> str | None:
-    """Return the folder (relative to the mount) best matching the torrent's files."""
+def _locate_folder(
+    index: dict[str, Any],
+    file_specs: list[tuple[str, int]],
+    folder_hint: str,
+) -> str | None:
+    """Find the folder holding the torrent's data.
+
+    The "rangement" keeps the torrent's downloaded folder intact but nests it
+    under the category structure, so first match by that preserved folder name
+    (``folder_hint``, e.g. the torrent name / content path basename). If that
+    fails, fall back to matching by file name + size anywhere in the scope.
+    """
     candidates: dict[str, dict[str, Any]] = {}
     for basename, size in file_specs:
         for dir_rel, dir_size in index["files"].get(basename.casefold(), {}).items():
@@ -106,14 +123,25 @@ def _locate_folder(index: dict[str, Any], file_specs: list[tuple[str, int]]) -> 
             candidate["names"] += 1
             if size > 0 and dir_size == size:
                 candidate["size_ok"] += 1
-    best: str | None = None
-    best_score = (-1, -1)
-    for dir_rel, candidate in candidates.items():
-        score = (candidate["size_ok"], candidate["names"])
-        if score > best_score:
-            best_score = score
-            best = dir_rel
-    return best
+
+    def _score(pair: tuple[str, dict[str, Any]]) -> tuple[int, int, int]:
+        dir_rel, candidate = pair
+        return (candidate["size_ok"], candidate["names"], len(dir_rel))
+
+    hint = (folder_hint or "").strip().casefold()
+    if hint:
+        hinted: list[tuple[str, dict[str, Any]]] = []
+        for dir_rel in index["dir_basenames"].get(hint, []):
+            candidate = candidates.get(dir_rel, {"names": 0, "size_ok": 0})
+            hinted.append((dir_rel, candidate))
+        if hinted:
+            best = max(hinted, key=_score)
+            if best[1]["names"] > 0:
+                return best[0]
+
+    if candidates:
+        return max(candidates.items(), key=_score)[0]
+    return None
 
 
 def _anchor_target(category_qbit_path: str, scope_mount_rel: str, located_mount_rel: str) -> str | None:
@@ -183,7 +211,7 @@ async def build_relink_plan(
         current = _normalize_path(str(torrent.get("savePath") or torrent.get("save_path") or ""))
         state = str(torrent.get("state") or "")
 
-        if selected_hashes is None and state not in MISSING_STATES and current != _normalize_path(category_qbit_path):
+        if selected_hashes is None and state not in MISSING_STATES and state not in PAUSED_DL_STATES and current != _normalize_path(category_qbit_path):
             continue
 
         specs = await _torrent_file_specs(qbit, torrent_hash)
@@ -191,7 +219,8 @@ async def build_relink_plan(
             skipped.append(_skipped_entry(torrent, "Aucun fichier connu"))
             continue
 
-        located = _locate_folder(index, specs)
+        folder_hint = _file_basename(torrent.get("contentPath") or torrent.get("name") or "")
+        located = _locate_folder(index, specs, folder_hint)
         if not located:
             skipped.append(_skipped_entry(torrent, "Contenu organisé non localisé"))
             continue

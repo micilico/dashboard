@@ -258,6 +258,7 @@ curl -I http://127.0.0.1:3130/healthz
 | POST | `/api/torrents/resume` | Reprendre |
 | POST | `/api/torrents/delete` | Supprimer |
 | GET | `/api/torrents/relink-preview` | Plan de réparation des torrents en fichiers manquants (lecture seule) |
+| GET | `/api/torrents/relink-status` | Compteur léger (sans scan disque) des torrents à réparer : `missingFiles`/`error` + états pause (`pausedDL`/`stoppedDL`) + `savePath == racine de catégorie` |
 | POST | `/api/torrents/relink` | Repositionner les torrents manquants sur le chemin de leur catégorie puis recheck (corps : `{hashes?: [], preview?: bool}`) |
 | GET | `/api/dashboard` | Snapshot vue d'ensemble |
 | GET | `/api/health` | État de santé complet |
@@ -347,6 +348,28 @@ curl -I http://127.0.0.1:3130/healthz
 | `TORRENT_PANEL_RATIO_ALERT_THRESHOLD` | Seuil initial du moniteur de ratio (défaut 10 ; réglable dans l'interface) |
 | `TORRENT_PANEL_AUTO_RELINK_ENABLED` | Auto-réparation planifiée des torrents en fichiers manquants (défaut `false`) |
 | `TORRENT_PANEL_AUTO_RELINK_INTERVAL_SECONDS` | Intervalle de l'auto-réparation en secondes (défaut 3600) |
+
+### Relink des torrents (réparation sans re-téléchargement)
+
+Le cloud-panel « rangement » déplace les contenus vers des dossiers organisés
+(`Qbittorrent/Films/Movie (2021)`, `Qbittorrent/Series/Show/Saison 1`) en
+préservant les noms de fichiers. qBittorrent, pointé sur la racine de catégorie
+en layout Subfolder, ne retrouve plus rien → 0 % → re-téléchargement.
+
+La réparation v2 (`services/relink.py`) :
+- Scanne `TORRENT_PANEL_MEDIA_MOUNT_PATH` (défaut `/mnt/ultra-media`, monté `:ro`).
+- Indexe basename + taille des fichiers sous les dossiers de catégorie (cache TTL 60 s).
+- Localise le dossier réel de chaque torrent (d'abord par le nom du dossier
+  préservé via `contentPath`, sinon par nom/taille de fichiers).
+- Ancre le chemin cible via le `savePath` de la catégorie qBittorrent.
+- Applique : **pause → setLocation → setContentLayout("NoSubfolder") → recheck**.
+  Les torrents **restent en pause** pour vérification manuelle avant reprise du seed.
+
+Candidats au relink (`build_relink_plan`, sans sélection explicite) :
+`missingFiles`/`error`, états pause `pausedDL`/`stoppedDL` (fichiers déplacés
+mais re-téléchargement en cours), ou `savePath` à la racine de catégorie.
+`GET /api/torrents/relink-status` reproduit ce critère sans scan disque (léger)
+pour alimenter le bouton « Réparer les fichiers manquants (N) ».
 
 ### Cloud Panel (`cloud-panel/.env`)
 
