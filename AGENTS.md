@@ -108,6 +108,8 @@ dashboard/
 │   │   │   ├── monitoring.py   # Checks santé, agrégation dashboard
 │   │   │   ├── notifications.py
 │   │   │   ├── automations.py
+│   │   │   ├── relink.py       # Plan + application de réparation des torrents en fichiers manquants
+│   │   │   ├── auto_relink.py  # Auto-réparation planifiée (env TORRENT_PANEL_AUTO_RELINK_ENABLED)
 │   │   │   ├── stats.py        # Statistiques persistantes quotidiennes
 │   │   │   └── ratio_monitor.py # Surveillance du ratio UP/DL (seuil réglable)
 │   │   └── static/             # Frontend
@@ -255,6 +257,8 @@ curl -I http://127.0.0.1:3130/healthz
 | POST | `/api/torrents/pause` | Mettre en pause |
 | POST | `/api/torrents/resume` | Reprendre |
 | POST | `/api/torrents/delete` | Supprimer |
+| GET | `/api/torrents/relink-preview` | Plan de réparation des torrents en fichiers manquants (lecture seule) |
+| POST | `/api/torrents/relink` | Repositionner les torrents manquants sur le chemin de leur catégorie puis recheck (corps : `{hashes?: [], preview?: bool}`) |
 | GET | `/api/dashboard` | Snapshot vue d'ensemble |
 | GET | `/api/health` | État de santé complet |
 | GET | `/api/activity` | Activité récente |
@@ -341,6 +345,8 @@ curl -I http://127.0.0.1:3130/healthz
 | `TORRENT_PANEL_STATS_HISTORY_DAYS` | Fenêtre d'historique en jours (défaut 60) |
 | `TORRENT_PANEL_RATIO_MONITOR_STATE_PATH` | Fichier d'état du seuil de ratio (défaut `data/ratio-monitor-state.json`) |
 | `TORRENT_PANEL_RATIO_ALERT_THRESHOLD` | Seuil initial du moniteur de ratio (défaut 10 ; réglable dans l'interface) |
+| `TORRENT_PANEL_AUTO_RELINK_ENABLED` | Auto-réparation planifiée des torrents en fichiers manquants (défaut `false`) |
+| `TORRENT_PANEL_AUTO_RELINK_INTERVAL_SECONDS` | Intervalle de l'auto-réparation en secondes (défaut 3600) |
 
 ### Cloud Panel (`cloud-panel/.env`)
 

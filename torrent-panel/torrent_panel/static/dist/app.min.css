@@ -2547,6 +2547,24 @@ tr:hover { background: var(--row-hover); }
   }
 }
 
+/* Plan de réparation des torrents manquants */
+.relink-plan ul {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.relink-plan li {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+
 .dialog,
 .detail-dialog {
   width: min(480px, calc(100% - 32px));

@@ -21,6 +21,8 @@ from common.csrf import csrf_cookie_matches, csrf_token_is_valid  # noqa: E402
 
 from .config import (  # noqa: E402
     ACTIVITY_PUBLIC_PREFIX,
+    AUTO_RELINK_ENABLED,
+    AUTO_RELINK_INTERVAL_SECONDS,
     AUTOMATION_RULES_STATE_PATH,
     CONSOLE_PREFIXES,
     HEALTH_PUBLIC_PREFIX,
@@ -57,6 +59,7 @@ from .routes.torrents import (  # noqa: E402
     validate_magnet,
 )
 from .services.automations import AutomationRuleStore  # noqa: E402
+from .services.auto_relink import AutoRelinkManager  # noqa: E402
 from .services.media_automation import (  # noqa: E402
     build_media_automation_config,
     MediaAutomationConfig,
@@ -88,7 +91,9 @@ def build_client() -> QBittorrentClient:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await app.state.media_automation.start()
+    await app.state.auto_relink.start()
     yield
+    await app.state.auto_relink.stop()
     await app.state.media_automation.stop()
     await app.state.qbit.close()
 
@@ -109,6 +114,12 @@ for prefix in CONSOLE_PREFIXES:
 app.state.qbit = build_client()
 app.state.media_automation = MediaAutomationManager(app.state.qbit, build_media_automation_config())
 app.state.notifications = NotificationCenter(NOTIFICATION_STATE_PATH)
+app.state.auto_relink = AutoRelinkManager(
+    app.state.qbit,
+    app.state.notifications,
+    enabled=AUTO_RELINK_ENABLED,
+    interval_seconds=AUTO_RELINK_INTERVAL_SECONDS,
+)
 app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
 app.state.tracker_stats = TrackerStatsStore(TRACKER_STATS_STATE_PATH)
 app.state.stats = StatsStore(STATS_STATE_PATH, history_days=STATS_HISTORY_DAYS)

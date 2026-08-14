@@ -55,9 +55,13 @@ class FakeQbit:
         self.calls = []
         self.torrents_payload = []
         self.trackers_payload = []
+        self.categories_payload = {}
 
     async def torrents(self):
         return list(self.torrents_payload)
+
+    async def categories(self):
+        return dict(self.categories_payload)
 
     async def pause_many(self, hashes):
         self.calls.append(("pause", hashes))
@@ -80,6 +84,12 @@ class FakeQbit:
 
     async def add_tracker(self, torrent_hash, tracker_url):
         self.calls.append(("add_tracker", torrent_hash, tracker_url))
+
+    async def set_location_many(self, hashes, location):
+        self.calls.append(("set_location", list(hashes), location))
+
+    async def recheck_many(self, hashes):
+        self.calls.append(("recheck", list(hashes)))
 
     async def ready(self):
         return True
@@ -530,6 +540,75 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(body["ratioAlerts"][0]["ratio"], 100.0)
 
 
+class RelinkTests(BackendTests):
+    def build_payload(self):
+        app.state.qbit.categories_payload = {
+            "Films": {"savePath": "/Qbittorrent/Films", "name": "Films"},
+            "Series": {"savePath": "/Qbittorrent/Series", "name": "Series"},
+        }
+        app.state.qbit.torrents_payload = [
+            {"hash": VALID_HASH, "name": "Un film", "state": "missingFiles", "category": "Films", "savePath": "/old/downloads/Film"},
+            {"hash": "b" * 40, "name": "Une série", "state": "missingFiles", "category": "Series", "savePath": "/old/downloads/Serie"},
+            {"hash": "c" * 40, "name": "Déjà aligné", "state": "missingFiles", "category": "Films", "savePath": "/Qbittorrent/Films"},
+            {"hash": "d" * 40, "name": "Sans catégorie", "state": "missingFiles", "category": "", "savePath": "/old/downloads/Other"},
+            {"hash": "e" * 40, "name": "Sain", "state": "uploading", "category": "Films", "savePath": "/Qbittorrent/Films"},
+        ]
+
+    def test_preview_groups_by_category_and_skips_unmapped(self):
+        self.build_payload()
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["total"], 4)
+        self.assertEqual(plan["relinkCount"], 2)
+        self.assertEqual(plan["recheckOnlyCount"], 1)
+        self.assertEqual(plan["skippedCount"], 1)
+        locations = sorted(group["location"] for group in plan["relink"])
+        self.assertEqual(locations, ["/Qbittorrent/Films", "/Qbittorrent/Series"])
+        self.assertEqual(plan["skipped"][0]["reason"], "Sans catégorie")
+
+    def test_apply_relinks_all_missing_in_one_pass(self):
+        self.build_payload()
+        response = self.post_action("/torrent-panel/api/torrents/relink", {})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result"]["relinked"], 2)
+        self.assertEqual(body["result"]["rechecked"], 3)
+        calls = app.state.qbit.calls
+        self.assertIn(("set_location", [VALID_HASH], "/Qbittorrent/Films"), calls)
+        self.assertIn(("set_location", ["b" * 40], "/Qbittorrent/Series"), calls)
+        self.assertEqual(calls[-1], ("recheck", [VALID_HASH, "b" * 40, "c" * 40]))
+
+    def test_preview_mode_never_mutates(self):
+        self.build_payload()
+        response = self.post_action("/torrent-panel/api/torrents/relink", {"preview": True})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["result"])
+        self.assertEqual(app.state.qbit.calls, [])
+
+    def test_relink_requires_csrf(self):
+        self.build_payload()
+        response = self.client.post("/torrent-panel/api/torrents/relink", json={})
+        self.assertEqual(response.status_code, 403)
+
+    def test_relink_filtered_by_selection(self):
+        self.build_payload()
+        response = self.post_action("/torrent-panel/api/torrents/relink", {"hashes": [VALID_HASH]})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["plan"]["relinkCount"], 1)
+        self.assertEqual(body["result"]["relinked"], 1)
+        self.assertEqual(app.state.qbit.calls[0], ("set_location", [VALID_HASH], "/Qbittorrent/Films"))
+
+    def test_no_relink_when_nothing_missing(self):
+        app.state.qbit.torrents_payload = [{"hash": VALID_HASH, "name": "Sain", "state": "uploading", "category": "Films", "savePath": "/Qbittorrent/Films"}]
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["total"], 0)
+        self.assertEqual(plan["relinkCount"], 0)
+
+
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         if hasattr(self, "client"):
@@ -600,6 +679,30 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         await self.client.set_force_start_many([VALID_HASH], True)
         self.assertEqual(calls[-1][1], "/api/v2/torrents/setForceStart")
         self.assertEqual(calls[-1][2]["value"], "true")
+
+    async def test_categories_returns_save_paths_map(self):
+        self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))
+
+        async def fake_request(method, path, **kwargs):
+            return FakeResponse({"Films": {"savePath": "/Qbittorrent/Films"}, "Series": {"savePath": "/Qbittorrent/Series"}})
+
+        self.client._request = fake_request
+        categories = await self.client.categories()
+        self.assertEqual(categories["Films"]["savePath"], "/Qbittorrent/Films")
+
+    async def test_set_location_sends_pipe_joined_hashes(self):
+        self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))
+        calls = []
+
+        async def fake_request(method, path, *, data=None, **kwargs):
+            calls.append((method, path, data))
+            return FakeResponse()
+
+        self.client._request = fake_request
+        await self.client.set_location_many([VALID_HASH, "b" * 40], "/Qbittorrent/Films")
+        self.assertEqual(calls[-1][1], "/api/v2/torrents/setLocation")
+        self.assertEqual(calls[-1][2]["hashes"], f"{VALID_HASH}|{'b' * 40}")
+        self.assertEqual(calls[-1][2]["location"], "/Qbittorrent/Films")
 
 
 class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):

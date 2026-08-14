@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard · Centre de contrôle</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260803-refonte">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260814-relink">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -159,6 +159,7 @@
           </div>
           <div class="page-header-actions">
             <button id="clearActiveFilters" type="button" class="button secondary" hidden>Effacer les filtres</button>
+            <button id="relinkMissingButton" type="button" class="button secondary" hidden>Réparer les fichiers manquants</button>
             <button id="densityToggle" type="button" class="button secondary" aria-pressed="false">Vue compacte</button>
             <button id="addTorrentButton" type="button" class="button primary">Ajouter un torrent</button>
           </div>
@@ -381,8 +382,21 @@
       </form>
     </dialog>
 
+    <dialog id="relinkDialog" class="dialog">
+      <form method="dialog" id="relinkForm">
+        <h2 id="relinkTitle">Réparer les fichiers manquants</h2>
+        <p id="relinkSummary" class="dialog-name"></p>
+        <div id="relinkPlan" class="relink-plan" aria-live="polite"></div>
+        <p class="field-message" id="relinkMessage" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelRelinkButton" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="confirmRelinkButton" value="confirm" class="button primary" type="button">Réparer</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=20260803-refonte"></script>
-    <script src="./static/dist/app.min.js?v=20260803-refonte" defer></script>
+    <script src="./config.js?v=20260814-relink"></script>
+    <script src="./static/dist/app.min.js?v=20260814-relink" defer></script>
   </body>
 </html>

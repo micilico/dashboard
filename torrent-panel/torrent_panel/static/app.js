@@ -166,6 +166,13 @@ const els = {
   detailDialog: document.querySelector("#detailDialog"),
   detailTitle: document.querySelector("#detailTitle"),
   detailBody: document.querySelector("#detailBody"),
+  relinkMissingButton: document.querySelector("#relinkMissingButton"),
+  relinkDialog: document.querySelector("#relinkDialog"),
+  relinkSummary: document.querySelector("#relinkSummary"),
+  relinkPlan: document.querySelector("#relinkPlan"),
+  relinkMessage: document.querySelector("#relinkMessage"),
+  cancelRelinkButton: document.querySelector("#cancelRelinkButton"),
+  confirmRelinkButton: document.querySelector("#confirmRelinkButton"),
 };
 
 const STATUS_GROUPS = {
@@ -1339,6 +1346,7 @@ function render() {
   els.summary.textContent = `${visible.length} affiché${visible.length > 1 ? "s" : ""} sur ${state.torrents.length}`;
   renderTrackerStats();
   renderSelection(visible);
+  renderRelinkButton();
   renderSortHeaders();
   updateDetails();
 }
@@ -1693,6 +1701,9 @@ function updateDetails() {
   const actions = document.createElement("div");
   actions.className = "action-row";
   actions.append(
+    ...(torrent.state === "missingFiles" || torrent.state === "error"
+      ? [button("Réparer l'emplacement", "primary", () => runRelink([torrent.hash]))]
+      : []),
     button("Revérifier", "secondary", () => runAdvancedAction(torrent.hash, "recheck", {}, "Revérification demandée.")),
     button("Nouvelle annonce", "secondary", () => runAdvancedAction(torrent.hash, "reannounce", {}, "Nouvelle annonce demandée.")),
     button(
@@ -1909,6 +1920,89 @@ function cancelAddTracker() {
   els.addTrackerDialog.close();
 }
 
+function renderRelinkButton() {
+  if (!els.relinkMissingButton) return;
+  const count = state.torrents.filter((torrent) => torrent.state === "missingFiles" || torrent.state === "error").length;
+  els.relinkMissingButton.hidden = count === 0;
+  els.relinkMissingButton.textContent = count ? `Réparer les fichiers manquants (${count})` : "Réparer les fichiers manquants";
+}
+
+async function runRelink(hashes = []) {
+  try {
+    const payload = await api(route("/api/torrents/relink"), {
+      method: "POST",
+      body: JSON.stringify(hashes.length ? { hashes } : {}),
+    });
+    const result = payload.result;
+    if (!result || !result.relinked) {
+      showToast("Aucun torrent manquant n'a pu être repositionné.");
+      return false;
+    }
+    const parts = [`${result.relinked} repositionné${result.relinked > 1 ? "s" : ""}`];
+    if (result.rechecked) parts.push(`${result.rechecked} revérifié${result.rechecked > 1 ? "s" : ""}`);
+    if (result.failed) parts.push(`${result.failed} échec${result.failed > 1 ? "s" : ""}`);
+    if (result.skipped) parts.push(`${result.skipped} ignoré${result.skipped > 1 ? "s" : ""}`);
+    showToast(`Réparation : ${parts.join(", ")}.`);
+    await loadTorrents({ silent: true, force: true });
+    return true;
+  } catch (error) {
+    showToast(describeError(error));
+    return false;
+  }
+}
+
+async function openRelinkDialog() {
+  els.relinkMessage.textContent = "";
+  els.confirmRelinkButton.disabled = true;
+  els.confirmRelinkButton.textContent = "Réparer";
+  els.relinkPlan.replaceChildren();
+  try {
+    const payload = await api(route("/api/torrents/relink-preview"));
+    const plan = payload.plan || {};
+    const relinkCount = Number(plan.relinkCount) || 0;
+    const recheckOnlyCount = Number(plan.recheckOnlyCount) || 0;
+    const skippedCount = Number(plan.skippedCount) || 0;
+    els.relinkSummary.textContent = `${relinkCount} torrent${relinkCount > 1 ? "s" : ""} à repositionner, ${recheckOnlyCount} à revérifier, ${skippedCount} sans catégorie ou chemin.`;
+    const list = document.createElement("ul");
+    for (const group of plan.relink || []) {
+      const li = document.createElement("li");
+      li.textContent = `${group.hashes.length} torrent${group.hashes.length > 1 ? "s" : ""} → ${group.location}`;
+      list.append(li);
+    }
+    if (list.childElementCount) els.relinkPlan.append(list);
+    if (skippedCount) {
+      const warn = document.createElement("p");
+      warn.className = "field-message";
+      warn.textContent = `${skippedCount} torrent(s) manquant(s) sans catégorie ou chemin configuré resteront en erreur.`;
+      els.relinkPlan.append(warn);
+    }
+    els.confirmRelinkButton.disabled = relinkCount === 0 && recheckOnlyCount === 0;
+    if (typeof trapFocus === "function") trapFocus(els.relinkDialog);
+    els.relinkDialog.showModal();
+  } catch (error) {
+    els.relinkSummary.textContent = describeError(error);
+  }
+}
+
+async function confirmRelink() {
+  els.confirmRelinkButton.disabled = true;
+  els.confirmRelinkButton.textContent = "Réparation…";
+  els.relinkMessage.textContent = "";
+  try {
+    const ok = await runRelink();
+    if (ok) els.relinkDialog.close();
+  } catch (error) {
+    els.relinkMessage.textContent = describeError(error);
+  } finally {
+    els.confirmRelinkButton.disabled = false;
+    els.confirmRelinkButton.textContent = "Réparer";
+  }
+}
+
+function cancelRelink() {
+  els.relinkDialog.close();
+}
+
 function configureLinks() {
   window.DashboardNavigation?.configure(state, state.activeView === "home" ? "home" : "torrent");
   if (els.torrentsNavLink) els.torrentsNavLink.href = `${route("/")}?view=torrents`;
@@ -2055,6 +2149,14 @@ function bindEvents() {
   els.confirmAddTrackerButton.addEventListener("click", confirmAddTracker);
   els.cancelAddTrackerButton.addEventListener("click", cancelAddTracker);
   els.addTrackerDialog.addEventListener("close", () => state.lastFocus?.focus?.());
+  els.relinkMissingButton.addEventListener("click", openRelinkDialog);
+  els.confirmRelinkButton.addEventListener("click", confirmRelink);
+  els.cancelRelinkButton.addEventListener("click", cancelRelink);
+  els.relinkDialog.addEventListener("close", () => state.lastFocus?.focus?.());
+  document.querySelector("#relinkForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    confirmRelink();
+  });
   els.addTrackerUrlInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();

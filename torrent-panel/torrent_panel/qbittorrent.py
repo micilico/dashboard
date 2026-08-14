@@ -297,6 +297,24 @@ class QBittorrentClient:
             data={"hashes": "|".join(torrent_hashes), "tags": tags},
         )
 
+    async def categories(self) -> dict[str, dict[str, Any]]:
+        response = await self._request("GET", "/api/v2/torrents/categories")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            logger.warning("qBittorrent returned invalid JSON for categories")
+            raise QbitError(502, "Reponse qBittorrent invalide.") from exc
+        if not isinstance(payload, dict):
+            raise QbitError(502, "Reponse qBittorrent invalide.")
+        return {str(name): item for name, item in payload.items() if isinstance(item, dict)}
+
+    async def set_location_many(self, torrent_hashes: list[str], location: str) -> None:
+        await self._request(
+            "POST",
+            "/api/v2/torrents/setLocation",
+            data={"hashes": "|".join(torrent_hashes), "location": location},
+        )
+
     async def set_download_limit_many(self, torrent_hashes: list[str], limit_bytes: int) -> None:
         await self._request(
             "POST",

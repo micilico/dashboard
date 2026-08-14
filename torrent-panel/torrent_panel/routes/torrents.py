@@ -18,6 +18,7 @@ from ..models import (
     AddTrackerPayload,
     DeleteTorrent,
     ForceStartTorrent,
+    RelinkRequest,
     TorrentCategoryUpdate,
     TorrentHashesAction,
     TorrentRateLimitUpdate,
@@ -25,6 +26,7 @@ from ..models import (
     TorrentTagsUpdate,
 )
 from ..qbittorrent import QbitError
+from ..services.relink import build_relink_plan, relink_missing
 from common import error_detail
 
 logger = logging.getLogger("torrent_panel.routes.trackers")
@@ -187,6 +189,29 @@ async def set_torrent_upload_limit(request: Request, payload: TorrentRateLimitUp
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
     return {"status": "upload_limit_updated", "count": len(hashes), "limitKiB": payload.limitKiB}
+
+
+@router.get("/torrents/relink-preview")
+async def relink_preview(request: Request) -> dict[str, Any]:
+    try:
+        torrents = await request.app.state.qbit.torrents()
+        categories = await request.app.state.qbit.categories()
+        return {"plan": build_relink_plan(torrents, categories)}
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+
+@router.post("/torrents/relink", dependencies=[Depends(require_action_guard)])
+async def relink_torrents(request: Request, payload: RelinkRequest) -> dict[str, Any]:
+    try:
+        hashes = [validate_hash(item) for item in payload.hashes]
+        return await relink_missing(
+            request.app.state.qbit,
+            hashes=hashes,
+            preview=payload.preview,
+        )
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
 
 
 @router.post("/torrents/set-sequential", dependencies=[Depends(require_action_guard)])
