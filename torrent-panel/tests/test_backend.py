@@ -819,6 +819,50 @@ class RelinkTests(BackendTests):
             relink_service.QBIT_SAVE_PATH = ""
             panel_config.QBIT_SAVE_PATH = ""
 
+    def test_relink_locates_renamed_files_in_different_category(self):
+        """Cas réel : fichiers renommés par le rangement + catégorie prowlarr mais contenu rangé dans Films."""
+        relink_service.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        panel_config.QBIT_SAVE_PATH = "/home/micilico/downloads/qbittorrent"
+        try:
+            import shutil
+
+            qbit_setup_dir = self.mount / "Qbittorrent"
+            if qbit_setup_dir.exists():
+                shutil.rmtree(qbit_setup_dir)
+            film_dir = self.mount / "qbittorrent" / "Films" / "Backrooms (2026)"
+            film_dir.mkdir(parents=True, exist_ok=True)
+            (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.mkv").write_bytes(b"0123456789")
+            (film_dir / "Backrooms.2026.MULTi.CA.2160p.WEB.H265-SUPPLY.nfo").write_bytes(b"nfo")
+            app.state.qbit.categories_payload = {
+                "prowlarr": {"savePath": "", "name": "prowlarr"},
+                "Films": {"savePath": "", "name": "Films"},
+            }
+            app.state.qbit.torrents_payload = [
+                {
+                    "hash": VALID_HASH,
+                    "name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
+                    "state": "pausedDL",
+                    "category": "prowlarr",
+                    "savePath": "/home/micilico/downloads/qbittorrent",
+                    "contentPath": "/home/micilico/downloads/qbittorrent/Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY",
+                },
+            ]
+            app.state.qbit.files_payload = {
+                VALID_HASH: [
+                    {"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.mkv", "size": 10},
+                    {"name": "Backrooms.2026.MULTi.VFQ.2160p.WEB.10bits.EAC3.5.1.H265-SUPPLY.nfo", "size": 3},
+                ]
+            }
+            relink_service._SCAN_CACHE["data"] = None
+            response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+            self.assertEqual(response.status_code, 200)
+            plan = response.json()["plan"]
+            self.assertEqual(plan["relinkCount"], 1)
+            self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films/Backrooms (2026)")
+        finally:
+            relink_service.QBIT_SAVE_PATH = ""
+            panel_config.QBIT_SAVE_PATH = ""
+
     def test_relink_plan_includes_paused_downloads(self):
         app.state.qbit.categories_payload = {
             "Films": {"savePath": "/mnt/ultra-media/Qbittorrent/Films", "name": "Films"},

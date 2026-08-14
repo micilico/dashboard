@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+import re
 import time
 from typing import Any
 
@@ -61,7 +62,8 @@ def _category_entry(categories: dict[str, dict[str, Any]], category: str) -> dic
 def _scan_index(mount_root: str, category_save_paths: list[str], category_names: list[str] | None = None) -> dict[str, Any]:
     """Index organized folders once per cache window.
 
-    Returns ``{"scope_dirs": [...], "files": {basename.casefold(): {dir_rel: size}}}``
+    Returns ``{"scope_dirs": [...], "files": {basename.casefold(): {dir_rel: size}},
+    "sizes": {size: [dir_rel, ...]}, "dir_basenames": {basename.casefold(): [dir_rel, ...]}}``
     where ``dir_rel`` paths are relative to ``mount_root``.
     """
     now = time.monotonic()
@@ -85,6 +87,7 @@ def _scan_index(mount_root: str, category_save_paths: list[str], category_names:
                     scope_dirs.append(os.path.relpath(os.path.join(dirpath, name), mount_root).replace(os.sep, "/"))
 
     files: dict[str, dict[str, int]] = {}
+    sizes: dict[int, list[str]] = {}
     dir_basenames: dict[str, list[str]] = {}
     for scope_rel in scope_dirs:
         scope_abs = os.path.join(mount_root, *scope_rel.split("/"))
@@ -97,15 +100,23 @@ def _scan_index(mount_root: str, category_save_paths: list[str], category_names:
                 except OSError:
                     size = -1
                 files.setdefault(filename.casefold(), {})[dir_rel] = size
+                if size > 0:
+                    sizes.setdefault(size, []).append(dir_rel)
 
     data = {
         "scope_dirs": sorted(set(scope_dirs)),
         "files": files,
+        "sizes": sizes,
         "dir_basenames": dir_basenames,
     }
     cache["data"] = data
     cache["ts"] = now
     return data
+
+
+def _name_tokens(value: str) -> set[str]:
+    """Lowercase alphanumeric tokens of a name, for fuzzy folder matching."""
+    return set(re.findall(r"[a-z0-9]+", str(value or "").lower()))
 
 
 def _locate_folder(
@@ -115,10 +126,13 @@ def _locate_folder(
 ) -> str | None:
     """Find the folder holding the torrent's data.
 
-    The "rangement" keeps the torrent's downloaded folder intact but nests it
-    under the category structure, so first match by that preserved folder name
-    (``folder_hint``, e.g. the torrent name / content path basename). If that
-    fails, fall back to matching by file name + size anywhere in the scope.
+    Matching strategies, tried in order:
+    1. Exact basename match (the "rangement" keeps the torrent's folder intact
+       but nests it under the category structure).
+    2. Folder basename == torrent name (``folder_hint``), e.g. the preserved
+       content path basename.
+    3. Fuzzy folder-name similarity against the hint (files were renamed too).
+    4. File size match anywhere in the scope (renamed files keep their size).
     """
     candidates: dict[str, dict[str, Any]] = {}
     for basename, size in file_specs:
@@ -145,7 +159,49 @@ def _locate_folder(
 
     if candidates:
         return max(candidates.items(), key=_score)[0]
-    return None
+
+    hint_tokens = _name_tokens(hint)
+
+    fuzzy: list[tuple[str, int]] = []
+    for dir_basename, dirs in index["dir_basenames"].items():
+        overlap = len(_name_tokens(dir_basename) & hint_tokens)
+        if overlap > 0:
+            for dir_rel in dirs:
+                fuzzy.append((dir_rel, overlap))
+    if fuzzy:
+        best_rel, best_overlap = max(fuzzy, key=lambda item: (item[1], -len(item[0])))
+        size_dir = _size_match_dir(index, file_specs, best_rel)
+        if size_dir:
+            return size_dir
+        if best_overlap >= 2:
+            return best_rel
+
+    return _size_match_dir(index, file_specs, None)
+
+
+def _size_match_dir(index: dict[str, Any], file_specs: list[tuple[str, int]], preferred: str | None) -> str | None:
+    """Return the directory whose files match the torrent's file sizes best.
+
+    Renamed files keep their size, so a size-only match can locate them even
+    when the basenames differ. If ``preferred`` is given, require it to hold at
+    least one size match before falling back to other candidates.
+    """
+    scored: dict[str, int] = {}
+    for _basename, size in file_specs:
+        if size <= 0:
+            continue
+        for dir_rel in index["sizes"].get(size, []):
+            scored[dir_rel] = scored.get(dir_rel, 0) + 1
+
+    if preferred is not None:
+        if preferred in scored:
+            return preferred
+        if not scored:
+            return None
+
+    if not scored:
+        return None
+    return max(scored.items(), key=lambda item: (item[1], -len(item[0])))[0]
 
 
 def _anchor_target(category_qbit_path: str, scope_mount_rel: str, located_mount_rel: str) -> str | None:
@@ -216,7 +272,6 @@ async def build_relink_plan(
             continue
 
         category = str(torrent.get("category") or "").strip()
-        category_info = _category_entry(categories, category) if category else None
         current = _normalize_path(str(torrent.get("savePath") or torrent.get("save_path") or ""))
         state = str(torrent.get("state") or "")
 
@@ -225,12 +280,8 @@ async def build_relink_plan(
             skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
             continue
 
-        category_qbit_path = str(category_info.get("savePath") or "").strip() if category_info else ""
-        if not category_qbit_path and category:
-            category_qbit_path = _normalize_path(posixpath.join(qbit_root or current, category))
-
         if selected_hashes is None:
-            at_category_root = bool(category_qbit_path and current == _normalize_path(category_qbit_path))
+            at_category_root = bool(current and current == _normalize_path(posixpath.join(qbit_root or "", category)))
             at_qbit_root = bool(qbit_root and current == qbit_root)
             if state not in MISSING_STATES and state not in PAUSED_DL_STATES and not at_category_root and not at_qbit_root:
                 logger.debug(
@@ -264,12 +315,13 @@ async def build_relink_plan(
             skipped.append(_skipped_entry(torrent, "Dossier catégorie non résolu"))
             continue
 
-        if not category_qbit_path:
-            logger.info("relink: %s (%s) ignoré — pas de chemin de catégorie", torrent_name, torrent_hash[:8])
-            skipped.append(_skipped_entry(torrent, "Sans catégorie ou chemin configuré"))
-            continue
+        scope_basename = posixpath.basename(scope_dir.rstrip("/"))
+        scope_category_info = _category_entry(categories, scope_basename) if scope_basename else None
+        anchor_base = str(scope_category_info.get("savePath") or "").strip() if scope_category_info else ""
+        if not anchor_base:
+            anchor_base = _normalize_path(posixpath.join(qbit_root or current, scope_basename))
 
-        target = _anchor_target(category_qbit_path, scope_dir, located)
+        target = _anchor_target(anchor_base, scope_dir, located)
         if not target:
             logger.info("relink: %s (%s) ignoré — cible non résolue (locate=%s)", torrent_name, torrent_hash[:8], located)
             skipped.append(_skipped_entry(torrent, "Chemin cible non résolu"))
