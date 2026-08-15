@@ -26,8 +26,11 @@ _SEASON_RE = re.compile(
     r"(?i)(?:^|[\s._\-/])(?:S(?:eason)?|Saison)[\s._-]*(\d{1,2})(?=$|[\s._\-/E])"
 )
 _EPISODE_RE = re.compile(r"(?i)(?:^|[\s._\-/])S(\d{1,2})E\d{1,3}\b")
+_ALT_EPISODE_RE = re.compile(r"(?i)(?:^|[\s._\-/])(\d{1,2})x\d{1,3}\b")
+_SPECIAL_RE = re.compile(r"(?i)(?:^|[\s._\-/])(?:specials?|sp[eé]cial(?:e|es)?)\b")
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 _VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".webm"}
+_DANGEROUS_EXTENSIONS = {".rar", ".zip", ".7z", ".part", ".exe", ".msi", ".bat", ".cmd", ".scr", ".com"}
 _ACTIVE_SEED_STATES = {"uploading", "stalledUP", "forcedUP", "queuedUP", "checkingUP"}
 _CHECKING_STATES = {"checkingUP", "checkingDL", "queuedForChecking", "checkingResumeData"}
 _PAUSED_STATES = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL", "missingFiles", "error"}
@@ -77,12 +80,14 @@ def _strip_common_root(path: str, root: str) -> str:
 
 
 def _season_number(value: str) -> int | None:
-    match = _EPISODE_RE.search(value) or _SEASON_RE.search(value)
+    match = _EPISODE_RE.search(value) or _ALT_EPISODE_RE.search(value) or _SEASON_RE.search(value)
+    if match is None and _SPECIAL_RE.search(value):
+        return 0
     return int(match.group(1)) if match else None
 
 
 def _series_title(value: str) -> str | None:
-    match = _EPISODE_RE.search(value) or _SEASON_RE.search(value)
+    match = _EPISODE_RE.search(value) or _ALT_EPISODE_RE.search(value) or _SEASON_RE.search(value) or _SPECIAL_RE.search(value)
     if not match:
         return None
     title = _clean_title(value[: match.start()])
@@ -192,6 +197,7 @@ def _torrent_plan(torrent: dict[str, Any], files: list[dict[str, Any]], qbit_roo
         "fileCount": len(paths),
         "initialState": str(torrent.get("state") or ""),
         "layout": "Chemins relatifs qBittorrent",
+        "confidence": "heuristic",
         "resumeAfterVerify": str(torrent.get("state") or "") in _ACTIVE_SEED_STATES,
         "alreadyOrganized": not operations and current_path == location,
     }
@@ -231,12 +237,119 @@ def _unassociated_files(mount_root: str, qbit_root: str, signatures: set[tuple[s
     return warnings
 
 
+def _orphan_media(mount_root: str, qbit_root: str, signatures: set[tuple[str, int]]) -> list[dict[str, Any]]:
+    """Return untracked video files as preview-only orphan media entries."""
+    video_extensions = _VIDEO_EXTENSIONS
+    mount = os.path.realpath(mount_root)
+    anchor_name = posixpath.basename(qbit_root.rstrip("/")).casefold()
+    anchor = mount
+    try:
+        for entry in os.scandir(mount):
+            if entry.is_dir() and entry.name.casefold() == anchor_name:
+                anchor = entry.path
+                break
+    except OSError:
+        return []
+    result: list[dict[str, Any]] = []
+    for directory, _dirs, filenames in os.walk(anchor):
+        for filename in filenames:
+            if posixpath.splitext(filename)[1].lower() not in video_extensions:
+                continue
+            path = os.path.join(directory, filename)
+            try:
+                signature = (filename.casefold(), os.path.getsize(path))
+            except OSError:
+                continue
+            if signature in signatures:
+                continue
+            relative = os.path.relpath(path, anchor).replace(os.sep, "/")
+            result.append({
+                "path": relative,
+                "status": "orphan",
+                "message": "Média rangé — aucun torrent associé",
+                "confidence": "manual_review",
+            })
+            if len(result) >= 500:
+                return result
+    return result
+
+
+def _missing_torrents(
+    mount_root: str,
+    qbit_root: str,
+    torrents: list[dict[str, Any]],
+    file_payloads: list[list[dict[str, Any]]],
+) -> list[dict[str, str]]:
+    """Find torrents whose media manifest has no matching file on disk."""
+    mount = os.path.realpath(mount_root)
+    if not os.path.isdir(mount):
+        return []
+    disk_signatures: set[tuple[str, int]] = set()
+    for directory, _dirs, filenames in os.walk(mount):
+        for filename in filenames:
+            try:
+                disk_signatures.add((filename.casefold(), os.path.getsize(os.path.join(directory, filename))))
+            except OSError:
+                continue
+    missing: list[dict[str, str]] = []
+    def _size(item: dict[str, Any]) -> int:
+        try:
+            return int(item.get("size") or 0)
+        except (TypeError, ValueError):
+            return 0
+    for torrent, files in zip(torrents, file_payloads):
+        media_files = [
+            item for item in files
+            if isinstance(item, dict) and posixpath.splitext(str(item.get("name") or ""))[1].lower() in _VIDEO_EXTENSIONS
+        ]
+        if media_files and not any(
+            (posixpath.basename(str(item.get("name") or "")).casefold(), _size(item)) in disk_signatures
+            for item in media_files
+        ):
+            missing.append({
+                "hash": str(torrent.get("hash") or "").lower(),
+                "name": str(torrent.get("name") or "Torrent"),
+                "reason": "Fichiers média introuvables sur le stockage — aucune mutation effectuée",
+            })
+    return missing
+
+
+def orphan_operations(orphan: dict[str, Any], qbit_root: str) -> list[dict[str, str]] | None:
+    """Build a move-only plan for one orphan video, or return ``None`` if unclear."""
+    source = _safe_relative(str(orphan.get("path") or ""))
+    filename = posixpath.basename(source)
+    series_season = _season_number(filename)
+    if series_season is not None:
+        title = _series_title(filename)
+        if not title:
+            return None
+        target_dir = posixpath.join(qbit_root, "Series", title, f"Saison {series_season}")
+    else:
+        movie = _movie_identity(filename)
+        if not movie:
+            return None
+        target_dir = posixpath.join(qbit_root, "Films", f"{movie[0]} ({movie[1]})")
+    cloud_root = posixpath.basename(qbit_root.rstrip("/"))
+    source_parent = posixpath.dirname(posixpath.join(cloud_root, source))
+    relative_target = posixpath.relpath(target_dir, qbit_root)
+    target_dir = posixpath.join(cloud_root, relative_target)
+    operations: list[dict[str, str]] = []
+    current = ""
+    for part in relative_target.split("/"):
+        next_path = posixpath.join(current, part)
+        operations.append({"op": "mkdir", "path": posixpath.join(cloud_root, current), "name": part})
+        current = next_path
+    operations.append({"op": "move", "path": source_parent, "old_name": filename, "dest": target_dir})
+    return operations
+
+
 async def build_organization_plan(
     qbit: Any,
     qbit_root: str,
     hashes: list[str] | None = None,
     *,
     mount_root: str | None = None,
+    metadata_resolver: Any | None = None,
 ) -> dict[str, Any]:
     root = _normalize_qbit_root(qbit_root)
     if not root:
@@ -262,6 +375,7 @@ async def build_organization_plan(
     candidates: list[dict[str, Any]] = []
     warnings: list[dict[str, str]] = []
     signatures: set[tuple[str, int]] = set()
+    total_bytes = 0
     torrents = [
         torrent
         for torrent in await qbit.torrents()
@@ -277,8 +391,13 @@ async def build_organization_plan(
     file_payloads = await asyncio.gather(
         *(fetch_files(str(torrent.get("hash") or "").lower()) for torrent in torrents)
     )
+    missing_torrents = _missing_torrents(mount_root, root, torrents, file_payloads) if mount_root else []
+    missing_hashes = {item["hash"] for item in missing_torrents}
+    warnings.extend(missing_torrents)
     for torrent, files in zip(torrents, file_payloads):
         torrent_hash = str(torrent.get("hash") or "").lower()
+        if torrent_hash in missing_hashes:
+            continue
         for item in files if isinstance(files, list) else []:
             if not isinstance(item, dict) or not item.get("name"):
                 continue
@@ -286,7 +405,22 @@ async def build_organization_plan(
                 size = int(item.get("size") or 0)
             except (TypeError, ValueError):
                 size = 0
+            total_bytes += max(0, size)
             signatures.add((posixpath.basename(str(item["name"])).casefold(), size))
+        dangerous = [
+            str(item.get("name") or "")
+            for item in files
+            if isinstance(item, dict)
+            and posixpath.splitext(str(item.get("name") or ""))[1].lower() in _DANGEROUS_EXTENSIONS
+        ]
+        if dangerous:
+            warnings.append({
+                "hash": torrent_hash,
+                "name": str(torrent.get("name") or "Torrent"),
+                "reason": "Archive, fichier incomplet ou exécutable détecté — rangement automatique refusé",
+                "files": ", ".join(dangerous[:5]),
+            })
+            continue
         if not _is_complete(torrent):
             warnings.append({"hash": torrent_hash, "name": str(torrent.get("name") or "Torrent"), "reason": "Torrent incomplet — rangement refusé"})
             continue
@@ -298,6 +432,17 @@ async def build_organization_plan(
         if entry is None:
             warnings.append({"hash": torrent_hash, "name": str(torrent.get("name") or "Torrent"), "reason": "Film ou série non identifié"})
             continue
+        if metadata_resolver is not None:
+            metadata = await metadata_resolver.resolve(
+                str(entry.get("folder") or entry.get("name") or ""),
+                "film" if entry.get("kind") == "film" else "series",
+                str(entry.get("folder") or "").rsplit("(", 1)[-1].rstrip(")") if entry.get("kind") == "film" else None,
+            )
+            entry["metadata"] = metadata
+            entry["confidence"] = metadata.get("confidence", entry.get("confidence", "heuristic"))
+            if entry["confidence"] == "ambiguous":
+                warnings.append({"hash": torrent_hash, "name": str(torrent.get("name") or "Torrent"), "reason": "Correspondance Jellyfin/TMDB ambiguë — validation manuelle requise"})
+                continue
         candidates.append(entry)
     owners: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for entry in candidates:
@@ -311,10 +456,25 @@ async def build_organization_plan(
         colliding_hashes.update(distinct)
         names = ", ".join(sorted({entry["name"] for entry in target_owners}))
         warnings.append({"name": names, "reason": f"Collision de destination ({target_file}) — rangement refusé"})
+    already_organized = [entry for entry in candidates if entry["alreadyOrganized"]]
     entries = [entry for entry in candidates if not entry["alreadyOrganized"] and entry["hash"] not in colliding_hashes]
+    orphan_media = _orphan_media(mount_root, root, signatures) if mount_root and not selected else []
     if mount_root and not selected:
         warnings.extend(_unassociated_files(mount_root, root, signatures))
-    return {"entries": entries, "warnings": warnings, "count": len(entries), "warningCount": len(warnings)}
+    return {
+        "entries": entries,
+        "alreadyOrganized": already_organized,
+        "orphanMedia": orphan_media,
+        "missingTorrents": missing_torrents,
+        "collisions": [warning for warning in warnings if "Collision" in str(warning.get("reason", ""))],
+        "ambiguous": [warning for warning in warnings if "ambigu" in str(warning.get("reason", "")).casefold()],
+        "ignored": [warning for warning in warnings if warning not in missing_torrents],
+        "warnings": warnings,
+        "count": len(entries),
+        "warningCount": len(warnings),
+        "totalOperations": sum(len(entry.get("operations", [])) for entry in entries),
+        "totalBytes": total_bytes,
+    }
 
 
 def _temporary_path(torrent_hash: str, index: int, old_path: str) -> str:
@@ -363,7 +523,17 @@ async def _rollback(
     return errors
 
 
-async def apply_organization_plan(qbit: Any, plan: dict[str, Any], resume_manager: "VerifiedResumeManager") -> dict[str, Any]:
+async def apply_organization_plan(
+    qbit: Any,
+    plan: dict[str, Any],
+    resume_manager: "VerifiedResumeManager | None" = None,
+) -> dict[str, Any]:
+    """Apply a plan while keeping every torrent paused.
+
+    ``resume_manager`` remains an optional compatibility argument for callers
+    from older versions.  It is intentionally ignored: organizing media must
+    never trigger a download or a resume automatically.
+    """
     results: list[dict[str, Any]] = []
     organized = 0
     for entry in plan.get("entries", []):
@@ -387,8 +557,6 @@ async def apply_organization_plan(qbit: Any, plan: dict[str, Any], resume_manage
                 await qbit.set_location_many([torrent_hash], entry["targetPath"])
                 location_changed = True
             await qbit.recheck_many([torrent_hash])
-            if entry["resumeAfterVerify"]:
-                resume_manager.track(torrent_hash, force_start=entry["initialState"] == "forcedUP")
             organized += 1
             results.append({"hash": torrent_hash, "name": entry["name"], "success": True, "status": "verification"})
         except QbitError as exc:
@@ -432,8 +600,9 @@ class VerifiedResumeManager:
         os.replace(temporary, self._state_path)
 
     def track(self, torrent_hash: str, *, force_start: bool = False) -> None:
-        self._pending[torrent_hash] = {"forceStart": force_start, "notBefore": time.time() + 5, "seenChecking": False}
-        self._save()
+        # Kept as a compatibility no-op for older callers.  Organization
+        # never schedules a resume anymore.
+        return None
 
     async def start(self) -> None:
         if self._task is None:
@@ -449,34 +618,9 @@ class VerifiedResumeManager:
             self._task = None
 
     async def check_once(self) -> None:
-        if not self._pending:
-            return
-        torrents = {str(item.get("hash") or "").lower(): item for item in await self._qbit.torrents()}
-        changed = False
-        for torrent_hash, pending in list(self._pending.items()):
-            torrent = torrents.get(torrent_hash)
-            if torrent is None:
-                continue
-            state = str(torrent.get("state") or "")
-            if state in _CHECKING_STATES:
-                pending["seenChecking"] = True
-                changed = True
-                continue
-            try:
-                progress = float(torrent.get("progress", 0))
-            except (TypeError, ValueError):
-                progress = 0
-            if time.time() < float(pending.get("notBefore", 0)):
-                continue
-            if progress < 1:
-                continue
-            await self._qbit.resume_many([torrent_hash])
-            if pending.get("forceStart"):
-                await self._qbit.set_force_start_many([torrent_hash], True)
-            del self._pending[torrent_hash]
-            changed = True
-        if changed:
-            self._save()
+        # Deliberately does nothing.  A verified torrent is still paused and
+        # can only be resumed by an explicit user action.
+        return None
 
     async def _loop(self) -> None:
         while True:

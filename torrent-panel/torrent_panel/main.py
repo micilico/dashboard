@@ -30,6 +30,7 @@ from .config import (  # noqa: E402
     MAX_RATE_KEYS,
     MEDIA_PUBLIC_PREFIX,
     NOTIFICATION_STATE_PATH,
+    LIBRARY_ORGANIZER_RUNS_PATH,
     ORGANIZER_RESUME_POLL_SECONDS,
     ORGANIZER_RESUME_STATE_PATH,
     PROWLARR_PANEL_PUBLIC_PREFIX,
@@ -70,7 +71,9 @@ from .services.media_automation import (  # noqa: E402
     MediaAutomationManager,
 )
 from .services.notifications import NotificationCenter  # noqa: E402
+from .services.organization_runs import OrganizationRunStore  # noqa: E402
 from .services.organizer import VerifiedResumeManager  # noqa: E402
+from .services.metadata import MediaMetadataResolver  # noqa: E402
 from .services.ratio_monitor import RatioMonitor  # noqa: E402
 from .services.stats import StatsStore  # noqa: E402
 from .services.tracker_stats import TrackerStatsStore  # noqa: E402
@@ -96,9 +99,7 @@ def build_client() -> QBittorrentClient:
 async def lifespan(app: FastAPI):
     await app.state.media_automation.start()
     await app.state.auto_relink.start()
-    await app.state.verified_resume.start()
     yield
-    await app.state.verified_resume.stop()
     await app.state.auto_relink.stop()
     await app.state.media_automation.stop()
     await app.state.qbit.close()
@@ -126,12 +127,14 @@ app.state.auto_relink = AutoRelinkManager(
     enabled=AUTO_RELINK_ENABLED,
     interval_seconds=AUTO_RELINK_INTERVAL_SECONDS,
 )
+app.state.organize_lock = asyncio.Lock()
 app.state.verified_resume = VerifiedResumeManager(
     app.state.qbit,
     ORGANIZER_RESUME_STATE_PATH,
     poll_seconds=ORGANIZER_RESUME_POLL_SECONDS,
 )
-app.state.organize_lock = asyncio.Lock()
+app.state.organization_runs = OrganizationRunStore(LIBRARY_ORGANIZER_RUNS_PATH)
+app.state.metadata_resolver = MediaMetadataResolver()
 app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
 app.state.tracker_stats = TrackerStatsStore(TRACKER_STATS_STATE_PATH)
 app.state.stats = StatsStore(STATS_STATE_PATH, history_days=STATS_HISTORY_DAYS)

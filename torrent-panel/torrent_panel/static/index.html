@@ -400,8 +400,21 @@
       <form method="dialog" id="organizeMediaForm">
         <h2>Ranger les médias sans perdre le seeding</h2>
         <p id="organizeMediaSummary" class="dialog-name">Analyse des torrents terminés…</p>
+        <div class="selection-toolbar" aria-label="Sélection des opérations">
+          <label><input id="organizeSelectAll" type="checkbox" checked> Tout sélectionner</label>
+          <span id="organizeSelectionSummary">0 sélectionné</span>
+          <label for="organizeFilter">Filtrer</label>
+          <select id="organizeFilter">
+            <option value="all">Tout</option>
+            <option value="film">Films</option>
+            <option value="series">Séries</option>
+            <option value="orphan">Orphelins</option>
+            <option value="warning">Avertissements</option>
+            <option value="collision">Collisions</option>
+          </select>
+        </div>
         <div id="organizeMediaPlan" class="relink-plan" aria-live="polite"></div>
-        <p class="field-message">qBittorrent mettra les torrents en pause, déplacera lui-même leurs fichiers, puis les revérifiera. Aucun téléchargement ne sera relancé si la vérification n’atteint pas 100 %.</p>
+        <p class="field-message">Les torrents seront mis en pause, déplacés via qBittorrent, puis revérifiés. Ils resteront toujours en pause : toute reprise devra être manuelle après confirmation d’une vérification à 100 %.</p>
         <p class="field-message" id="organizeMediaMessage" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="cancelOrganizeMediaButton" value="cancel" class="button secondary" type="button">Annuler</button>

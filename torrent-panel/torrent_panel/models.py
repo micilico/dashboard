@@ -94,6 +94,12 @@ class OrganizeRequest(BaseModel):
     hashes: list[str] = Field(default_factory=list, max_length=500)
 
 
+class LibraryOrganizeRequest(BaseModel):
+    hashes: list[str] = Field(default_factory=list, max_length=500)
+    orphanPaths: list[str] = Field(default_factory=list, max_length=500)
+    runId: str | None = Field(default=None, min_length=8, max_length=64)
+
+
 class AutomationRulePayload(BaseModel):
     name: str = Field(..., min_length=3, max_length=120)
     trigger: str = Field(..., min_length=3, max_length=80)

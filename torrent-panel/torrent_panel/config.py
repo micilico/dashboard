@@ -130,6 +130,10 @@ JELLYFIN_API_URL = os.getenv("TORRENT_PANEL_JELLYFIN_API_URL", "http://host.dock
 JELLYFIN_API_KEY = os.getenv("TORRENT_PANEL_JELLYFIN_API_KEY", "")
 JELLYFIN_LIBRARY_MAP = os.getenv("TORRENT_PANEL_JELLYFIN_LIBRARY_MAP", "")
 JELLYFIN_GLOBAL_FALLBACK = os.getenv("TORRENT_PANEL_JELLYFIN_GLOBAL_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
+TMDB_API_URL = os.getenv("TORRENT_PANEL_TMDB_API_URL", "https://api.themoviedb.org/3").strip().rstrip("/")
+TMDB_API_KEY = os.getenv("TORRENT_PANEL_TMDB_API_KEY", "").strip()
+MEDIA_METADATA_CACHE_TTL_SECONDS = float(os.getenv("TORRENT_PANEL_MEDIA_METADATA_CACHE_TTL_SECONDS", "3600"))
+MEDIA_METADATA_TIMEOUT_SECONDS = float(os.getenv("TORRENT_PANEL_MEDIA_METADATA_TIMEOUT_SECONDS", "4"))
 AUTO_RELINK_ENABLED = os.getenv("TORRENT_PANEL_AUTO_RELINK_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 AUTO_RELINK_INTERVAL_SECONDS = float(os.getenv("TORRENT_PANEL_AUTO_RELINK_INTERVAL_SECONDS", "3600"))
 ORGANIZER_RESUME_STATE_PATH = Path(
@@ -139,3 +143,9 @@ ORGANIZER_RESUME_STATE_PATH = Path(
     )
 )
 ORGANIZER_RESUME_POLL_SECONDS = float(os.getenv("TORRENT_PANEL_ORGANIZER_RESUME_POLL_SECONDS", "10"))
+LIBRARY_ORGANIZER_RUNS_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_LIBRARY_ORGANIZER_RUNS_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "library-organizer-runs.json"),
+    )
+)

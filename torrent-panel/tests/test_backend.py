@@ -38,6 +38,8 @@ from torrent_panel import config as panel_config  # noqa: E402
 from torrent_panel.services.ratio_monitor import MAX_THRESHOLD, MIN_THRESHOLD, RatioMonitor, RatioThresholdError  # noqa: E402
 from torrent_panel.services.stats import StatsStore  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
+from torrent_panel.services.organization_runs import OrganizationRunStore  # noqa: E402
+from torrent_panel.services.metadata import MediaMetadataResolver  # noqa: E402
 
 
 VALID_HASH = "a" * 40
@@ -145,6 +147,8 @@ class BackendTests(unittest.TestCase):
         self.original_ratio_monitor = app.state.ratio_monitor
         self.original_limiter = app.state.action_limiter
         self.original_verified_resume = app.state.verified_resume
+        self.original_organization_runs = app.state.organization_runs
+        self.original_metadata_resolver = app.state.metadata_resolver
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
         self.original_tr4ker_announce_url = torrent_routes.TR4KER_ANNOUNCE_URL
         app.state.qbit = FakeQbit()
@@ -178,6 +182,8 @@ class BackendTests(unittest.TestCase):
             Path(tempfile.mkdtemp()) / "organizer-resume.json",
             poll_seconds=2,
         )
+        app.state.organization_runs = OrganizationRunStore(Path(tempfile.mkdtemp()) / "runs.json")
+        app.state.metadata_resolver = MediaMetadataResolver()
         app.state.tracker_stats = TrackerStatsStore(temp_state.parent / "tracker-stats.json")
         app.state.stats = StatsStore(temp_state.parent / "stats.json", history_days=30)
         app.state.ratio_monitor = RatioMonitor(temp_state.parent / "ratio-monitor.json", threshold=10.0)
@@ -196,6 +202,8 @@ class BackendTests(unittest.TestCase):
         app.state.ratio_monitor = self.original_ratio_monitor
         app.state.action_limiter = self.original_limiter
         app.state.verified_resume = self.original_verified_resume
+        app.state.organization_runs = self.original_organization_runs
+        app.state.metadata_resolver = self.original_metadata_resolver
         app.state.csrf_tokens = self.original_csrf_tokens
         torrent_routes.TR4KER_ANNOUNCE_URL = self.original_tr4ker_announce_url
 
@@ -1192,6 +1200,72 @@ class OrganizerTests(BackendTests):
             [{"type": "folder", "oldPath": "The.Show.S01.1080p", "newPath": "The Show/Saison 1"}],
         )
 
+    def test_alt_episode_notation_is_classified_as_series(self):
+        torrent_hash = "b" * 40
+        app.state.qbit.torrents_payload = [{
+            "hash": torrent_hash,
+            "name": "The.Show.1x02.1080p",
+            "state": "uploading",
+            "progress": 1,
+            "size": 10,
+            "remaining": 0,
+            "savePath": self.QBIT_ROOT,
+        }]
+        app.state.qbit.files_payload = {torrent_hash: [{"name": "The.Show.1x02.mkv", "size": 10}]}
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        self.assertEqual(plan["entries"][0]["kind"], "series")
+        self.assertIn("Saison 1", plan["entries"][0]["targetFiles"][0])
+
+    def test_library_preview_and_run_are_persisted_without_secrets(self):
+        self._movie_payload()
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
+            preview = self.client.get("/torrent-panel/api/torrents/organize-library-preview")
+        self.assertEqual(preview.status_code, 200)
+        run_id = preview.json()["runId"]
+        with (
+            mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT),
+            mock.patch.object(torrent_routes, "MEDIA_MOUNT_PATH", "/path/that/does/not/exist"),
+            mock.patch.object(app.state.media_automation, "refresh_rclone", new=mock.AsyncMock()),
+            mock.patch.object(app.state.media_automation, "trigger_jellyfin_scan", new=mock.AsyncMock(return_value={"scope": "global"})),
+        ):
+            response = self.post_action("/torrent-panel/api/torrents/organize-library", {"runId": run_id, "hashes": [VALID_HASH]})
+        self.assertEqual(response.status_code, 200)
+        stored = self.client.get(f"/torrent-panel/api/torrents/organize-library-runs/{run_id}").json()
+        self.assertEqual(stored["status"], "completed")
+        self.assertNotIn("QBITTORRENT_PASSWORD", str(stored))
+        self.assertNotIn("JELLYFIN_API_KEY", str(stored))
+        self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
+
+    def test_library_preview_uses_backend_metadata_confidence(self):
+        self._movie_payload()
+        app.state.metadata_resolver.resolve = mock.AsyncMock(return_value={"status": "resolved", "confidence": "certain", "source": "jellyfin"})
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
+            response = self.client.get("/torrent-panel/api/torrents/organize-library-preview")
+        self.assertEqual(response.status_code, 200)
+        entry = response.json()["plan"]["entries"][0]
+        self.assertEqual(entry["confidence"], "certain")
+        self.assertEqual(entry["metadata"]["source"], "jellyfin")
+
+    def test_ambiguous_backend_metadata_is_blocked(self):
+        self._movie_payload()
+        app.state.metadata_resolver.resolve = mock.AsyncMock(return_value={"status": "ambiguous", "confidence": "ambiguous"})
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
+            response = self.client.get("/torrent-panel/api/torrents/organize-library-preview")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["plan"]["entries"], [])
+        self.assertIn("ambiguë", response.json()["plan"]["warnings"][0]["reason"])
+
+    def test_orphan_operations_use_cloud_relative_paths_and_move_only(self):
+        operations = organizer_service.orphan_operations(
+            {"path": "Incoming/Dune.2021.1080p.mkv"},
+            self.QBIT_ROOT,
+        )
+        self.assertIsNotNone(operations)
+        self.assertTrue(all(not str(item.get("path", "")).startswith("/") for item in operations or []))
+        self.assertTrue(all(item.get("op") != "copy" for item in operations or []))
+        self.assertEqual((operations or [])[-1]["op"], "move")
+        self.assertTrue((operations or [])[-1]["dest"].startswith("qbittorrent/Films/"))
+
     def test_multi_season_pack_keeps_one_series_tree_and_each_season(self):
         torrent_hash = "c" * 40
         app.state.qbit.torrents_payload = [
@@ -1254,7 +1328,7 @@ class OrganizerTests(BackendTests):
         self.assertIn("2.8 minimum", plan["warnings"][0]["reason"])
         self.assertEqual(app.state.qbit.calls, [])
 
-    def test_apply_uses_qbittorrent_then_rechecks_and_tracks_safe_resume(self):
+    def test_apply_uses_qbittorrent_then_rechecks_and_never_resumes(self):
         self._movie_payload()
         plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
         result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
@@ -1267,7 +1341,7 @@ class OrganizerTests(BackendTests):
         self.assertLess(pause_index, rename_calls[0])
         self.assertLess(rename_calls[-1], location_index)
         self.assertLess(location_index, recheck_index)
-        self.assertEqual(app.state.verified_resume.snapshot()["pending"], 1)
+        self.assertEqual(app.state.verified_resume.snapshot()["pending"], 0)
         self.assertNotIn("resume", [call[0] for call in calls])
 
     def test_failed_rename_rolls_back_and_never_rechecks_or_resumes(self):
@@ -1281,17 +1355,16 @@ class OrganizerTests(BackendTests):
         self.assertNotIn("recheck", [call[0] for call in app.state.qbit.calls])
         self.assertEqual(app.state.verified_resume.snapshot()["pending"], 0)
 
-    def test_resume_manager_only_resumes_verified_torrent(self):
+    def test_resume_manager_never_resumes_automatically(self):
         self._movie_payload()
         manager = app.state.verified_resume
         manager.track(VALID_HASH)
-        manager._pending[VALID_HASH]["notBefore"] = 0
         app.state.qbit.torrents_payload[0]["progress"] = 0.99
         asyncio.run(manager.check_once())
         self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
         app.state.qbit.torrents_payload[0]["progress"] = 1
         asyncio.run(manager.check_once())
-        self.assertIn(("resume", [VALID_HASH]), app.state.qbit.calls)
+        self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
         self.assertEqual(manager.snapshot()["pending"], 0)
 
     def test_organize_requires_csrf(self):

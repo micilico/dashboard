@@ -10,7 +10,8 @@ from starlette.concurrency import run_in_threadpool
 
 from common import error_detail
 
-from ..config import INTERNAL_TOKEN, SEARCH_MAX_RESULTS
+from ..config import INTERNAL_TOKEN, MOUNT_PATH, SEARCH_MAX_RESULTS
+from ..security import resolve_path_within
 from ..storage import (
     list_directory,
     upload_file_streaming,
@@ -213,7 +214,11 @@ async def internal_arrange_batch(
         folder_name = str(item.get("name") or "")
         try:
             if op == "mkdir":
-                result = await run_in_threadpool(create_directory, path, folder_name)
+                target = resolve_path_within(MOUNT_PATH, os.path.join(path, folder_name), must_exist=False)
+                if os.path.isdir(target):
+                    result = {"success": True}
+                else:
+                    result = await run_in_threadpool(create_directory, path, folder_name)
                 results.append({"success": bool(result.get("success", True)), "op": op, "path": path, "new_name": folder_name})
             elif op == "move":
                 await run_in_threadpool(move_item, path, old_name, dest)

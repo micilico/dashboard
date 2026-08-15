@@ -18,6 +18,7 @@ from ..models import (
     AddTrackerPayload,
     DeleteTorrent,
     ForceStartTorrent,
+    LibraryOrganizeRequest,
     RelinkRequest,
     OrganizeRequest,
     TorrentCategoryUpdate,
@@ -28,7 +29,9 @@ from ..models import (
 )
 from ..qbittorrent import QbitError
 from ..services.relink import relink_missing
-from ..services.organizer import apply_organization_plan, build_organization_plan
+from ..services.organizer import apply_organization_plan, build_organization_plan, orphan_operations
+from ..services.cloud_panel import CloudPanelError, arrange_batch
+from ..services.organization_runs import journal_operation, journal_orphan_operation
 from ..services.media_automation import MediaAutomationError
 from common import error_detail
 logger = logging.getLogger("torrent_panel.routes.trackers")
@@ -263,7 +266,7 @@ async def organize_torrents_preview(
 
 @router.get("/torrents/organize-status")
 async def organize_torrents_status(request: Request) -> dict[str, Any]:
-    return request.app.state.verified_resume.snapshot()
+    return {"pending": 0, "hashes": [], "automaticResume": False}
 
 
 @router.post("/torrents/organize", dependencies=[Depends(require_action_guard)])
@@ -278,7 +281,7 @@ async def organize_torrents(request: Request, payload: OrganizeRequest) -> dict[
                 hashes=hashes,
                 mount_root=MEDIA_MOUNT_PATH,
             )
-            result = await apply_organization_plan(request.app.state.qbit, plan, request.app.state.verified_resume)
+            result = await apply_organization_plan(request.app.state.qbit, plan)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
 
@@ -301,6 +304,132 @@ async def organize_torrents(request: Request, payload: OrganizeRequest) -> dict[
             refresh["jellyfin"] = "failed"
             refresh["jellyfinMessage"] = exc.public_message
     return {"plan": plan, "result": result, "refresh": refresh}
+
+
+async def _library_plan(request: Request, hashes: list[str] | None) -> dict[str, Any]:
+    return await build_organization_plan(
+        request.app.state.qbit,
+        QBIT_SAVE_PATH,
+        hashes=hashes,
+        mount_root=MEDIA_MOUNT_PATH,
+        metadata_resolver=request.app.state.metadata_resolver,
+    )
+
+
+@router.get("/torrents/organize-library-preview")
+async def organize_library_preview(
+    request: Request,
+    torrent_hash: str = Query(default="", alias="hash"),
+) -> dict[str, Any]:
+    """Create a non-destructive global library organization plan."""
+    hashes = [validate_hash(torrent_hash)] if torrent_hash else []
+    try:
+        plan = await _library_plan(request, hashes or None)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+    run = request.app.state.organization_runs.create(hashes)
+    request.app.state.organization_runs.update(
+        run["runId"],
+        plan=plan,
+        warnings=plan.get("warnings", []),
+    )
+    return {"runId": run["runId"], "plan": plan}
+
+
+@router.post("/torrents/organize-library", dependencies=[Depends(require_action_guard)])
+async def organize_library(request: Request, payload: LibraryOrganizeRequest) -> dict[str, Any]:
+    """Apply a selected global plan; every torrent remains paused afterward."""
+    hashes = [validate_hash(value) for value in payload.hashes]
+    async with request.app.state.organize_lock:
+        try:
+            # Orphans live on disk, not in a qBittorrent selection.  When the
+            # request contains both kinds of items, build one full read-only
+            # plan, then keep only the explicitly selected torrent entries.
+            plan = await _library_plan(request, None if payload.orphanPaths else (hashes or None))
+            if payload.orphanPaths:
+                selected_hashes = set(hashes)
+                plan["entries"] = [
+                    entry for entry in plan.get("entries", [])
+                    if str(entry.get("hash") or "").lower() in selected_hashes
+                ]
+                plan["totalOperations"] = sum(len(entry.get("operations", [])) for entry in plan["entries"])
+            result = await apply_organization_plan(request.app.state.qbit, plan, None)
+        except QbitError as exc:
+            raise qbit_error_response(exc) from exc
+
+        run = request.app.state.organization_runs.get(payload.runId) if payload.runId else None
+        if run is None:
+            run = request.app.state.organization_runs.create(hashes)
+        orphan_paths = set(payload.orphanPaths)
+        if not payload.hashes and not payload.orphanPaths:
+            orphan_paths = {str(item.get("path")) for item in plan.get("orphanMedia", [])}
+        orphan_items = [item for item in plan.get("orphanMedia", []) if str(item.get("path")) in orphan_paths]
+        orphan_results: list[dict[str, Any]] = []
+        orphan_journal: list[dict[str, Any]] = []
+        for orphan in orphan_items:
+            operations = orphan_operations(orphan, QBIT_SAVE_PATH)
+            if operations is None:
+                orphan_result = {"path": orphan.get("path", ""), "success": False, "error": "Identification ambiguë"}
+                orphan_results.append(orphan_result)
+                orphan_journal.append(journal_orphan_operation(orphan, [], orphan_result))
+                continue
+            try:
+                cloud_result = await arrange_batch(operations)
+                orphan_result = {
+                    "path": orphan.get("path", ""),
+                    "success": cloud_result.get("failed", 0) == 0,
+                    "message": "Média rangé — aucun torrent associé" if cloud_result.get("failed", 0) == 0 else "Opération partiellement échouée",
+                }
+            except CloudPanelError as exc:
+                orphan_result = {"path": orphan.get("path", ""), "success": False, "error": exc.message}
+            orphan_results.append(orphan_result)
+            orphan_journal.append(journal_orphan_operation(orphan, operations, orphan_result))
+        result["orphansOrganized"] = sum(1 for item in orphan_results if item.get("success"))
+        result["orphanResults"] = orphan_results
+        by_hash = {str(item.get("hash")): item for item in result.get("results", [])}
+        journal = [
+            journal_operation(entry, by_hash.get(str(entry.get("hash")), {"success": False, "error": "Non traité"}))
+            for entry in plan.get("entries", [])
+        ]
+        journal.extend(orphan_journal)
+        has_failure = bool(result.get("failed")) or any(not item.get("success") for item in orphan_results)
+        stored = request.app.state.organization_runs.update(
+            run["runId"],
+            status="completed" if not has_failure else "partial_failure",
+            plan=plan,
+            result=result,
+            operations=journal,
+            warnings=plan.get("warnings", []),
+        )
+
+    refresh = {"rclone": "skipped", "jellyfin": "skipped"}
+    if result.get("organized") or result.get("orphansOrganized"):
+        try:
+            await request.app.state.media_automation.refresh_rclone(
+                dirs=["qbittorrent"], recursive=True, async_run=True
+            )
+            refresh["rclone"] = "requested"
+        except MediaAutomationError as exc:
+            refresh["rclone"] = "failed"
+            refresh["rcloneMessage"] = exc.public_message
+        try:
+            await request.app.state.media_automation.trigger_jellyfin_scan([])
+            refresh["jellyfin"] = "requested"
+        except MediaAutomationError as exc:
+            refresh["jellyfin"] = "failed"
+            refresh["jellyfinMessage"] = exc.public_message
+    return {"runId": stored["runId"] if stored else run["runId"], "plan": plan, "result": result, "refresh": refresh}
+
+
+@router.get("/torrents/organize-library-runs/{run_id}")
+async def organize_library_run(request: Request, run_id: str) -> dict[str, Any]:
+    run = request.app.state.organization_runs.get(run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=error_detail("organization_run_not_found", "Exécution introuvable.", "Relancer une analyse"),
+        )
+    return run
 
 
 @router.post("/torrents/set-sequential", dependencies=[Depends(require_action_guard)])

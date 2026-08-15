@@ -7,7 +7,7 @@ import re
 
 from ..config import MOUNT_PATH
 from ..security import resolve_path_within
-from ..storage import clear_scandir_cache, create_directory, move_item, rename_item
+from ..storage import clear_scandir_cache, create_directory, delete_item, move_item, rename_item
 
 _SEASON_RE = re.compile(
     r"(?i)\bS(\d{1,2})(?:E\d{1,3}){0,2}\b"
@@ -354,7 +354,7 @@ def _move_children_deduplicated(src_dir: str, dest_dir_rel: str, source: str, ki
                 errors.append(f"{source}/{child.name} : conflit de contenu")
             else:
                 try:
-                    os.remove(child.path)
+                    delete_item(source_parent_rel, child.name, permanent=False)
                 except OSError:
                     pass
             skipped += 1
@@ -407,7 +407,7 @@ def _place_loose(src_parent_rel: str, name: str, season_rel: str, errors: list[s
             errors.append(f"{name} : conflit de contenu")
         elif source_size == target_size and _same_file(os.path.join(parent, name), target_file):
             try:
-                os.remove(os.path.join(parent, name))
+                delete_item(src_parent_rel, name, permanent=False)
             except OSError:
                 pass
         else:
@@ -435,7 +435,7 @@ def _merge_movie(src_parent_rel: str, name: str, destination_rel: str, is_dir: b
                     errors.append(f"{name} : conflit de contenu")
                 elif _same_file(source_abs, os.path.join(destination, name)):
                     try:
-                        os.remove(source_abs)
+                        delete_item(src_parent_rel, name, permanent=False)
                     except OSError:
                         pass
                 else:
@@ -454,7 +454,7 @@ def _merge_movie(src_parent_rel: str, name: str, destination_rel: str, is_dir: b
                 errors.append(f"{name} : conflit de contenu")
             else:
                 try:
-                    os.remove(source_abs)
+                    delete_item(src_parent_rel, name, permanent=False)
                 except OSError:
                     pass
             return 0, 1
