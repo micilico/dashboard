@@ -509,18 +509,35 @@ suite('Drag & drop (move) logic', () => {
     assert.deepEqual(payload.body, { path: "docs", name: "file.txt", dest: "archive" });
   });
 
-  test('rows are draggable and folders expose drop targets calling the move API', () => {
-    assert.ok(appSource.includes("tr.draggable = true"));
-    assert.ok(appSource.includes('dataTransfer.effectAllowed = "move"'));
-    assert.ok(appSource.includes("moveItemsTo(f.path, items)"));
+  test('rows use pointer drag sources and folders expose pointer drop targets', () => {
+    assert.ok(appSource.includes("wirePointerDragSource(tr, f)"));
+    assert.ok(appSource.includes("wirePointerDropTarget(tr, () => f.path)"));
+    assert.ok(appSource.includes("moveItemsTo(dest, items)"));
     assert.ok(appSource.includes('au("/files/move")'));
-    assert.ok(appSource.includes("classList.add(\"drop-target\")"));
+    assert.ok(appSource.includes("pointer-drop-active"));
   });
 
-  test('grid tiles are draggable and MIME fallback uses the active drag state', () => {
-    assert.ok(appSource.includes('tile.draggable = true'));
-    assert.ok(appSource.includes('tile.addEventListener("dragstart", (e) => dragPayload(e, f))'));
-    assert.ok(appSource.includes('if (!raw) return dragItems'));
+  test('grid tiles use the same pointer drag and drop pipeline', () => {
+    assert.ok(appSource.includes("wirePointerDragSource(tile, f)"));
+    assert.ok(appSource.includes("wirePointerDropTarget(tile, () => f.path)"));
+  });
+
+  test('pointer drag waits for a movement threshold and suppresses the trailing click', () => {
+    assert.ok(appSource.includes("distance < 6"));
+    assert.ok(appSource.includes("suppressPointerClickUntil = performance.now() + 500"));
+    assert.ok(appSource.includes("e.stopImmediatePropagation()"));
+  });
+
+  test('invalid self, descendant and same-folder drops are rejected', () => {
+    function canPointerDrop(items, destPath) {
+      const srcDirs = new Set(items.map(i => i.path.split("/").slice(0, -1).join("/")));
+      if (srcDirs.size === 1 && [...srcDirs][0] === destPath) return false;
+      return !items.some(i => i.is_dir && (destPath === i.path || destPath.startsWith(i.path + "/")));
+    }
+    assert.strictEqual(canPointerDrop([{ path: "docs/a.txt", is_dir: false }], "docs"), false);
+    assert.strictEqual(canPointerDrop([{ path: "docs", is_dir: true }], "docs"), false);
+    assert.strictEqual(canPointerDrop([{ path: "docs", is_dir: true }], "docs/sub"), false);
+    assert.strictEqual(canPointerDrop([{ path: "docs/a.txt", is_dir: false }], "archive"), true);
   });
 
   test('breadcrumb crumbs and root/parent nav act as move drop targets', () => {
@@ -569,6 +586,12 @@ suite('Ranger les médias feature', () => {
     assert.ok(appSource.includes('au("/files/organize/preview")'));
     assert.ok(appSource.includes('au("/files/organize/apply")'));
     assert.ok(!appSource.includes('"/files/organize-series/'));
+  });
+
+  test('qBittorrent folders delegate media organization to Torrent Panel', () => {
+    assert.ok(appSource.includes('qbitOwned = S.path.split("/")'));
+    assert.ok(appSource.includes("organizeButton.disabled = qbitOwned"));
+    assert.ok(appSource.includes("Ranger pour Jellyfin"));
   });
 
   test('preview renders series, movies and parasites sections safely', () => {

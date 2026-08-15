@@ -12,13 +12,14 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from .csrf_guard import require_action_guard
-from ..config import ALLOWED_SAVE_PATHS, HASH_RE, TR4KER_ANNOUNCE_URL
+from ..config import ALLOWED_SAVE_PATHS, HASH_RE, MEDIA_MOUNT_PATH, QBIT_SAVE_PATH, TR4KER_ANNOUNCE_URL
 from ..models import (
     AddMagnet,
     AddTrackerPayload,
     DeleteTorrent,
     ForceStartTorrent,
     RelinkRequest,
+    OrganizeRequest,
     TorrentCategoryUpdate,
     TorrentHashesAction,
     TorrentRateLimitUpdate,
@@ -27,6 +28,8 @@ from ..models import (
 )
 from ..qbittorrent import QbitError
 from ..services.relink import relink_missing
+from ..services.organizer import apply_organization_plan, build_organization_plan
+from ..services.media_automation import MediaAutomationError
 from common import error_detail
 logger = logging.getLogger("torrent_panel.routes.trackers")
 
@@ -236,6 +239,57 @@ async def relink_torrents(request: Request, payload: RelinkRequest) -> dict[str,
         )
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
+
+
+@router.get("/torrents/organize-preview")
+async def organize_torrents_preview(request: Request) -> dict[str, Any]:
+    """Preview a Jellyfin layout derived exclusively from qBittorrent-owned files."""
+    try:
+        return {"plan": await build_organization_plan(request.app.state.qbit, QBIT_SAVE_PATH, mount_root=MEDIA_MOUNT_PATH)}
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+
+@router.get("/torrents/organize-status")
+async def organize_torrents_status(request: Request) -> dict[str, Any]:
+    return request.app.state.verified_resume.snapshot()
+
+
+@router.post("/torrents/organize", dependencies=[Depends(require_action_guard)])
+async def organize_torrents(request: Request, payload: OrganizeRequest) -> dict[str, Any]:
+    """Pause, organize through qBittorrent, verify, then refresh rclone/Jellyfin."""
+    hashes = [validate_hash(value) for value in payload.hashes]
+    try:
+        async with request.app.state.organize_lock:
+            plan = await build_organization_plan(
+                request.app.state.qbit,
+                QBIT_SAVE_PATH,
+                hashes=hashes,
+                mount_root=MEDIA_MOUNT_PATH,
+            )
+            result = await apply_organization_plan(request.app.state.qbit, plan, request.app.state.verified_resume)
+    except QbitError as exc:
+        raise qbit_error_response(exc) from exc
+
+    refresh = {"rclone": "skipped", "jellyfin": "skipped"}
+    if result["organized"]:
+        try:
+            await request.app.state.media_automation.refresh_rclone(
+                dirs=["qbittorrent/Films", "qbittorrent/Series"],
+                recursive=True,
+                async_run=True,
+            )
+            refresh["rclone"] = "requested"
+        except MediaAutomationError as exc:
+            refresh["rclone"] = "failed"
+            refresh["rcloneMessage"] = exc.public_message
+        try:
+            await request.app.state.media_automation.trigger_jellyfin_scan([])
+            refresh["jellyfin"] = "requested"
+        except MediaAutomationError as exc:
+            refresh["jellyfin"] = "failed"
+            refresh["jellyfinMessage"] = exc.public_message
+    return {"plan": plan, "result": result, "refresh": refresh}
 
 
 @router.post("/torrents/set-sequential", dependencies=[Depends(require_action_guard)])

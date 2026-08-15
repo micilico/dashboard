@@ -1606,6 +1606,29 @@ class TestMediaOrganizer:
         with pytest.raises(ValueError, match="Chemin hors|introuvable"):
             apply_organization_plan("../")
 
+    def test_qbittorrent_tree_is_rejected_by_browser_organizer(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        (tmp_path / "qbittorrent").mkdir()
+        import importlib
+        import cloud_panel.routes.files as files_routes
+        import cloud_panel.main
+
+        importlib.reload(files_routes)
+        importlib.reload(cloud_panel.main)
+        app = cloud_panel.main.app
+        app.state.action_limiter = type("L", (), {"allow": lambda self, key: True})()
+        from fastapi.testclient import TestClient
+
+        client = TestClient(app)
+        session = client.get("/cloud-panel/api/session").json()
+        response = client.post(
+            "/cloud-panel/api/files/organize/preview",
+            data={"path": "qbittorrent"},
+            headers={"X-Cloud-Panel-CSRF": session["csrfToken"]},
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "qbit_organize_coordinated"
+
 
 class TestUltraQuota:
     def test_parse_ultra_quota_valid(self):

@@ -90,6 +90,10 @@ class RelinkRequest(BaseModel):
     recheck: bool = False
 
 
+class OrganizeRequest(BaseModel):
+    hashes: list[str] = Field(default_factory=list, max_length=500)
+
+
 class AutomationRulePayload(BaseModel):
     name: str = Field(..., min_length=3, max_length=120)
     trigger: str = Field(..., min_length=3, max_length=80)

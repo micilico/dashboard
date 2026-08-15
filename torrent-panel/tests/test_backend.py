@@ -33,6 +33,7 @@ from torrent_panel.services.monitoring import (
     storage_snapshot,
 )  # noqa: E402
 from torrent_panel.services import relink as relink_service  # noqa: E402
+from torrent_panel.services import organizer as organizer_service  # noqa: E402
 from torrent_panel import config as panel_config  # noqa: E402
 from torrent_panel.services.ratio_monitor import MAX_THRESHOLD, MIN_THRESHOLD, RatioMonitor, RatioThresholdError  # noqa: E402
 from torrent_panel.services.stats import StatsStore  # noqa: E402
@@ -60,6 +61,7 @@ class FakeQbit:
         self.categories_payload = {}
         self.files_payload = {}
         self.fail_location_hashes: set[str] = set()
+        self.fail_rename_old_paths: set[str] = set()
 
     async def torrents(self):
         return list(self.torrents_payload)
@@ -73,6 +75,12 @@ class FakeQbit:
 
     async def pause_many(self, hashes):
         self.calls.append(("pause", list(hashes)))
+        for torrent in self.torrents_payload:
+            if torrent.get("hash") not in hashes:
+                continue
+            state = str(torrent.get("state") or "")
+            if state not in {"missingFiles", "error"}:
+                torrent["state"] = "stoppedUP" if state in {"uploading", "stalledUP", "forcedUP", "queuedUP", "checkingUP"} else "stoppedDL"
 
     async def resume_many(self, hashes):
         self.calls.append(("resume", hashes))
@@ -103,6 +111,15 @@ class FakeQbit:
                 recovery="Réessayer",
             )
 
+    async def rename_file(self, torrent_hash, old_path, new_path):
+        self.calls.append(("rename_file", torrent_hash, old_path, new_path))
+        if old_path in self.fail_rename_old_paths:
+            self.fail_rename_old_paths.discard(old_path)
+            raise QbitError(409, "Renommage qBittorrent refusé.")
+
+    async def rename_folder(self, torrent_hash, old_path, new_path):
+        self.calls.append(("rename_folder", torrent_hash, old_path, new_path))
+
     async def set_content_layout_many(self, hashes, layout):
         self.calls.append(("set_content_layout", list(hashes), layout))
 
@@ -111,6 +128,9 @@ class FakeQbit:
 
     async def ready(self):
         return True
+
+    async def webapi_version(self):
+        return "2.11.4"
 
     async def close(self):
         return None
@@ -124,6 +144,7 @@ class BackendTests(unittest.TestCase):
         self.original_stats = app.state.stats
         self.original_ratio_monitor = app.state.ratio_monitor
         self.original_limiter = app.state.action_limiter
+        self.original_verified_resume = app.state.verified_resume
         self.original_csrf_tokens = dict(app.state.csrf_tokens)
         self.original_tr4ker_announce_url = torrent_routes.TR4KER_ANNOUNCE_URL
         app.state.qbit = FakeQbit()
@@ -152,6 +173,11 @@ class BackendTests(unittest.TestCase):
                 jellyfin_global_fallback=True,
             ),
         )
+        app.state.verified_resume = organizer_service.VerifiedResumeManager(
+            app.state.qbit,
+            Path(tempfile.mkdtemp()) / "organizer-resume.json",
+            poll_seconds=2,
+        )
         app.state.tracker_stats = TrackerStatsStore(temp_state.parent / "tracker-stats.json")
         app.state.stats = StatsStore(temp_state.parent / "stats.json", history_days=30)
         app.state.ratio_monitor = RatioMonitor(temp_state.parent / "ratio-monitor.json", threshold=10.0)
@@ -169,6 +195,7 @@ class BackendTests(unittest.TestCase):
         app.state.stats = self.original_stats
         app.state.ratio_monitor = self.original_ratio_monitor
         app.state.action_limiter = self.original_limiter
+        app.state.verified_resume = self.original_verified_resume
         app.state.csrf_tokens = self.original_csrf_tokens
         torrent_routes.TR4KER_ANNOUNCE_URL = self.original_tr4ker_announce_url
 
@@ -1091,6 +1118,192 @@ class RelinkTests(BackendTests):
         self.assertFalse(any(op.get("op") == "rename" and op.get("old_name") == "Films" for op in ops))
 
 
+class OrganizerTests(BackendTests):
+    QBIT_ROOT = "/home/micilico/downloads/qbittorrent"
+
+    def _movie_payload(self):
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Dune.2021.1080p.MULTi",
+                "state": "uploading",
+                "progress": 1,
+                "size": 10,
+                "remaining": 0,
+                "savePath": self.QBIT_ROOT,
+            }
+        ]
+        app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.2021.1080p.MULTi.mkv", "size": 10}]}
+
+    def test_movie_preview_keeps_filename_and_builds_jellyfin_folder(self):
+        self._movie_payload()
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
+            response = self.client.get("/torrent-panel/api/torrents/organize-preview")
+        self.assertEqual(response.status_code, 200)
+        entry = response.json()["plan"]["entries"][0]
+        self.assertEqual(entry["folder"], "Dune (2021)")
+        self.assertEqual(entry["targetPath"], f"{self.QBIT_ROOT}/Films")
+        self.assertEqual(
+            entry["operations"],
+            [{"oldPath": "Dune.2021.1080p.MULTi.mkv", "newPath": "Dune (2021)/Dune.2021.1080p.MULTi.mkv"}],
+        )
+
+    def test_series_preview_flattens_release_folder_but_keeps_episode_name(self):
+        torrent_hash = "b" * 40
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": torrent_hash,
+                "name": "The.Show.S01.1080p",
+                "state": "stalledUP",
+                "progress": 1,
+                "size": 20,
+                "remaining": 0,
+                "savePath": self.QBIT_ROOT,
+            }
+        ]
+        app.state.qbit.files_payload = {
+            torrent_hash: [
+                {"name": "The.Show.S01.1080p/The.Show.S01E01.mkv", "size": 10},
+                {"name": "The.Show.S01.1080p/The.Show.S01E01.srt", "size": 1},
+            ]
+        }
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        entry = plan["entries"][0]
+        self.assertEqual(entry["folder"], "The Show")
+        self.assertEqual(entry["targetPath"], f"{self.QBIT_ROOT}/Series")
+        self.assertEqual(
+            entry["operations"],
+            [{"type": "folder", "oldPath": "The.Show.S01.1080p", "newPath": "The Show/Saison 1"}],
+        )
+
+    def test_multi_season_pack_keeps_one_series_tree_and_each_season(self):
+        torrent_hash = "c" * 40
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": torrent_hash,
+                "name": "The.Show.Complete.1080p",
+                "state": "uploading",
+                "progress": 1,
+                "size": 20,
+                "remaining": 0,
+                "savePath": self.QBIT_ROOT,
+            }
+        ]
+        app.state.qbit.files_payload = {
+            torrent_hash: [
+                {"name": "The.Show.Complete.1080p/Season 1/The.Show.S01E01.mkv", "size": 10},
+                {"name": "The.Show.Complete.1080p/Season 2/The.Show.S02E01.mkv", "size": 10},
+            ]
+        }
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        targets = {item["newPath"] for item in plan["entries"][0]["operations"]}
+        self.assertEqual(
+            targets,
+            {
+                "The Show/Saison 1/The.Show.S01E01.mkv",
+                "The Show/Saison 2/The.Show.S02E01.mkv",
+            },
+        )
+
+    def test_destination_collision_warns_and_blocks_both_torrents(self):
+        duplicate_hash = "d" * 40
+        self._movie_payload()
+        duplicate = dict(app.state.qbit.torrents_payload[0])
+        duplicate.update({"hash": duplicate_hash, "name": "Dune.2021.2160p.MULTi"})
+        app.state.qbit.torrents_payload.append(duplicate)
+        app.state.qbit.files_payload[duplicate_hash] = [{"name": "Dune.2021.1080p.MULTi.mkv", "size": 10}]
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        self.assertEqual(plan["entries"], [])
+        self.assertTrue(any("Collision" in warning["reason"] for warning in plan["warnings"]))
+
+    def test_incomplete_torrent_is_warning_and_never_planned(self):
+        self._movie_payload()
+        app.state.qbit.torrents_payload[0].update({"progress": 0.5, "remaining": 5})
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        self.assertEqual(plan["entries"], [])
+        self.assertIn("incomplet", plan["warnings"][0]["reason"])
+
+    def test_category_path_configuration_is_normalized_to_qbittorrent_root(self):
+        self._movie_payload()
+        plan = asyncio.run(
+            organizer_service.build_organization_plan(app.state.qbit, f"{self.QBIT_ROOT}/Series")
+        )
+        self.assertEqual(plan["entries"][0]["targetPath"], f"{self.QBIT_ROOT}/Films")
+
+    def test_incompatible_qbittorrent_version_is_rejected_before_mutation(self):
+        self._movie_payload()
+        app.state.qbit.webapi_version = mock.AsyncMock(return_value="2.7.0")
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        self.assertEqual(plan["entries"], [])
+        self.assertIn("2.8 minimum", plan["warnings"][0]["reason"])
+        self.assertEqual(app.state.qbit.calls, [])
+
+    def test_apply_uses_qbittorrent_then_rechecks_and_tracks_safe_resume(self):
+        self._movie_payload()
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
+        self.assertEqual(result["organized"], 1)
+        calls = app.state.qbit.calls
+        pause_index = calls.index(("pause", [VALID_HASH]))
+        location_index = calls.index(("set_location", [VALID_HASH], f"{self.QBIT_ROOT}/Films"))
+        recheck_index = calls.index(("recheck", [VALID_HASH]))
+        rename_calls = [index for index, call in enumerate(calls) if call[0] == "rename_file"]
+        self.assertLess(pause_index, rename_calls[0])
+        self.assertLess(rename_calls[-1], location_index)
+        self.assertLess(location_index, recheck_index)
+        self.assertEqual(app.state.verified_resume.snapshot()["pending"], 1)
+        self.assertNotIn("resume", [call[0] for call in calls])
+
+    def test_failed_rename_rolls_back_and_never_rechecks_or_resumes(self):
+        self._movie_payload()
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        temp_path = organizer_service._temporary_path(VALID_HASH, 0, "Dune.2021.1080p.MULTi.mkv")
+        app.state.qbit.fail_rename_old_paths = {temp_path}
+        result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["results"][0]["rollback"], "ok")
+        self.assertNotIn("recheck", [call[0] for call in app.state.qbit.calls])
+        self.assertEqual(app.state.verified_resume.snapshot()["pending"], 0)
+
+    def test_resume_manager_only_resumes_verified_torrent(self):
+        self._movie_payload()
+        manager = app.state.verified_resume
+        manager.track(VALID_HASH)
+        manager._pending[VALID_HASH]["notBefore"] = 0
+        app.state.qbit.torrents_payload[0]["progress"] = 0.99
+        asyncio.run(manager.check_once())
+        self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
+        app.state.qbit.torrents_payload[0]["progress"] = 1
+        asyncio.run(manager.check_once())
+        self.assertIn(("resume", [VALID_HASH]), app.state.qbit.calls)
+        self.assertEqual(manager.snapshot()["pending"], 0)
+
+    def test_organize_requires_csrf(self):
+        self._movie_payload()
+        response = self.client.post("/torrent-panel/api/torrents/organize", json={})
+        self.assertEqual(response.status_code, 403)
+
+    def test_organize_endpoint_refreshes_rclone_and_jellyfin_after_success(self):
+        self._movie_payload()
+        with (
+            mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT),
+            mock.patch.object(torrent_routes, "MEDIA_MOUNT_PATH", "/path/that/does/not/exist"),
+            mock.patch.object(app.state.media_automation, "refresh_rclone", new=mock.AsyncMock()) as refresh,
+            mock.patch.object(app.state.media_automation, "trigger_jellyfin_scan", new=mock.AsyncMock(return_value={"scope": "global"})) as scan,
+        ):
+            response = self.post_action("/torrent-panel/api/torrents/organize", {})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result"]["organized"], 1)
+        self.assertEqual(body["refresh"], {"rclone": "requested", "jellyfin": "requested"})
+        refresh.assert_awaited_once_with(
+            dirs=["qbittorrent/Films", "qbittorrent/Series"],
+            recursive=True,
+            async_run=True,
+        )
+        scan.assert_awaited_once_with([])
+
+
 class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         if hasattr(self, "client"):
@@ -1199,6 +1412,22 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[-1][1], "/api/v2/torrents/setContentLayout")
         self.assertEqual(calls[-1][2]["hashes"], VALID_HASH)
         self.assertEqual(calls[-1][2]["layout"], "NoSubfolder")
+
+    async def test_rename_file_uses_metadata_aware_endpoint(self):
+        self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))
+        calls = []
+
+        async def fake_request(method, path, *, data=None, **kwargs):
+            calls.append((method, path, data))
+            return FakeResponse()
+
+        self.client._request = fake_request
+        await self.client.rename_file(VALID_HASH, "old/file.mkv", "Dune (2021)/file.mkv")
+        self.assertEqual(calls[-1][1], "/api/v2/torrents/renameFile")
+        self.assertEqual(
+            calls[-1][2],
+            {"hash": VALID_HASH, "oldPath": "old/file.mkv", "newPath": "Dune (2021)/file.mkv"},
+        )
 
 
 class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):

@@ -348,12 +348,8 @@ function makeRow(f, i) {
     });
   }
   nc.append(ic, nm); td1.append(nc);
-  // A dedicated block-level source is more reliable than dragging a <tr>,
-  // especially in Safari.
-  nc.draggable = true;
+  nc.classList.add("file-drag-source");
   nc.setAttribute("aria-label", `Déplacer ${f.name}`);
-  nc.addEventListener("dragstart", (e) => { e.stopPropagation(); dragPayload(e, f); });
-  nc.addEventListener("dragend", (e) => { e.stopPropagation(); clearDrag(); });
 
   // Type
   const tdType = document.createElement("td"); tdType.className = "type-cell"; tdType.textContent = fileTypeLabel(f);
@@ -387,26 +383,22 @@ function makeRow(f, i) {
   td5.append(acts);
 
   tr.append(td0, td1, tdType, td2, td3, tdCreated, td4, td5);
-  tr.draggable = true;
-  tr.addEventListener("dragstart", (e) => dragPayload(e, f));
-  tr.addEventListener("dragend", clearDrag);
+  wirePointerDragSource(tr, f);
   if (f.is_dir) {
+    wirePointerDropTarget(tr, () => f.path);
     tr.addEventListener("dragover", (e) => {
+      if (!hasDesktopFiles(e)) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect = "copy";
       tr.classList.add("drop-target");
     });
     tr.addEventListener("dragleave", () => tr.classList.remove("drop-target"));
     tr.addEventListener("drop", (e) => {
+      if (!hasDesktopFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
       tr.classList.remove("drop-target");
-      const items = readDragItems(e);
-      if (items.length) {
-        if (e.ctrlKey || e.metaKey) copyItems(items, f.path);
-        else moveItemsTo(f.path, items);
-      }
-      else if (e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files, f.path);
+      if (e.dataTransfer.files && e.dataTransfer.files.length) startUpload(e.dataTransfer.files, f.path);
     });
   }
   wireRowEvents(tr, f, i);
@@ -416,9 +408,9 @@ function makeRow(f, i) {
 function makeTile(f, i) {
   const tile = document.createElement("div");
   tile.className = "grid-tile";
+  tile.classList.add("file-drag-source");
   tile.dataset.path = f.path;
   tile.tabIndex = 0;
-  tile.draggable = true;
   if (S.selected.has(f.path)) tile.classList.add("selected");
   const isImg = !f.is_dir && ["jpg","jpeg","png","gif","webp","svg","bmp","ico"].includes((f.name.split(".").pop() || "").toLowerCase());
   const preview = document.createElement("div"); preview.className = "grid-preview";
@@ -452,14 +444,13 @@ function makeTile(f, i) {
     if (!S.selected.has(f.path)) { S.selected = new Set([f.path]); S.selectedItems = new Map([[f.path, f]]); S.selectionMode = true; renderFiles(); }
     openFileActionMenu(f, tile);
   });
-  tile.addEventListener("dragstart", (e) => dragPayload(e, f));
-  tile.addEventListener("dragend", clearDrag);
+  wirePointerDragSource(tile, f);
   if (f.is_dir) {
+    wirePointerDropTarget(tile, () => f.path);
     tile.addEventListener("dragover", (e) => {
-      const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
-      if (!dragItems.length && !types.includes("application/x-cloud-item")) return;
+      if (!hasDesktopFiles(e)) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
+      e.dataTransfer.dropEffect = "copy";
       tile.classList.add("drop-target");
     });
     tile.addEventListener("dragleave", () => tile.classList.remove("drop-target"));
@@ -467,12 +458,7 @@ function makeTile(f, i) {
       e.preventDefault();
       e.stopPropagation();
       tile.classList.remove("drop-target");
-      const items = readDragItems(e);
-      const dragged = items.length ? items : dragItems;
-      if (dragged.length) {
-        if (e.ctrlKey || e.metaKey) copyItems(dragged, f.path);
-        else moveItemsTo(f.path, dragged);
-      } else if (e.dataTransfer.files && e.dataTransfer.files.length) {
+      if (e.dataTransfer.files && e.dataTransfer.files.length) {
         startUpload(e.dataTransfer.files, f.path);
       }
     });
@@ -481,6 +467,14 @@ function makeTile(f, i) {
 }
 
 function renderFiles() {
+  const organizeButton = $("btnOrganizeSeries");
+  if (organizeButton) {
+    const qbitOwned = S.path.split("/").filter(Boolean)[0]?.toLowerCase() === "qbittorrent";
+    organizeButton.disabled = qbitOwned;
+    organizeButton.title = qbitOwned
+      ? "Utilisez “Ranger pour Jellyfin” dans Torrent Panel afin de conserver le seeding."
+      : "Grouper les séries, ranger les films et signaler les parasites";
+  }
   const all = getSortedFiltered();
   const totalPages = Math.max(1, Math.ceil(S.totalItems / S.pageSize));
   S.page = Math.min(S.page, totalPages);
@@ -539,59 +533,140 @@ function renderFiles() {
 
 // ── Drag & drop (déplacer) ──
 let dragItems = [];
+let pointerDrag = null;
+let suppressPointerClickUntil = 0;
+const pointerDropGetters = new WeakMap();
 
-function dragPayload(e, f) {
-  if (!e.dataTransfer) return;
+function draggedItemsFor(f) {
   const selectedPaths = [...S.selected];
   const items = selectedPaths.includes(f.path) && selectedPaths.length
     ? selectedPaths.map(p => S.selectedItems.get(p) || { path: p, name: p.split("/").pop(), is_dir: false })
     : [f];
-  dragItems = items.map(i => ({ path: i.path, name: i.name, is_dir: Boolean(i.is_dir) }));
-  e.dataTransfer.setData("application/x-cloud-item", JSON.stringify(dragItems));
-  // Keep a standards-compatible fallback for browsers that hide custom MIME types.
-  e.dataTransfer.setData("text/plain", JSON.stringify(dragItems));
-  e.dataTransfer.effectAllowed = "move";
-  e.currentTarget.setAttribute("aria-grabbed", "true");
+  return items.map(i => ({ path: i.path, name: i.name, is_dir: Boolean(i.is_dir) }));
+}
+
+function hasDesktopFiles(e) {
+  const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
+  return types.includes("Files");
+}
+
+function wirePointerDragSource(el, f) {
+  el.classList.add("file-drag-source");
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || (e.pointerType && e.pointerType !== "mouse")) return;
+    if (e.target.closest("input, a, .fav-btn, .action-btn, .size-btn")) return;
+    pointerDrag = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      source: el,
+      items: draggedItemsFor(f),
+      active: false,
+      target: null,
+      ghost: null,
+      copy: false,
+    };
+  });
+}
+
+function wirePointerDropTarget(el, destPathOrGetter) {
+  if (!el) return;
+  el.dataset.pointerDrop = "1";
+  pointerDropGetters.set(el, typeof destPathOrGetter === "function" ? destPathOrGetter : () => destPathOrGetter);
+}
+
+function canPointerDrop(items, destPath) {
+  const srcDirs = new Set(items.map(i => i.path.split("/").slice(0, -1).join("/")));
+  if (srcDirs.size === 1 && [...srcDirs][0] === destPath) return false;
+  return !items.some(i => i.is_dir && (destPath === i.path || destPath.startsWith(i.path + "/")));
+}
+
+function setPointerDropTarget(target) {
+  if (pointerDrag?.target === target) return;
+  pointerDrag?.target?.classList.remove("pointer-drop-active");
+  if (pointerDrag) pointerDrag.target = target;
+  target?.classList.add("pointer-drop-active");
+}
+
+function activatePointerDrag(e) {
+  if (!pointerDrag || pointerDrag.active) return;
+  pointerDrag.active = true;
+  dragItems = pointerDrag.items;
+  document.body.classList.add("file-drag-active");
+  pointerDrag.source.setAttribute("aria-grabbed", "true");
   qsa("#fileBody tr").forEach(tr => {
     if (dragItems.some(i => i.path === tr.dataset.path)) tr.classList.add("dragging");
   });
   qsa(".grid-tile").forEach(tile => {
     if (dragItems.some(i => i.path === tile.dataset.path)) tile.classList.add("dragging");
   });
+  const ghost = document.createElement("div");
+  ghost.className = "file-drag-ghost";
+  ghost.textContent = dragItems.length === 1 ? dragItems[0].name : `${dragItems.length} éléments`;
+  document.body.append(ghost);
+  pointerDrag.ghost = ghost;
+  window.getSelection()?.removeAllRanges();
+  updatePointerDrag(e);
 }
 
-function clearDrag() {
-  // Keep the payload alive for the drop event: some browsers emit dragend
-  // immediately before the target's drop handler completes.
-  const endedItems = dragItems;
-  setTimeout(() => {
-    if (dragItems !== endedItems) return;
+function updatePointerDrag(e) {
+  if (!pointerDrag?.active) return;
+  pointerDrag.x = e.clientX;
+  pointerDrag.y = e.clientY;
+  pointerDrag.copy = Boolean(e.ctrlKey || e.metaKey);
+  pointerDrag.ghost.textContent = pointerDrag.items.length === 1
+    ? `${pointerDrag.copy ? "Copier" : "Déplacer"} ${pointerDrag.items[0].name}`
+    : `${pointerDrag.copy ? "Copier" : "Déplacer"} ${pointerDrag.items.length} éléments`;
+  pointerDrag.ghost.style.transform = `translate3d(${e.clientX + 14}px, ${e.clientY + 14}px, 0)`;
+  const candidate = document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-pointer-drop]");
+  if (!candidate) { setPointerDropTarget(null); return; }
+  const dest = pointerDropGetters.get(candidate)?.();
+  setPointerDropTarget(canPointerDrop(pointerDrag.items, dest) ? candidate : null);
+}
+
+function clearPointerDrag() {
+  pointerDrag?.target?.classList.remove("pointer-drop-active");
+  pointerDrag?.ghost?.remove();
   qsa("#fileBody tr.dragging, .grid-tile.dragging").forEach(el => {
     el.classList.remove("dragging");
     el.removeAttribute("aria-grabbed");
   });
-    dragItems = [];
-  }, 250);
+  document.body.classList.remove("file-drag-active");
+  dragItems = [];
+  pointerDrag = null;
 }
 
-function readDragItems(e) {
-  let raw = e.dataTransfer.getData("application/x-cloud-item");
-  if (!raw) {
-    raw = e.dataTransfer.getData("text/plain");
-    if (!raw) return dragItems;
-  }
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : dragItems;
-  } catch {
-    return dragItems;
-  }
-}
+document.addEventListener("pointermove", (e) => {
+  if (!pointerDrag || e.pointerId !== pointerDrag.pointerId) return;
+  const distance = Math.hypot(e.clientX - pointerDrag.startX, e.clientY - pointerDrag.startY);
+  if (!pointerDrag.active && distance < 6) return;
+  e.preventDefault();
+  activatePointerDrag(e);
+  updatePointerDrag(e);
+}, { passive: false });
 
-function isInternalDrag(e) {
-  const types = e.dataTransfer?.types ? Array.from(e.dataTransfer.types) : [];
-  return dragItems.length > 0 || types.includes("application/x-cloud-item");
-}
+document.addEventListener("pointerup", (e) => {
+  if (!pointerDrag || e.pointerId !== pointerDrag.pointerId) return;
+  if (!pointerDrag.active) { pointerDrag = null; return; }
+  e.preventDefault();
+  const { target, items, copy } = pointerDrag;
+  const dest = target ? pointerDropGetters.get(target)?.() : null;
+  suppressPointerClickUntil = performance.now() + 500;
+  clearPointerDrag();
+  if (target && dest !== null && dest !== undefined) {
+    if (copy) copyItems(items, dest);
+    else moveItemsTo(dest, items);
+  }
+}, { passive: false });
+
+document.addEventListener("pointercancel", clearPointerDrag);
+document.addEventListener("click", (e) => {
+  if (performance.now() >= suppressPointerClickUntil) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+}, true);
 
 function dropLabel(destPath) {
   return destPath ? destPath.split("/").filter(Boolean).pop() : "Racine";
@@ -640,24 +715,7 @@ function makeDropTarget(el, destPathOrGetter) {
   if (!el || el.dataset.dropTarget) return;
   el.dataset.dropTarget = "1";
   el.classList.add("drop-crumb");
-  const resolveDest = () => (typeof destPathOrGetter === "function" ? destPathOrGetter() : destPathOrGetter);
-  el.addEventListener("dragover", (e) => {
-    if (!isInternalDrag(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    el.classList.add("drop-active");
-  });
-  el.addEventListener("dragleave", () => el.classList.remove("drop-active"));
-  el.addEventListener("drop", (e) => {
-    e.preventDefault();
-    el.classList.remove("drop-active");
-    const items = readDragItems(e);
-    if (items.length) {
-      const dest = resolveDest();
-      if (e.ctrlKey || e.metaKey) copyItems(items, dest);
-      else moveItemsTo(dest, items);
-    }
-  });
+  wirePointerDropTarget(el, destPathOrGetter);
 }
 
 function renderSidebarDisk() {
@@ -1154,7 +1212,7 @@ makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="parent"]'), () => S.path.s
   let depth = 0;
   const hasFiles = (e) => e.dataTransfer && e.dataTransfer.types && Array.from(e.dataTransfer.types).includes("Files");
   view.addEventListener("dragenter", (e) => {
-    if (isInternalDrag(e) || !hasFiles(e)) return;
+    if (dragItems.length || !hasFiles(e)) return;
     e.preventDefault();
     depth++;
     view.classList.add("upload-target");
@@ -1165,12 +1223,12 @@ makeDropTarget(qs('.cloud-view-nav .nav-btn[data-nav="parent"]'), () => S.path.s
     if (depth === 0) view.classList.remove("upload-target");
   });
   view.addEventListener("dragover", (e) => {
-    if (isInternalDrag(e) || !hasFiles(e)) return;
+    if (dragItems.length || !hasFiles(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   });
   view.addEventListener("drop", (e) => {
-    if (isInternalDrag(e)) return;
+    if (dragItems.length) return;
     depth = 0;
     view.classList.remove("upload-target");
     if (hasFiles(e) && e.dataTransfer.files.length) {

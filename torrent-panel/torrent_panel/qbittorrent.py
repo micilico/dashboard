@@ -213,6 +213,10 @@ class QBittorrentClient:
         await self._request("GET", "/api/v2/app/version")
         return True
 
+    async def webapi_version(self) -> str:
+        response = await self._request("GET", "/api/v2/app/webapiVersion")
+        return response.text.strip()
+
     async def pause(self, torrent_hash: str) -> None:
         await self.pause_many([torrent_hash])
 
@@ -314,6 +318,22 @@ class QBittorrentClient:
             "POST",
             "/api/v2/torrents/setLocation",
             data={"hashes": "|".join(torrent_hashes), "location": location},
+        )
+
+    async def rename_file(self, torrent_hash: str, old_path: str, new_path: str) -> None:
+        """Rename or move one torrent-owned file while keeping qBittorrent's metadata aligned."""
+        await self._request(
+            "POST",
+            "/api/v2/torrents/renameFile",
+            data={"hash": torrent_hash, "oldPath": old_path, "newPath": new_path},
+        )
+
+    async def rename_folder(self, torrent_hash: str, old_path: str, new_path: str) -> None:
+        """Rename a torrent-owned folder through qBittorrent's Web API."""
+        await self._request(
+            "POST",
+            "/api/v2/torrents/renameFolder",
+            data={"hash": torrent_hash, "oldPath": old_path, "newPath": new_path},
         )
 
     async def set_content_layout_many(self, torrent_hashes: list[str], layout: str) -> None:

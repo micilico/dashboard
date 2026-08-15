@@ -495,6 +495,17 @@ async def organize_preview(
     path: str = Form(""),
 ):
     """Preview how the directory would be reorganized (series, movies, parasites)."""
+    from ..services.media import is_qbittorrent_tree
+
+    if is_qbittorrent_tree(path):
+        raise HTTPException(
+            status_code=409,
+            detail=error_detail(
+                "qbit_organize_coordinated",
+                "Ce dossier est géré par le rangement sécurisé du Torrent Panel.",
+                "Ouvrir Torrent Panel",
+            ),
+        )
     try:
         return await run_in_threadpool(build_organization_plan, path)
     except ValueError:
@@ -516,6 +527,17 @@ async def organize_apply(
     path: str = Form(""),
 ):
     """Group seasons into series folders, rename them, and move movies to Films/."""
+    from ..services.media import is_qbittorrent_tree
+
+    if is_qbittorrent_tree(path):
+        raise HTTPException(
+            status_code=409,
+            detail=error_detail(
+                "qbit_organize_coordinated",
+                "Déplacement refusé : qBittorrent doit conserver la maîtrise de ses fichiers.",
+                "Utiliser le rangement du Torrent Panel",
+            ),
+        )
     try:
         return await run_in_threadpool(apply_organization_plan, path)
     except ValueError:

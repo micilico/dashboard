@@ -132,3 +132,10 @@ JELLYFIN_LIBRARY_MAP = os.getenv("TORRENT_PANEL_JELLYFIN_LIBRARY_MAP", "")
 JELLYFIN_GLOBAL_FALLBACK = os.getenv("TORRENT_PANEL_JELLYFIN_GLOBAL_FALLBACK", "true").lower() in {"1", "true", "yes", "on"}
 AUTO_RELINK_ENABLED = os.getenv("TORRENT_PANEL_AUTO_RELINK_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 AUTO_RELINK_INTERVAL_SECONDS = float(os.getenv("TORRENT_PANEL_AUTO_RELINK_INTERVAL_SECONDS", "3600"))
+ORGANIZER_RESUME_STATE_PATH = Path(
+    os.getenv(
+        "TORRENT_PANEL_ORGANIZER_RESUME_STATE_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "organizer-resume-state.json"),
+    )
+)
+ORGANIZER_RESUME_POLL_SECONDS = float(os.getenv("TORRENT_PANEL_ORGANIZER_RESUME_POLL_SECONDS", "10"))

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard · Centre de contrôle</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260814-relink">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260815-organizer">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -159,6 +159,7 @@
           </div>
           <div class="page-header-actions">
             <button id="clearActiveFilters" type="button" class="button secondary" hidden>Effacer les filtres</button>
+            <button id="organizeMediaButton" type="button" class="button secondary">Ranger pour Jellyfin</button>
             <button id="relinkMissingButton" type="button" class="button secondary" hidden>Réparer les fichiers manquants</button>
             <button id="densityToggle" type="button" class="button secondary" aria-pressed="false">Vue compacte</button>
             <button id="addTorrentButton" type="button" class="button primary">Ajouter un torrent</button>
@@ -395,8 +396,22 @@
       </form>
     </dialog>
 
+    <dialog id="organizeMediaDialog" class="dialog">
+      <form method="dialog" id="organizeMediaForm">
+        <h2>Ranger les médias sans perdre le seeding</h2>
+        <p id="organizeMediaSummary" class="dialog-name">Analyse des torrents terminés…</p>
+        <div id="organizeMediaPlan" class="relink-plan" aria-live="polite"></div>
+        <p class="field-message">qBittorrent mettra les torrents en pause, déplacera lui-même leurs fichiers, puis les revérifiera. Aucun téléchargement ne sera relancé si la vérification n’atteint pas 100 %.</p>
+        <p class="field-message" id="organizeMediaMessage" aria-live="polite"></p>
+        <div class="dialog-actions">
+          <button id="cancelOrganizeMediaButton" value="cancel" class="button secondary" type="button">Annuler</button>
+          <button id="confirmOrganizeMediaButton" value="confirm" class="button primary" type="button" disabled>Ranger et revérifier</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=20260814-relink"></script>
-    <script src="./static/dist/app.min.js?v=20260814-relink" defer></script>
+    <script src="./config.js?v=20260815-organizer"></script>
+    <script src="./static/dist/app.min.js?v=20260815-organizer" defer></script>
   </body>
 </html>

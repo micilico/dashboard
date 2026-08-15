@@ -260,6 +260,9 @@ curl -I http://127.0.0.1:3130/healthz
 | GET | `/api/torrents/relink-preview` | Plan de réparation des torrents en fichiers manquants (lecture seule) |
 | GET | `/api/torrents/relink-status` | Compteur léger (sans scan disque) des torrents à réparer : `missingFiles`/`error` + états pause (`pausedDL`/`stoppedDL`) + `savePath == racine de catégorie` |
 | POST | `/api/torrents/relink` | Réorganiser les torrents manquants (dossier + fichiers au nom du torrent via cloud-panel), `setLocation(parent)` + layout `Subfolder`, recheck, pause (corps : `{hashes?: [], preview?: bool}`) |
+| GET | `/api/torrents/organize-preview` | Prévisualiser le rangement Jellyfin coordonné à partir des fichiers connus par qBittorrent |
+| POST | `/api/torrents/organize` | Ranger via qBittorrent (`renameFile` + `setLocation`), revérifier et ne reprendre qu’après 100 % |
+| GET | `/api/torrents/organize-status` | État des torrents en attente de reprise sécurisée après revérification |
 | GET | `/api/dashboard` | Snapshot vue d'ensemble |
 | GET | `/api/health` | État de santé complet |
 | GET | `/api/activity` | Activité récente |

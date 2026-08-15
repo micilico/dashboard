@@ -31,6 +31,12 @@ _QB_FILMS = "qbittorrent/Films"
 _QB_SERIES = "qbittorrent/Series"
 
 
+def is_qbittorrent_tree(relative_path: str) -> bool:
+    """Return whether a path is owned by qBittorrent's coordinated organizer."""
+    normalized = posixpath.normpath(str(relative_path or ".").replace("\\", "/")).strip("/")
+    return normalized.casefold() == _QB_ROOT or normalized.casefold().startswith(_QB_ROOT + "/")
+
+
 def _rel(path: str, base: str) -> str:
     return os.path.relpath(path, base).replace(os.sep, "/")
 
@@ -313,6 +319,8 @@ def build_organization_plan(relative_path: str) -> dict:
             continue
 
     series_list = sorted(series_groups.values(), key=lambda group: group["name"].casefold())
+    for group in series_list:
+        group["items"].sort(key=lambda item: (item["season"], item["name"].casefold()))
     return {
         "categories": categories,
         "series": series_list,

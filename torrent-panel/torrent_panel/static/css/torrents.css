@@ -355,4 +355,43 @@ tr:hover { background: var(--row-hover); }
   font-variant-numeric: tabular-nums;
   word-break: break-word;
 }
-
+.relink-plan li strong,
+.organize-plan-detail {
+  display: block;
+}
+.organize-plan-detail {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.organize-plan-path {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+.organize-operations {
+  margin-top: 8px;
+  font-size: 0.78rem;
+}
+.organize-operations summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+.relink-plan .organize-operations ul {
+  margin: 0;
+}
+.relink-plan .organize-operations li {
+  padding: 6px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.76rem;
+}
+.relink-plan .organize-warning-list li {
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+}
