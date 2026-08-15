@@ -58,6 +58,7 @@ const state = {
   rowErrors: new Map(),
   rowBusy: new Map(),
   pendingDelete: null,
+  organizeHashes: [],
   detailHash: "",
   lastFocus: null,
   refreshTimer: null,
@@ -887,12 +888,15 @@ function renderRow(torrent) {
   const canForceShare = isComplete(torrent) || isForcedShare;
   const pauseOrResume = button(isPaused ? "Reprendre" : "Pause", isPaused ? "primary" : "secondary", () => runTorrentAction([hash], isPaused ? "resume" : "pause"));
   const detail = button("Détails", "secondary", (event) => openDetails(hash, event.currentTarget));
+  const organize = isComplete(torrent)
+    ? button("Ranger ce torrent", "secondary", (event) => openOrganizeMediaDialog([hash], event.currentTarget))
+    : null;
   const forceShare = canForceShare
     ? button(isForcedShare ? "Partage normal" : "Partage forcé", isForcedShare ? "primary" : "secondary", () => runTorrentAction([hash], "force-start", { enabled: !isForcedShare }))
     : null;
   const remove = button("Supprimer", "danger", (event) => openDeleteDialog([torrent], event.currentTarget));
-  for (const control of [pauseOrResume, detail, forceShare, remove].filter(Boolean)) control.disabled = Boolean(busyText);
-  actions.append(...[pauseOrResume, detail, forceShare, remove].filter(Boolean));
+  for (const control of [pauseOrResume, detail, organize, forceShare, remove].filter(Boolean)) control.disabled = Boolean(busyText);
+  actions.append(...[pauseOrResume, detail, organize, forceShare, remove].filter(Boolean));
   const inline = document.createElement("div");
   inline.className = "row-status";
   inline.setAttribute("aria-live", "polite");
@@ -1713,6 +1717,9 @@ function updateDetails() {
     ...(["missingFiles", "error", "pausedDL", "stoppedDL"].includes(torrent.state)
       ? [button("Réparer l'emplacement", "primary", () => runRelink([torrent.hash]))]
       : []),
+    ...(isComplete(torrent)
+      ? [button("Ranger ce torrent", "primary", () => openOrganizeMediaDialog([torrent.hash], document.activeElement))]
+      : []),
     button("Revérifier", "secondary", () => runAdvancedAction(torrent.hash, "recheck", {}, "Revérification demandée.")),
     button("Nouvelle annonce", "secondary", () => runAdvancedAction(torrent.hash, "reannounce", {}, "Nouvelle annonce demandée.")),
     button(
@@ -2013,14 +2020,18 @@ function cancelRelink() {
   els.relinkDialog.close();
 }
 
-async function openOrganizeMediaDialog() {
-  state.lastFocus = document.activeElement;
+async function openOrganizeMediaDialog(hashes = [], trigger = null) {
+  state.organizeHashes = Array.isArray(hashes) ? hashes : [];
+  state.lastFocus = trigger || document.activeElement;
   els.organizeMediaMessage.textContent = "";
   els.organizeMediaSummary.textContent = "Analyse des torrents terminés…";
   els.organizeMediaPlan.replaceChildren();
   els.confirmOrganizeMediaButton.disabled = true;
   try {
-    const payload = await api(route("/api/torrents/organize-preview"), { cache: "no-store" });
+    const previewPath = state.organizeHashes.length === 1
+      ? `/api/torrents/organize-preview?hash=${encodeURIComponent(state.organizeHashes[0])}`
+      : "/api/torrents/organize-preview";
+    const payload = await api(route(previewPath), { cache: "no-store" });
     const plan = payload.plan || {};
     const entries = plan.entries || [];
     const warnings = plan.warnings || [];
@@ -2078,7 +2089,10 @@ async function confirmOrganizeMedia() {
   els.confirmOrganizeMediaButton.textContent = "Rangement…";
   els.organizeMediaMessage.textContent = "";
   try {
-    const payload = await api(route("/api/torrents/organize"), { method: "POST", body: JSON.stringify({}) });
+    const payload = await api(route("/api/torrents/organize"), {
+      method: "POST",
+      body: JSON.stringify({ hashes: state.organizeHashes }),
+    });
     const result = payload.result || {};
     const refresh = payload.refresh || {};
     const parts = [`${result.organized || 0} rangé${result.organized > 1 ? "s" : ""}`];
@@ -2250,7 +2264,7 @@ function bindEvents() {
     event.preventDefault();
     confirmRelink();
   });
-  els.organizeMediaButton?.addEventListener("click", openOrganizeMediaDialog);
+  els.organizeMediaButton?.addEventListener("click", (event) => openOrganizeMediaDialog([], event.currentTarget));
   els.confirmOrganizeMediaButton?.addEventListener("click", confirmOrganizeMedia);
   els.cancelOrganizeMediaButton?.addEventListener("click", () => els.organizeMediaDialog.close());
   els.organizeMediaDialog?.addEventListener("close", () => state.lastFocus?.focus?.());

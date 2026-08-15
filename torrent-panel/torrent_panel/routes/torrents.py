@@ -9,7 +9,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .csrf_guard import require_action_guard
 from ..config import ALLOWED_SAVE_PATHS, HASH_RE, MEDIA_MOUNT_PATH, QBIT_SAVE_PATH, TR4KER_ANNOUNCE_URL
@@ -242,10 +242,21 @@ async def relink_torrents(request: Request, payload: RelinkRequest) -> dict[str,
 
 
 @router.get("/torrents/organize-preview")
-async def organize_torrents_preview(request: Request) -> dict[str, Any]:
+async def organize_torrents_preview(
+    request: Request,
+    torrent_hash: str = Query(default="", alias="hash"),
+) -> dict[str, Any]:
     """Preview a Jellyfin layout derived exclusively from qBittorrent-owned files."""
+    hashes = [validate_hash(torrent_hash)] if torrent_hash else None
     try:
-        return {"plan": await build_organization_plan(request.app.state.qbit, QBIT_SAVE_PATH, mount_root=MEDIA_MOUNT_PATH)}
+        return {
+            "plan": await build_organization_plan(
+                request.app.state.qbit,
+                QBIT_SAVE_PATH,
+                hashes=hashes,
+                mount_root=MEDIA_MOUNT_PATH,
+            )
+        }
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
 

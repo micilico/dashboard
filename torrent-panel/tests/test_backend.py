@@ -1148,6 +1148,22 @@ class OrganizerTests(BackendTests):
             [{"oldPath": "Dune.2021.1080p.MULTi.mkv", "newPath": "Dune (2021)/Dune.2021.1080p.MULTi.mkv"}],
         )
 
+    def test_preview_can_be_scoped_to_one_torrent(self):
+        self._movie_payload()
+        other_hash = "b" * 40
+        other = dict(app.state.qbit.torrents_payload[0])
+        other.update({"hash": other_hash, "name": "Arrival.2016.1080p"})
+        app.state.qbit.torrents_payload.append(other)
+        app.state.qbit.files_payload[other_hash] = [{"name": "Arrival.2016.1080p.mkv", "size": 10}]
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
+            response = self.client.get(
+                "/torrent-panel/api/torrents/organize-preview",
+                params={"hash": VALID_HASH},
+            )
+        self.assertEqual(response.status_code, 200)
+        entries = response.json()["plan"]["entries"]
+        self.assertEqual([entry["hash"] for entry in entries], [VALID_HASH])
+
     def test_series_preview_flattens_release_folder_but_keeps_episode_name(self):
         torrent_hash = "b" * 40
         app.state.qbit.torrents_payload = [
