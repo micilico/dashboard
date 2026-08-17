@@ -36,9 +36,9 @@ from ..models import (
 )
 from ..qbittorrent import QbitError
 from ..services.relink import relink_missing
-from ..services.organizer import apply_organization_plan, build_organization_plan, orphan_operations
+from ..services.organizer import apply_organization_plan, build_organization_plan, duplicate_cloud_operations, orphan_operations
 from ..services.cloud_panel import CloudPanelError, arrange_batch
-from ..services.organization_runs import journal_operation, journal_orphan_operation
+from ..services.organization_runs import journal_duplicate_operation, journal_operation, journal_orphan_operation
 from ..services.media_automation import MediaAutomationError
 from common import error_detail
 logger = logging.getLogger("torrent_panel.routes.trackers")
@@ -397,6 +397,28 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
         if run is None:
             run = request.app.state.organization_runs.create(hashes)
         orphan_paths = set(payload.orphanPaths)
+        duplicate_results: list[dict[str, Any]] = []
+        selected_duplicate_ids = set(payload.duplicateGroupIds)
+        for group in plan.get("duplicateGroups", []):
+            if str(group.get("id")) not in selected_duplicate_ids:
+                continue
+            if group.get("status") != "ready":
+                duplicate_results.append({"id": group.get("id"), "success": False, "error": "Conflit ou validation manuelle requise"})
+                continue
+            torrent_hashes = [str(item.get("hash")) for item in group.get("associatedTorrents", []) if item.get("hash")]
+            try:
+                if torrent_hashes:
+                    await request.app.state.qbit.pause_many(torrent_hashes)
+                cloud_result = await arrange_batch(duplicate_cloud_operations(group, QBIT_SAVE_PATH))
+                if cloud_result.get("failed", 0):
+                    raise CloudPanelError("Une opération de fusion a échoué.")
+                if torrent_hashes:
+                    await request.app.state.qbit.recheck_many(torrent_hashes)
+                duplicate_results.append({"id": group.get("id"), "success": True, "status": "verification", "torrentHashes": torrent_hashes})
+            except (CloudPanelError, QbitError) as exc:
+                duplicate_results.append({"id": group.get("id"), "success": False, "error": getattr(exc, "message", getattr(exc, "public_message", "Fusion impossible")), "torrentHashes": torrent_hashes})
+        result["duplicateGroups"] = duplicate_results
+        result["duplicatesMerged"] = sum(1 for item in duplicate_results if item.get("success"))
         if not payload.hashes and not payload.orphanPaths:
             orphan_paths = {str(item.get("path")) for item in plan.get("orphanMedia", [])}
         orphan_items = [item for item in plan.get("orphanMedia", []) if str(item.get("path")) in orphan_paths]
@@ -428,7 +450,13 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
             for entry in plan.get("entries", [])
         ]
         journal.extend(orphan_journal)
-        has_failure = bool(result.get("failed")) or any(not item.get("success") for item in orphan_results)
+        duplicate_by_id = {str(item.get("id")): item for item in duplicate_results}
+        journal.extend(
+            journal_duplicate_operation(group, duplicate_by_id.get(str(group.get("id")), {"success": False, "error": "Non sélectionné"}))
+            for group in plan.get("duplicateGroups", [])
+            if str(group.get("id")) in selected_duplicate_ids
+        )
+        has_failure = bool(result.get("failed")) or any(not item.get("success") for item in orphan_results) or any(not item.get("success") for item in duplicate_results)
         stored = request.app.state.organization_runs.update(
             run["runId"],
             status="completed" if not has_failure else "partial_failure",

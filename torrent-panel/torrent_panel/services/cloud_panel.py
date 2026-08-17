@@ -23,7 +23,7 @@ class CloudPanelError(Exception):
 async def arrange_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
     """Apply filesystem operations via the cloud-panel internal API.
 
-    Each item is ``{"op": "rename"|"mkdir"|"move", path, old_name?, new_name?, dest?}``.
+    Each item is ``{"op": "rename"|"mkdir"|"move"|"delete", ...}``.
     """
     if not CLOUD_PANEL_API_URL:
         raise CloudPanelError("CLOUD_PANEL_API_URL non configuré.")

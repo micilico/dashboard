@@ -97,6 +97,7 @@ class OrganizeRequest(BaseModel):
 class LibraryOrganizeRequest(BaseModel):
     hashes: list[str] = Field(default_factory=list, max_length=500)
     orphanPaths: list[str] = Field(default_factory=list, max_length=500)
+    duplicateGroupIds: list[str] = Field(default_factory=list, max_length=200)
     runId: str | None = Field(default=None, min_length=8, max_length=64)
 
 

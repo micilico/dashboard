@@ -62,8 +62,10 @@ const state = {
   organizeRunId: "",
   organizePlanEntries: [],
   organizePlanOrphans: [],
+  organizePlanDuplicates: [],
   organizeSelected: new Set(),
   organizeOrphanSelected: new Set(),
+  organizeDuplicateSelected: new Set(),
   detailHash: "",
   lastFocus: null,
   refreshTimer: null,
@@ -2038,6 +2040,7 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
   state.organizeRunId = "";
   state.organizeSelected = new Set();
   state.organizeOrphanSelected = new Set();
+  state.organizeDuplicateSelected = new Set();
   state.organizeFilter = "all";
   state.lastFocus = trigger || document.activeElement;
   els.organizeMediaMessage.textContent = "";
@@ -2057,10 +2060,13 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
     const plan = payload.plan || {};
     const entries = plan.entries || [];
     const orphanMedia = plan.orphanMedia || [];
+    const duplicateGroups = plan.duplicateGroups || [];
     state.organizePlanEntries = entries;
     state.organizePlanOrphans = orphanMedia;
+    state.organizePlanDuplicates = duplicateGroups;
     entries.forEach((entry) => state.organizeSelected.add(entry.hash));
     orphanMedia.forEach((item) => state.organizeOrphanSelected.add(item.path));
+    duplicateGroups.filter((group) => group.status === "ready").forEach((group) => state.organizeDuplicateSelected.add(group.id));
     if (els.organizeSelectAll) els.organizeSelectAll.checked = entries.length + orphanMedia.length > 0;
     const warnings = plan.warnings || [];
     els.organizeMediaSummary.textContent = `${entries.length} torrent${entries.length > 1 ? "s" : ""} à ranger · ${warnings.length} avertissement${warnings.length > 1 ? "s" : ""}.`;
@@ -2124,6 +2130,34 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
       item.append(checkbox, title, detail);
       list.append(item);
     });
+    duplicateGroups.forEach((group) => {
+      const item = document.createElement("li");
+      item.dataset.kind = "duplicate";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = group.status === "ready";
+      checkbox.disabled = group.status !== "ready";
+      checkbox.dataset.duplicateId = group.id;
+      checkbox.setAttribute("aria-label", `Sélectionner la fusion ${group.canonicalPath}`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.organizeDuplicateSelected.add(group.id);
+        else state.organizeDuplicateSelected.delete(group.id);
+        renderOrganizeSelection();
+      });
+      const title = document.createElement("strong");
+      title.textContent = `Dossier en doublon · ${group.canonicalPath}`;
+      const detail = document.createElement("span");
+      detail.className = "organize-plan-detail";
+      const groupStatus = group.status === "ready"
+        ? ((group.associatedTorrents || []).length ? "Prêt à fusionner" : "Torrent introuvable — fusion orpheline")
+        : "Conflit — validation requise";
+      detail.textContent = `${groupStatus} · ${group.exactFiles} identique(s) · ${group.complementaryFiles} complémentaire(s) · ${group.recoverableBytes} o récupérables`;
+      const path = document.createElement("span");
+      path.className = "organize-plan-path";
+      path.textContent = `Sources : ${(group.sourcePaths || []).join(", ")}`;
+      item.append(checkbox, title, detail, path);
+      list.append(item);
+    });
     if (list.childElementCount) els.organizeMediaPlan.append(list);
     if (warnings.length) {
       const warningList = document.createElement("ul");
@@ -2137,7 +2171,7 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
       els.organizeMediaPlan.append(warningList);
     }
     renderOrganizeSelection();
-    els.confirmOrganizeMediaButton.disabled = entries.length + orphanMedia.length === 0;
+    els.confirmOrganizeMediaButton.disabled = entries.length + orphanMedia.length + duplicateGroups.filter((group) => group.status === "ready").length === 0;
     applyOrganizeFilter();
     if (typeof trapFocus === "function") trapFocus(els.organizeMediaDialog);
     els.organizeMediaDialog.showModal();
@@ -2155,8 +2189,8 @@ function applyOrganizeFilter() {
 }
 
 function renderOrganizeSelection() {
-  const selected = (state.organizeSelected?.size || 0) + (state.organizeOrphanSelected?.size || 0);
-  const total = (state.organizePlanEntries?.length || 0) + (state.organizePlanOrphans?.length || 0);
+  const selected = (state.organizeSelected?.size || 0) + (state.organizeOrphanSelected?.size || 0) + (state.organizeDuplicateSelected?.size || 0);
+  const total = (state.organizePlanEntries?.length || 0) + (state.organizePlanOrphans?.length || 0) + (state.organizePlanDuplicates?.filter((group) => group.status === "ready").length || 0);
   if (els.organizeSelectionSummary) els.organizeSelectionSummary.textContent = `${selected} sélectionné${selected > 1 ? "s" : ""} sur ${total}`;
   if (els.organizeSelectAll) {
     els.organizeSelectAll.checked = total > 0 && selected === total;
@@ -2172,14 +2206,16 @@ async function confirmOrganizeMedia() {
   try {
     const hashes = [...(state.organizeSelected || new Set())];
     const orphanPaths = [...(state.organizeOrphanSelected || new Set())];
+    const duplicateGroupIds = [...(state.organizeDuplicateSelected || new Set())];
     const payload = await api(route("/api/torrents/organize-library"), {
       method: "POST",
-      body: JSON.stringify({ hashes, orphanPaths, runId: state.organizeRunId || null }),
+      body: JSON.stringify({ hashes, orphanPaths, duplicateGroupIds, runId: state.organizeRunId || null }),
     });
     const result = payload.result || {};
     const refresh = payload.refresh || {};
     const parts = [`${result.organized || 0} rangé${result.organized > 1 ? "s" : ""}`];
     if (result.failed) parts.push(`${result.failed} échec${result.failed > 1 ? "s" : ""}`);
+    if (result.duplicatesMerged) parts.push(`${result.duplicatesMerged} fusion${result.duplicatesMerged > 1 ? "s" : ""}`);
     if (refresh.rclone === "failed") parts.push("rafraîchissement rclone en échec");
     if (refresh.jellyfin === "failed") parts.push("scan Jellyfin en échec");
     showToast(`Rangement : ${parts.join(", ")}. Les torrents restent en pause ; reprise manuelle après vérification à 100 %.`);
@@ -2352,8 +2388,9 @@ function bindEvents() {
   els.organizeSelectAll?.addEventListener("change", () => {
     state.organizeSelected = new Set(els.organizeSelectAll.checked ? (state.organizePlanEntries || []).map((entry) => entry.hash) : []);
     state.organizeOrphanSelected = new Set(els.organizeSelectAll.checked ? (state.organizePlanOrphans || []).map((item) => item.path) : []);
+    state.organizeDuplicateSelected = new Set(els.organizeSelectAll.checked ? (state.organizePlanDuplicates || []).filter((group) => group.status === "ready").map((group) => group.id) : []);
     document.querySelectorAll("#organizeMediaPlan input[type=checkbox]").forEach((checkbox) => {
-      checkbox.checked = els.organizeSelectAll.checked;
+      checkbox.checked = els.organizeSelectAll.checked && !checkbox.disabled;
     });
     renderOrganizeSelection();
   });

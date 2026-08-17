@@ -118,3 +118,20 @@ def journal_orphan_operation(orphan: dict[str, Any], operations: list[dict[str, 
         "warnings": [],
         "recordedAt": _timestamp(),
     }
+
+
+def journal_duplicate_operation(group: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    """Store a sanitized, manual-restoration-friendly duplicate merge record."""
+    return {
+        "type": "duplicate_merge",
+        "canonicalPath": _public_path(group.get("canonicalPath")),
+        "sourcePaths": [_public_path(value) for value in group.get("sourcePaths", [])],
+        "movedFiles": [_public_path(item.get("sourcePath")) for item in group.get("files", []) if item.get("decision") == "move"],
+        "trashedFiles": [_public_path(item.get("sourcePath")) for item in group.get("files", []) if item.get("decision") == "reuse"],
+        "torrentChanges": [str(item.get("hash") or "")[:64] for item in group.get("associatedTorrents", [])],
+        "verification": "started" if result.get("success") else "not_started",
+        "rollback": "not_required" if result.get("success") else "manual_review",
+        "success": bool(result.get("success")),
+        "error": str(result.get("error") or "")[:500],
+        "recordedAt": _timestamp(),
+    }

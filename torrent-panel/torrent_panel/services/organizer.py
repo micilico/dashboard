@@ -9,6 +9,7 @@ previously-active torrent may resume.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +38,151 @@ _PAUSED_STATES = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL", "missingFile
 _CATEGORY_NAMES = {"Films", "Series"}
 
 
+def _duplicate_key(directory: str, files: list[str]) -> tuple[str, str] | None:
+    """Return a stable identity for one Jellyfin-like media directory."""
+    value = posixpath.basename(directory)
+    season = _season_number(value) or next((_season_number(name) for name in files), None)
+    if season is not None:
+        title = _series_title(value) or next((_series_title(name) for name in files), None)
+        return ("series", _clean_title(title)) if title else None
+    movie = _movie_identity(value) or next((_movie_identity(name) for name in files), None)
+    return ("film", f"{movie[0]}|{movie[1]}") if movie else None
+
+
+def _file_digest(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _duplicate_file_decision(left: dict[str, Any], right: dict[str, Any]) -> str:
+    """Compare two files progressively and return an explicit decision."""
+    if left["name"].casefold() == right["name"].casefold() and left["size"] != right["size"]:
+        return "conflict"
+    if left["size"] != right["size"]:
+        return "keep_both"
+    if left.get("digest") and right.get("digest") and left["digest"] == right["digest"]:
+        return "reuse"
+    return "conflict" if left["name"].casefold() == right["name"].casefold() else "keep_both"
+
+
+def detect_duplicate_groups(mount_root: str, qbit_root: str) -> list[dict[str, Any]]:
+    """Build a read-only duplicate plan from the mounted library.
+
+    Only directories below Films and Series are considered. Hashes are computed
+    for same-name/same-size candidates, keeping the usual scan cheap.
+    """
+    mount = os.path.realpath(mount_root or "")
+    if not os.path.isdir(mount):
+        return []
+    anchor = mount
+    root_name = posixpath.basename(qbit_root.rstrip("/"))
+    try:
+        candidate = next((entry.path for entry in os.scandir(mount) if entry.is_dir() and entry.name.casefold() == root_name.casefold()), None)
+        if candidate:
+            anchor = candidate
+    except OSError:
+        return []
+    folders: list[dict[str, Any]] = []
+    for category in ("Films", "Series"):
+        category_path = os.path.join(anchor, category)
+        if not os.path.isdir(category_path):
+            continue
+        try:
+            directories = [entry for entry in os.scandir(category_path) if entry.is_dir()]
+        except OSError:
+            continue
+        for entry in directories:
+            files: list[dict[str, Any]] = []
+            for directory, _dirs, names in os.walk(entry.path):
+                for name in names:
+                    path = os.path.join(directory, name)
+                    try:
+                        size = os.path.getsize(path)
+                    except OSError:
+                        continue
+                    relative = os.path.relpath(path, entry.path).replace(os.sep, "/")
+                    files.append({"name": relative, "size": size, "path": path})
+            identity = _duplicate_key(entry.name, [item["name"] for item in files])
+            if identity and files:
+                folders.append({"category": category, "name": entry.name, "path": f"{category}/{entry.name}", "identity": identity, "files": files})
+    groups: list[dict[str, Any]] = []
+    for identity in sorted({item["identity"] for item in folders}):
+        members = [item for item in folders if item["identity"] == identity]
+        if len(members) < 2:
+            continue
+        kind, key = identity
+        year = key.rsplit("|", 1)[-1] if kind == "film" else ""
+        title = key.split("|", 1)[0] if kind == "film" else key
+        canonical_name = f"{title} ({year})" if kind == "film" else title
+        canonical_member = next((item for item in members if item["name"] == canonical_name), members[0])
+        canonical_path = f"{canonical_member['category']}/{canonical_name}"
+        canonical_files = {item["name"].casefold(): item for item in canonical_member["files"]}
+        decisions: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        exact_files = 0
+        conflicts = 0
+        recoverable = 0
+        for member in members:
+            if member is canonical_member:
+                continue
+            for item in member["files"]:
+                target = canonical_files.get(item["name"].casefold())
+                if target is None:
+                    decision = "move"
+                else:
+                    try:
+                        item["digest"] = _file_digest(item["path"])
+                        target["digest"] = target.get("digest") or _file_digest(target["path"])
+                    except OSError:
+                        decision = "manual"
+                    else:
+                        decision = _duplicate_file_decision(item, target)
+                if decision == "reuse":
+                    exact_files += 1
+                    recoverable += item["size"]
+                elif decision == "conflict":
+                    conflicts += 1
+                    warnings.append(f"Conflit de contenu : {item['name']}")
+                decisions.append({"sourcePath": f"{member['path']}/{item['name']}", "targetPath": f"{canonical_path}/{item['name']}", "name": item["name"], "size": item["size"], "decision": decision})
+        status = "conflict" if conflicts else "ready"
+        groups.append({
+            "id": hashlib.sha256("|".join(sorted(item["path"] for item in members)).encode()).hexdigest()[:16],
+            "kind": kind,
+            "canonicalPath": canonical_path,
+            "sourcePaths": [item["path"] for item in members if item is not canonical_member],
+            "files": decisions,
+            "status": status,
+            "warnings": warnings,
+            "exactFiles": exact_files,
+            "complementaryFiles": sum(1 for item in decisions if item["decision"] == "move"),
+            "conflicts": conflicts,
+            "recoverableBytes": recoverable,
+            "associatedTorrents": [],
+            "proposedDecision": "manual" if conflicts else "merge",
+        })
+    return groups
+
+
+def duplicate_cloud_operations(group: dict[str, Any], qbit_root: str) -> list[dict[str, str]]:
+    """Translate approved file decisions to cloud-panel move/trash operations."""
+    cloud_root = posixpath.basename(qbit_root.rstrip("/"))
+    operations: list[dict[str, str]] = []
+    canonical = posixpath.join(cloud_root, str(group.get("canonicalPath") or ""))
+    operations.append({"op": "mkdir", "path": posixpath.dirname(canonical), "name": posixpath.basename(canonical)})
+    for item in group.get("files", []):
+        decision = str(item.get("decision") or "")
+        source = posixpath.join(cloud_root, str(item.get("sourcePath") or ""))
+        target = posixpath.join(cloud_root, str(item.get("targetPath") or ""))
+        if decision == "move":
+            operations.append({"op": "move", "path": posixpath.dirname(source), "old_name": posixpath.basename(source), "dest": posixpath.dirname(target), "new_name": posixpath.basename(target)})
+        elif decision == "reuse":
+            operations.append({"op": "delete", "path": posixpath.dirname(source), "old_name": posixpath.basename(source)})
+    return operations
+
+
 def _normalize_qbit_root(value: str) -> str:
     root = str(value or "").strip().replace("\\", "/").rstrip("/")
     if posixpath.basename(root).casefold() in {name.casefold() for name in _CATEGORY_NAMES}:
@@ -53,7 +199,7 @@ def _supports_path_rename(version: str) -> bool:
 
 
 def _clean_title(value: str) -> str:
-    words = [part for part in re.split(r"[\s._-]+", value.strip(" ._-")) if part]
+    words = [part for part in re.split(r"[\s._()\[\]-]+", value.strip(" ._()-[]")) if part]
     return " ".join(part if part.isupper() and len(part) <= 4 else part[:1].upper() + part[1:].lower() for part in words)
 
 
@@ -461,6 +607,22 @@ async def build_organization_plan(
     orphan_media = _orphan_media(mount_root, root, signatures) if mount_root and not selected else []
     if mount_root and not selected:
         warnings.extend(_unassociated_files(mount_root, root, signatures))
+    duplicate_groups = detect_duplicate_groups(mount_root, root) if mount_root and not selected else []
+    torrent_by_file: dict[tuple[str, int], list[dict[str, str]]] = {}
+    for torrent, files in zip(torrents, file_payloads):
+        torrent_name = str(torrent.get("name") or "")
+        for item in files if isinstance(files, list) else []:
+            try:
+                size = int(item.get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            torrent_by_file.setdefault((posixpath.basename(str(item.get("name") or "")).casefold(), size), []).append({"hash": str(torrent.get("hash") or "").lower(), "name": torrent_name})
+    for group in duplicate_groups:
+        associated: dict[str, str] = {}
+        for item in group["files"]:
+            for torrent in torrent_by_file.get((posixpath.basename(item["name"]).casefold(), int(item["size"])), []):
+                associated[torrent["hash"]] = torrent["name"]
+        group["associatedTorrents"] = [{"hash": key, "name": value} for key, value in sorted(associated.items())]
     return {
         "entries": entries,
         "alreadyOrganized": already_organized,
@@ -474,6 +636,13 @@ async def build_organization_plan(
         "warningCount": len(warnings),
         "totalOperations": sum(len(entry.get("operations", [])) for entry in entries),
         "totalBytes": total_bytes,
+        "duplicateGroups": duplicate_groups,
+        "duplicateSummary": {
+            "groups": len(duplicate_groups),
+            "exactFiles": sum(int(group.get("exactFiles", 0)) for group in duplicate_groups),
+            "conflicts": sum(int(group.get("conflicts", 0)) for group in duplicate_groups),
+            "recoverableBytes": sum(int(group.get("recoverableBytes", 0)) for group in duplicate_groups),
+        },
     }
 
 

@@ -227,6 +227,9 @@ async def internal_arrange_batch(
                 if new_name and new_name != old_name:
                     await run_in_threadpool(rename_item, dest, old_name, new_name)
                 results.append({"success": True, "op": op, "path": path, "old_name": old_name, "dest": dest, "new_name": new_name})
+            elif op == "delete":
+                result = await run_in_threadpool(delete_item, path, old_name, False)
+                results.append({"success": bool(result.get("success", True)), "op": op, "path": path, "old_name": old_name, "trashed": True})
             else:
                 result = await run_in_threadpool(rename_item, path, old_name, new_name)
                 results.append({"success": bool(result.get("success", True)), "op": "rename", "path": path, "old_name": old_name, "new_name": new_name})
