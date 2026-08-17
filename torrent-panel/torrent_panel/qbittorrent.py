@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .config import QBIT_TORRENTS_CACHE_TTL_SECONDS
+
 logger = logging.getLogger("torrent_panel.qbittorrent")
 
 
@@ -37,12 +39,49 @@ class QbitError(Exception):
         self.recovery = recovery
 
 
+class AsyncTTLCache:
+    """Small single-value async cache with concurrent-call coalescing."""
+
+    def __init__(self, ttl_seconds: float) -> None:
+        self.ttl_seconds = max(0.0, ttl_seconds)
+        self._value: Any = None
+        self._stored_at = 0.0
+        self._task: asyncio.Task[Any] | None = None
+        self._lock = asyncio.Lock()
+
+    async def get_or_set(self, factory: Any, *, force: bool = False) -> Any:
+        now = asyncio.get_running_loop().time()
+        async with self._lock:
+            if not force and self._value is not None and now - self._stored_at < self.ttl_seconds:
+                return self._value
+            if self._task is None:
+                self._task = asyncio.create_task(factory())
+            task = self._task
+        try:
+            value = await task
+        except Exception:
+            async with self._lock:
+                if self._task is task:
+                    self._task = None
+            raise
+        async with self._lock:
+            if self._task is task:
+                self._value = value
+                self._stored_at = asyncio.get_running_loop().time()
+                self._task = None
+        return value
+
+    def invalidate(self) -> None:
+        self._stored_at = 0.0
+
+
 @dataclass(frozen=True)
 class QbitConfig:
     url: str
     username: str
     password: str
     timeout_seconds: float = 8.0
+    torrents_cache_ttl_seconds: float = QBIT_TORRENTS_CACHE_TTL_SECONDS
 
 
 class QBittorrentClient:
@@ -55,6 +94,7 @@ class QBittorrentClient:
         )
         self._login_lock = asyncio.Lock()
         self._authenticated = False
+        self._torrents_cache = AsyncTTLCache(config.torrents_cache_ttl_seconds)
 
     def _request_error(self, exc: httpx.RequestError) -> QbitError:
         host = urlparse(self._config.url).hostname or ""
@@ -161,9 +201,11 @@ class QBittorrentClient:
                 recovery="Réessayer",
             )
 
+        if method.upper() != "GET":
+            self.invalidate_torrents()
         return response
 
-    async def torrents(self) -> list[dict[str, Any]]:
+    async def _fetch_torrents(self) -> list[dict[str, Any]]:
         response = await self._request("GET", "/api/v2/torrents/info")
         try:
             torrents = response.json()
@@ -208,6 +250,12 @@ class QBittorrentClient:
             for item in torrents
             if isinstance(item, dict) and item.get("hash") and item.get("name")
         ]
+
+    async def torrents(self, *, force: bool = False) -> list[dict[str, Any]]:
+        return await self._torrents_cache.get_or_set(self._fetch_torrents, force=force)
+
+    def invalidate_torrents(self) -> None:
+        self._torrents_cache.invalidate()
 
     async def ready(self) -> bool:
         await self._request("GET", "/api/v2/app/version")

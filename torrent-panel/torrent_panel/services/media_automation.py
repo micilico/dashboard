@@ -428,16 +428,17 @@ class MediaAutomationManager:
         if mode not in {"auto", "rc", "systemd"}:
             raise MediaAutomationError("Mode de rafraîchissement rclone invalide.")
         if mode in {"auto", "rc"}:
-            await self._refresh_rclone_rc(
-                dirs=dirs,
-                recursive=recursive,
-                async_run=async_run,
-                timeout_seconds=timeout_seconds,
-            )
+            refresh_kwargs: dict[str, Any] = {"dirs": dirs, "recursive": recursive, "async_run": async_run}
+            if timeout_seconds is not None:
+                refresh_kwargs["timeout_seconds"] = timeout_seconds
+            await self._refresh_rclone_rc(**refresh_kwargs)
             return
         if async_run:
             raise MediaAutomationError("Le mode systemd ne supporte pas le refresh asynchrone.")
-        await self._refresh_rclone_systemd(timeout_seconds=timeout_seconds)
+        if timeout_seconds is None:
+            await self._refresh_rclone_systemd()
+        else:
+            await self._refresh_rclone_systemd(timeout_seconds=timeout_seconds)
         return
 
     async def _refresh_rclone_rc(

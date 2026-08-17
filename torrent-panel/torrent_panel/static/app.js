@@ -9,7 +9,7 @@ const DEFAULT_PREFS = {
   sort: "default",
   direction: "asc",
   autoRefresh: true,
-  refreshIntervalMs: 6000,
+  refreshIntervalMs: 9000,
   density: "normal",
   lastCategory: "",
   lastTags: "",
@@ -68,6 +68,7 @@ const state = {
   lastFocus: null,
   refreshTimer: null,
   refreshPromise: null,
+  pollCycle: 0,
   undoToastTimer: null,
   lastSignature: "",
   lastUpdatedAt: null,
@@ -1460,12 +1461,16 @@ async function loadTorrents({ silent = false, force = false } = {}) {
     state.backendStatus = BACKEND_STATES.loading;
     renderHome();
     try {
+      const cycle = state.pollCycle++;
+      const refreshActivity = force || cycle % 3 === 0;
+      const refreshStorage = force || cycle % 7 === 0;
+      const refreshTrackers = force || cycle % 30 === 0;
       const [dashboardPayload, torrentPayload, storagePayload, activityPayload, trackerStatsPayload, relinkStatusPayload] = await Promise.all([
         api(route("/api/dashboard"), { cache: "no-store" }),
         api(route("/api/torrents"), { cache: "no-store" }),
-        api(route("/api/storage"), { cache: "no-store" }).catch(() => ({ disk: state.storage.disk || {}, rclone: state.storage.rclone || {} })),
-        api(route("/api/activity"), { cache: "no-store" }).catch(() => ({ summary: state.activity.summary || {}, timeline: state.activity.timeline || [] })),
-        api(route("/api/torrents/stats/trackers"), { cache: "no-store" }).catch(() => ({ stats: state.trackerStats })),
+        refreshStorage ? api(route("/api/storage"), { cache: "no-store" }).catch(() => ({ disk: state.storage.disk || {}, rclone: state.storage.rclone || {} })) : Promise.resolve(state.storage),
+        refreshActivity ? api(route("/api/activity"), { cache: "no-store" }).catch(() => ({ summary: state.activity.summary || {}, timeline: state.activity.timeline || [] })) : Promise.resolve(state.activity),
+        refreshTrackers ? api(route("/api/torrents/stats/trackers"), { cache: "no-store" }).catch(() => ({ stats: state.trackerStats })) : Promise.resolve({ stats: state.trackerStats }),
         api(route("/api/torrents/relink-status"), { cache: "no-store" }).catch(() => ({ count: 0 })),
       ]);
       state.relinkStatus = { count: Number(relinkStatusPayload?.count) || 0 };
@@ -2244,7 +2249,7 @@ function restartRefreshTimer() {
   if (!state.prefs.autoRefresh) return;
   state.refreshTimer = window.setInterval(() => {
     loadTorrents({ silent: true });
-  }, Number(state.prefs.refreshIntervalMs) || 6000);
+  }, Number(state.prefs.refreshIntervalMs) || 9000);
 }
 
 function updatePreference(key, value) {

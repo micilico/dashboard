@@ -12,7 +12,7 @@ import time
 import httpx
 from fastapi import UploadFile
 
-from .config import MOUNT_PATH, SCANDIR_CACHE_TTL, SEARCH_MAX_RESULTS, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, ULTRA_API_CACHE_TTL, ULTRA_API_TIMEOUT_SECONDS, ULTRA_API_TOKEN, ULTRA_API_URL, UPLOAD_CHUNK_SIZE
+from .config import FOLDER_SIZE_CACHE_MAX_ENTRIES, MOUNT_PATH, PATH_LOCK_MAX_ENTRIES, SCANDIR_CACHE_MAX_ENTRIES, SCANDIR_CACHE_TTL, SEARCH_CACHE_MAX_ENTRIES, SEARCH_CACHE_TTL, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, ULTRA_API_CACHE_TTL, ULTRA_API_TIMEOUT_SECONDS, ULTRA_API_TOKEN, ULTRA_API_URL, UPLOAD_CHUNK_SIZE
 from .security import resolve_path_within
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
 _folder_size_cache: dict[tuple[str, float], tuple[float, int]] = {}
 _disk_cache: tuple[float, dict[str, str | float]] | None = None
 _path_locks: dict[str, threading.Lock] = {}
+_search_cache: dict[tuple[str, str, int, int, int], tuple[float, dict]] = {}
 _path_locks_guard = threading.Lock()
 
 _ULTRA_UNIT_MULTIPLIERS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
@@ -135,6 +136,7 @@ def get_disk_usage() -> dict[str, str | float | bool]:
 def get_cached_scandir(path: str, ttl: int = SCANDIR_CACHE_TTL) -> list[dict]:
     """Cache scandir results for TTL seconds."""
     now = time.time()
+    _purge_cache(_scandir_cache, SCANDIR_CACHE_MAX_ENTRIES)
     try:
         mtime = os.path.getmtime(path)
     except OSError:
@@ -165,11 +167,20 @@ def get_cached_scandir(path: str, ttl: int = SCANDIR_CACHE_TTL) -> list[dict]:
         logger.warning('scandir error for %s', cache_key, exc_info=True)
     result.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
     _scandir_cache[cache_key] = (now, result)
+    _purge_cache(_scandir_cache, SCANDIR_CACHE_MAX_ENTRIES)
     return result
+
+
+def _purge_cache(cache: dict, max_entries: int) -> None:
+    if len(cache) <= max_entries:
+        return
+    for key, _value in sorted(cache.items(), key=lambda item: item[1][0])[: len(cache) - max_entries]:
+        cache.pop(key, None)
 
 
 def clear_scandir_cache() -> None:
     _scandir_cache.clear()
+    _search_cache.clear()
 
 
 def clear_folder_size_cache() -> None:
@@ -180,6 +191,12 @@ def _target_lock(path: str) -> threading.Lock:
     """Return a per-path lock so concurrent mutations of the same target serialize."""
     real = os.path.realpath(path)
     with _path_locks_guard:
+        if len(_path_locks) >= PATH_LOCK_MAX_ENTRIES:
+            for key, candidate in list(_path_locks.items()):
+                if not candidate.locked():
+                    _path_locks.pop(key, None)
+                    if len(_path_locks) < PATH_LOCK_MAX_ENTRIES:
+                        break
         lock = _path_locks.get(real)
         if lock is None:
             lock = threading.Lock()
@@ -241,6 +258,7 @@ def _folder_size_cached(abs_path: str, ttl: float = SCANDIR_CACHE_TTL) -> int:
         logger.warning('folder size walk error for %s', abs_path, exc_info=True)
         return 0
     _folder_size_cache[cache_key] = (time.time(), total)
+    _purge_cache(_folder_size_cache, FOLDER_SIZE_CACHE_MAX_ENTRIES)
     return total
 
 
@@ -798,10 +816,16 @@ def search_files(
     """
     max_results = max_results or SEARCH_MAX_RESULTS
     query = (query or '').casefold()
+    cache_key = (base_path, query, max(0, offset), max(1, min(limit, 200)), max_results)
+    cached = _search_cache.get(cache_key)
+    if cached is not None and time.time() - cached[0] < SEARCH_CACHE_TTL:
+        return cached[1]
     base = resolve_path_within(MOUNT_PATH, base_path)
     matches: list[dict] = []
-    if not query:
-        return {'items': [], 'total': 0, 'has_more': False, 'current_path': base_path}
+    if len(query) < SEARCH_MIN_LENGTH:
+        result = {'items': [], 'total': 0, 'has_more': False, 'current_path': base_path}
+        _search_cache[cache_key] = (time.time(), result)
+        return result
 
     for root, dirs, files in os.walk(base, followlinks=False):
         dirs.sort(key=str.casefold)
@@ -834,13 +858,16 @@ def search_files(
 
     total = len(matches)
     items = matches[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
-    return {
+    result = {
         'items': items,
         'total': total,
         'has_more': max(0, offset) + len(items) < total,
         'truncated': total >= max_results,
         'current_path': base_path,
     }
+    _search_cache[cache_key] = (time.time(), result)
+    _purge_cache(_search_cache, SEARCH_CACHE_MAX_ENTRIES)
+    return result
 
 
 def get_file_properties(relative_path: str) -> dict:

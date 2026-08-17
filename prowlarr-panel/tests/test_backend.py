@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import time
 import unittest
@@ -195,6 +196,38 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0][0:2], ("GET", "/api/v1/indexer/7"))
         self.assertEqual(calls[1][0:2], ("POST", "/api/v1/indexer/test"))
         self.assertEqual(calls[1][2]["json"]["id"], 7)
+
+    async def test_snapshot_coalesces_and_invalidates(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret", snapshot_cache_ttl_seconds=60)
+        )
+        calls = {"status": 0, "indexers": 0, "applications": 0, "health": 0}
+
+        async def status():
+            calls["status"] += 1
+            return {"version": "1"}
+
+        async def indexers():
+            calls["indexers"] += 1
+            return []
+
+        async def applications():
+            calls["applications"] += 1
+            return []
+
+        async def health():
+            calls["health"] += 1
+            return []
+
+        self.client.system_status = status
+        self.client.indexers = indexers
+        self.client.applications = applications
+        self.client.health = health
+        await asyncio.gather(self.client.snapshot(), self.client.snapshot())
+        self.assertEqual(calls, {"status": 1, "indexers": 1, "applications": 1, "health": 1})
+        self.client.invalidate_snapshot()
+        await self.client.snapshot()
+        self.assertEqual(calls, {"status": 2, "indexers": 2, "applications": 2, "health": 2})
 
     async def test_test_all_indexers_uses_testall_endpoint(self):
         self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))

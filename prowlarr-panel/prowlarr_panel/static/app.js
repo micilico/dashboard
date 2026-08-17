@@ -598,14 +598,15 @@ function applyUrlState() {
   if (query) els.releaseQuery.value = query;
 }
 
-async function loadAll() {
+async function loadAll(force = false) {
   clearError();
   setSidebarStatus("Actualisation en cours", "Synchronisation Prowlarr.", "checking");
+  const refreshQuery = force ? "?force=true" : "";
   const requests = {
-    overview: api(route("/api/overview"), { cache: "no-store" }),
-    indexers: api(route("/api/indexers"), { cache: "no-store" }),
-    applications: api(route("/api/applications"), { cache: "no-store" }),
-    health: api(route("/api/health"), { cache: "no-store" }),
+    overview: api(route(`/api/overview${refreshQuery}`), { cache: "no-store" }),
+    indexers: api(route(`/api/indexers${refreshQuery}`), { cache: "no-store" }),
+    applications: api(route(`/api/applications${refreshQuery}`), { cache: "no-store" }),
+    health: api(route(`/api/health${refreshQuery}`), { cache: "no-store" }),
     history: api(route("/api/history"), { cache: "no-store" }),
   };
   const results = await Promise.allSettled(Object.values(requests));
@@ -793,8 +794,8 @@ function bindEvents() {
     }
   });
   els.tabs.forEach((tab) => tab.addEventListener("keydown", handleTabKeydown));
-  els.refreshButton.addEventListener("click", loadAll);
-  els.retryButton.addEventListener("click", loadAll);
+  els.refreshButton.addEventListener("click", () => loadAll(true));
+  els.retryButton.addEventListener("click", () => loadAll(true));
   els.testAllButton.addEventListener("click", async () => {
     const ok = await confirmAction("Tester tous les indexers", "Cette action interroge tous les indexers configures.");
     if (!ok) return;

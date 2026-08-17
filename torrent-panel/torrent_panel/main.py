@@ -43,8 +43,10 @@ from .config import (  # noqa: E402
     STATS_HISTORY_DAYS,
     STATS_PUBLIC_PREFIX,
     STATS_STATE_PATH,
+    STATS_PERSIST_DEBOUNCE_SECONDS,
     STORAGE_PUBLIC_PREFIX,
     TRACKER_STATS_STATE_PATH,
+    TRACKER_STATS_PERSIST_DEBOUNCE_SECONDS,
 )
 from .qbittorrent import QbitConfig, QBittorrentClient, QbitError  # noqa: E402
 from .routes.automations import router as automations_router  # noqa: E402
@@ -57,6 +59,7 @@ from .routes.dashboard import router as dashboard_router  # noqa: E402
 from .routes.media_automation import router as media_automation_router  # noqa: E402
 from .routes.notifications import router as notifications_router  # noqa: E402
 from .routes.torrents import (  # noqa: E402
+    invalidate_tracker_index,
     qbit_error_response,
     router as torrents_router,
     validate_hash,
@@ -77,6 +80,7 @@ from .services.metadata import MediaMetadataResolver  # noqa: E402
 from .services.ratio_monitor import RatioMonitor  # noqa: E402
 from .services.stats import StatsStore  # noqa: E402
 from .services.tracker_stats import TrackerStatsStore  # noqa: E402
+from .services.monitoring import close_http_clients, initialize_http_clients  # noqa: E402
 
 from logging import basicConfig, getLogger  # noqa: E402
 
@@ -97,11 +101,15 @@ def build_client() -> QBittorrentClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await initialize_http_clients()
     await app.state.media_automation.start()
     await app.state.auto_relink.start()
     yield
     await app.state.auto_relink.stop()
     await app.state.media_automation.stop()
+    getattr(app.state.stats, "flush", lambda: None)()
+    getattr(app.state.tracker_stats, "flush", lambda: None)()
+    await close_http_clients()
     await app.state.qbit.close()
 
 
@@ -136,8 +144,12 @@ app.state.verified_resume = VerifiedResumeManager(
 app.state.organization_runs = OrganizationRunStore(LIBRARY_ORGANIZER_RUNS_PATH)
 app.state.metadata_resolver = MediaMetadataResolver()
 app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
-app.state.tracker_stats = TrackerStatsStore(TRACKER_STATS_STATE_PATH)
-app.state.stats = StatsStore(STATS_STATE_PATH, history_days=STATS_HISTORY_DAYS)
+app.state.tracker_stats = TrackerStatsStore(
+    TRACKER_STATS_STATE_PATH, persist_debounce_seconds=TRACKER_STATS_PERSIST_DEBOUNCE_SECONDS
+)
+app.state.stats = StatsStore(
+    STATS_STATE_PATH, history_days=STATS_HISTORY_DAYS, persist_debounce_seconds=STATS_PERSIST_DEBOUNCE_SECONDS
+)
 app.state.ratio_monitor = RatioMonitor(RATIO_MONITOR_STATE_PATH, threshold=RATIO_ALERT_THRESHOLD)
 app.state.csrf_tokens = {}
 app.state.action_limiter = RateLimiter(
@@ -151,6 +163,12 @@ app.state.service_checks = {}
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
+    if request.method != "GET":
+        # Mutations must be visible to the next user refresh, regardless of
+        # which route performed them.
+        from .services.monitoring import invalidate_monitoring_caches
+        invalidate_monitoring_caches(request.app)
+        invalidate_tracker_index()
     response.headers["Content-Security-Policy"] = build_csp()
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,12 +13,17 @@ logger = logging.getLogger("torrent_panel.tracker_stats")
 
 
 class TrackerStatsStore:
-    def __init__(self, state_path: Path, *, history_days: int = 60) -> None:
+    def __init__(self, state_path: Path, *, history_days: int = 60, persist_debounce_seconds: float = 15.0) -> None:
         self._state_path = state_path
         self._history_days = history_days
+        self._state = self._load()
+        self._last_save_at = 0.0
+        self._dirty = False
+        self._persist_debounce_seconds = max(0.0, persist_debounce_seconds)
 
     def observe(self, torrents: list[dict[str, Any]], tracker_index: dict[str, list[str]]) -> dict[str, Any]:
-        state = self._load()
+        state = self._state
+        previous_serialized = json.dumps(state, sort_keys=True)
         today = datetime.now().astimezone().date().isoformat()
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         previous = state.get("torrents") if isinstance(state.get("torrents"), dict) else {}
@@ -50,12 +56,13 @@ class TrackerStatsStore:
             bucket["downloaded"] = self._positive_int(bucket.get("downloaded")) + downloaded_delta
             bucket["uploaded"] = self._positive_int(bucket.get("uploaded")) + uploaded_delta
 
-        state = {
-            "updatedAt": now,
-            "torrents": current,
-            "days": self._trim_days(days),
-        }
-        self._save(state)
+        state = {"updatedAt": state.get("updatedAt", ""), "torrents": current, "days": self._trim_days(days)}
+        if json.dumps(state, sort_keys=True) != previous_serialized:
+            state["updatedAt"] = now
+            self._state = state
+            self._dirty = True
+            if time.monotonic() - self._last_save_at >= self._persist_debounce_seconds:
+                self.flush()
         return self.snapshot(state, torrents, tracker_index)
 
     def snapshot(
@@ -64,7 +71,7 @@ class TrackerStatsStore:
         torrents: list[dict[str, Any]] | None = None,
         tracker_index: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
-        state = state or self._load()
+        state = state or self._state
         torrents = torrents or []
         tracker_index = tracker_index or {}
         days = state.get("days") if isinstance(state.get("days"), dict) else {}
@@ -130,6 +137,14 @@ class TrackerStatsStore:
         tmp_path = self._state_path.with_suffix(f"{self._state_path.suffix}.tmp")
         tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp_path.replace(self._state_path)
+        self._state = state
+
+    def flush(self) -> None:
+        if not self._dirty:
+            return
+        self._save(self._state)
+        self._last_save_at = time.monotonic()
+        self._dirty = False
 
     def _trim_days(self, days: dict[str, Any]) -> dict[str, Any]:
         return {key: days[key] for key in sorted(days)[-self._history_days:]}

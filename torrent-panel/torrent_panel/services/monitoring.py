@@ -20,7 +20,14 @@ from ..config import (
     MONITOR_DISK_CRITICAL_PERCENT,
     MONITOR_DISK_PATH,
     MONITOR_DISK_WARNING_PERCENT,
+    MONITOR_ACTIVITY_CACHE_TTL_SECONDS,
+    MONITOR_DASHBOARD_CACHE_TTL_SECONDS,
+    MONITOR_HEALTH_CACHE_TTL_SECONDS,
+    MONITOR_JELLYFIN_CACHE_TTL_SECONDS,
     MONITOR_HTTP_TIMEOUT_SECONDS,
+    MONITOR_PROWLARR_CACHE_TTL_SECONDS,
+    MONITOR_STATS_CACHE_TTL_SECONDS,
+    MONITOR_STORAGE_CACHE_TTL_SECONDS,
     PROWLARR_PANEL_HEALTH_URL,
     PROWLARR_PANEL_OVERVIEW_URL,
     PROWLARR_PANEL_PUBLIC_PREFIX,
@@ -36,8 +43,70 @@ from ..config import (
     ULTRA_API_TOKEN,
     ULTRA_API_URL,
 )
-from ..qbittorrent import QbitError
+from ..qbittorrent import AsyncTTLCache, QbitError
 from .media_automation import now_iso
+
+
+_PROWLARR_CACHE = AsyncTTLCache(MONITOR_PROWLARR_CACHE_TTL_SECONDS)
+_JELLYFIN_CACHE = AsyncTTLCache(MONITOR_JELLYFIN_CACHE_TTL_SECONDS)
+_LOCAL_HTTP_CLIENT: httpx.AsyncClient | None = None
+_EXTERNAL_HTTP_CLIENT: httpx.AsyncClient | None = None
+_JELLYFIN_HTTP_CLIENT: httpx.AsyncClient | None = None
+_HTTP_CLIENTS_MANAGED = False
+
+
+async def initialize_http_clients() -> None:
+    global _LOCAL_HTTP_CLIENT, _EXTERNAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT, _HTTP_CLIENTS_MANAGED
+    _LOCAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True)
+    _EXTERNAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS), follow_redirects=True)
+    _JELLYFIN_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), trust_env=False)
+    _HTTP_CLIENTS_MANAGED = True
+
+
+async def close_http_clients() -> None:
+    global _LOCAL_HTTP_CLIENT, _EXTERNAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT, _HTTP_CLIENTS_MANAGED
+    for client in (_LOCAL_HTTP_CLIENT, _EXTERNAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT):
+        if client is not None:
+            await client.aclose()
+    _LOCAL_HTTP_CLIENT = _EXTERNAL_HTTP_CLIENT = _JELLYFIN_HTTP_CLIENT = None
+    _HTTP_CLIENTS_MANAGED = False
+
+
+def _local_client() -> httpx.AsyncClient:
+    global _LOCAL_HTTP_CLIENT
+    if not _HTTP_CLIENTS_MANAGED:
+        return httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True)
+    if _LOCAL_HTTP_CLIENT is None:
+        _LOCAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True)
+    return _LOCAL_HTTP_CLIENT
+
+
+def _external_client() -> httpx.AsyncClient:
+    global _EXTERNAL_HTTP_CLIENT
+    if not _HTTP_CLIENTS_MANAGED:
+        return httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS), follow_redirects=True)
+    if _EXTERNAL_HTTP_CLIENT is None:
+        _EXTERNAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS), follow_redirects=True)
+    return _EXTERNAL_HTTP_CLIENT
+
+
+def _jellyfin_client() -> httpx.AsyncClient:
+    global _JELLYFIN_HTTP_CLIENT
+    if not _HTTP_CLIENTS_MANAGED:
+        return httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), trust_env=False)
+    if _JELLYFIN_HTTP_CLIENT is None:
+        _JELLYFIN_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), trust_env=False)
+    return _JELLYFIN_HTTP_CLIENT
+
+
+def _app_cache(app: FastAPI, name: str, ttl: float) -> AsyncTTLCache:
+    caches = getattr(app.state, "monitoring_caches", None)
+    if caches is None:
+        caches = app.state.monitoring_caches = {}
+    cache = caches.get(name)
+    if cache is None:
+        cache = caches[name] = AsyncTTLCache(ttl)
+    return cache
 
 
 def format_bytes(value: int | float) -> str:
@@ -123,8 +192,7 @@ async def http_service_status(
     action: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True) as client:
-            response = await client.get(url)
+        response = await _local_client().get(url)
         allowed = ok_statuses or {200}
         if response.status_code in allowed:
             return service_payload(
@@ -260,13 +328,13 @@ def build_recent_activity(
     return events[:3]
 
 
-async def prowlarr_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+async def _prowlarr_snapshot_uncached() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
-            overview_response, health_response = await asyncio.gather(
-                client.get(PROWLARR_PANEL_OVERVIEW_URL),
-                client.get(PROWLARR_PANEL_HEALTH_URL),
-            )
+        client = _local_client()
+        overview_response, health_response = await asyncio.gather(
+            client.get(PROWLARR_PANEL_OVERVIEW_URL),
+            client.get(PROWLARR_PANEL_HEALTH_URL),
+        )
         overview = overview_response.json() if overview_response.status_code == 200 else {}
         health_payload = health_response.json() if health_response.status_code == 200 else {}
         alerts = health_payload.get("alerts") if isinstance(health_payload, dict) else []
@@ -275,7 +343,18 @@ async def prowlarr_snapshot() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         return {}, []
 
 
-async def dashboard_snapshot(app: FastAPI) -> dict[str, Any]:
+async def prowlarr_snapshot(*, force: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    return await _PROWLARR_CACHE.get_or_set(_prowlarr_snapshot_uncached, force=force)
+
+
+def invalidate_monitoring_caches(app: FastAPI) -> None:
+    for cache in getattr(app.state, "monitoring_caches", {}).values():
+        cache.invalidate()
+    _PROWLARR_CACHE.invalidate()
+    _JELLYFIN_CACHE.invalidate()
+
+
+async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     qbit = app.state.qbit
     media_automation = app.state.media_automation
     service_results: dict[str, dict[str, Any]] = {
@@ -570,8 +649,7 @@ async def _fetch_ultra_quota() -> tuple[tuple[int, int, int] | None, str | None]
     for path in _ULTRA_PATHS:
         try:
             headers = {"Authorization": f"Bearer {ULTRA_API_TOKEN}"}
-            async with httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS)) as client:
-                response = await client.get(f"{ULTRA_API_URL}{path}", headers=headers)
+            response = await _external_client().get(f"{ULTRA_API_URL}{path}", headers=headers)
         except httpx.TimeoutException:
             return None, "timeout"
         except httpx.HTTPError:
@@ -594,7 +672,7 @@ async def _fetch_ultra_quota() -> tuple[tuple[int, int, int] | None, str | None]
     return None, (errors[-1] if errors else "invalid_payload")
 
 
-async def storage_snapshot(app: FastAPI) -> dict[str, Any]:
+async def _storage_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     generated_at = now_iso()
     quota, quota_error = await _fetch_ultra_quota()
     if quota is not None:
@@ -606,8 +684,7 @@ async def storage_snapshot(app: FastAPI) -> dict[str, Any]:
     rclone_stats: dict[str, Any] = {}
     rclone_error = ""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS)) as client:
-            response = await client.post(RCLONE_RC_URL, json={})
+        response = await _local_client().post(RCLONE_RC_URL, json={})
         parsed = response.json() if response.status_code == 200 else {}
         rclone_stats = parsed if isinstance(parsed, dict) else {}
     except (httpx.HTTPError, ValueError):
@@ -638,7 +715,7 @@ async def storage_snapshot(app: FastAPI) -> dict[str, Any]:
     }
 
 
-async def jellyfin_snapshot() -> dict[str, Any]:
+async def _jellyfin_snapshot_uncached() -> dict[str, Any]:
     generated_at = now_iso()
     summary = {
         "generatedAt": generated_at,
@@ -662,14 +739,14 @@ async def jellyfin_snapshot() -> dict[str, Any]:
 
     headers = {"X-Emby-Token": JELLYFIN_API_KEY}
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), trust_env=False) as client:
-            info_response, session_response, views_response, latest_response, tasks_response = await asyncio.gather(
-                client.get(f"{JELLYFIN_API_URL}/System/Info/Public", headers=headers),
-                client.get(f"{JELLYFIN_API_URL}/Sessions", headers=headers),
-                client.get(f"{JELLYFIN_API_URL}/Users", headers=headers),
-                client.get(f"{JELLYFIN_API_URL}/Items/Latest", headers=headers, params={"Limit": 8}),
-                client.get(f"{JELLYFIN_API_URL}/ScheduledTasks", headers=headers),
-            )
+        client = _jellyfin_client()
+        info_response, session_response, views_response, latest_response, tasks_response = await asyncio.gather(
+            client.get(f"{JELLYFIN_API_URL}/System/Info/Public", headers=headers),
+            client.get(f"{JELLYFIN_API_URL}/Sessions", headers=headers),
+            client.get(f"{JELLYFIN_API_URL}/Users", headers=headers),
+            client.get(f"{JELLYFIN_API_URL}/Items/Latest", headers=headers, params={"Limit": 8}),
+            client.get(f"{JELLYFIN_API_URL}/ScheduledTasks", headers=headers),
+        )
         info = info_response.json() if info_response.status_code == 200 else {}
         sessions = session_response.json() if session_response.status_code == 200 else []
         users = views_response.json() if views_response.status_code == 200 else []
@@ -711,7 +788,7 @@ async def jellyfin_snapshot() -> dict[str, Any]:
     return summary
 
 
-async def health_snapshot(app: FastAPI) -> dict[str, Any]:
+async def _health_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     dashboard = await dashboard_snapshot(app)
     services = list(dashboard.get("services", []))
     operational = [item for item in services if item.get("status") == "operational"]
@@ -741,7 +818,7 @@ async def health_snapshot(app: FastAPI) -> dict[str, Any]:
     }
 
 
-async def activity_snapshot(app: FastAPI) -> dict[str, Any]:
+async def _activity_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     qbit = app.state.qbit
     media_automation = app.state.media_automation
     notifications = app.state.notifications
@@ -806,7 +883,7 @@ async def activity_snapshot(app: FastAPI) -> dict[str, Any]:
     }
 
 
-async def stats_snapshot(app: FastAPI) -> dict[str, Any]:
+async def _stats_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     qbit = app.state.qbit
     torrents: list[dict[str, Any]] = []
     try:
@@ -833,3 +910,39 @@ async def stats_snapshot(app: FastAPI) -> dict[str, Any]:
         "ratioThreshold": ratio_monitor.settings() if ratio_monitor is not None else {},
         "ratioAlerts": ratio_monitor.evaluate(torrents) if ratio_monitor is not None else [],
     }
+
+
+async def dashboard_snapshot(app: FastAPI, *, force: bool = False) -> dict[str, Any]:
+    return await _app_cache(app, "dashboard", MONITOR_DASHBOARD_CACHE_TTL_SECONDS).get_or_set(
+        lambda: _dashboard_snapshot_uncached(app), force=force
+    )
+
+
+async def storage_snapshot(app: FastAPI, *, force: bool = False) -> dict[str, Any]:
+    if not isinstance(app, FastAPI):
+        return await _storage_snapshot_uncached(app)
+    return await _app_cache(app, "storage", MONITOR_STORAGE_CACHE_TTL_SECONDS).get_or_set(
+        lambda: _storage_snapshot_uncached(app), force=force
+    )
+
+
+async def jellyfin_snapshot(*, force: bool = False) -> dict[str, Any]:
+    return await _JELLYFIN_CACHE.get_or_set(_jellyfin_snapshot_uncached, force=force)
+
+
+async def health_snapshot(app: FastAPI, *, force: bool = False) -> dict[str, Any]:
+    return await _app_cache(app, "health", MONITOR_HEALTH_CACHE_TTL_SECONDS).get_or_set(
+        lambda: _health_snapshot_uncached(app), force=force
+    )
+
+
+async def activity_snapshot(app: FastAPI, *, force: bool = False) -> dict[str, Any]:
+    return await _app_cache(app, "activity", MONITOR_ACTIVITY_CACHE_TTL_SECONDS).get_or_set(
+        lambda: _activity_snapshot_uncached(app), force=force
+    )
+
+
+async def stats_snapshot(app: FastAPI, *, force: bool = False) -> dict[str, Any]:
+    return await _app_cache(app, "stats", MONITOR_STATS_CACHE_TTL_SECONDS).get_or_set(
+        lambda: _stats_snapshot_uncached(app), force=force
+    )

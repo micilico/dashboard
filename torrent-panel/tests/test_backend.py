@@ -22,7 +22,7 @@ from torrent_panel.main import (  # noqa: E402
     validate_hash,
     validate_magnet,
 )
-from torrent_panel.qbittorrent import QBittorrentClient, QbitConfig, QbitError  # noqa: E402
+from torrent_panel.qbittorrent import AsyncTTLCache, QBittorrentClient, QbitConfig, QbitError  # noqa: E402
 from torrent_panel.routes import dashboard as dashboard_routes  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
 from torrent_panel.services.monitoring import (
@@ -40,6 +40,9 @@ from torrent_panel.services.stats import StatsStore  # noqa: E402
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
 from torrent_panel.services.organization_runs import OrganizationRunStore  # noqa: E402
 from torrent_panel.services.metadata import MediaMetadataResolver  # noqa: E402
+from torrent_panel.services.notifications import NotificationCenter  # noqa: E402
+from torrent_panel.services.automations import AutomationRuleStore  # noqa: E402
+from torrent_panel.services import metadata as metadata_service  # noqa: E402
 
 
 VALID_HASH = "a" * 40
@@ -213,6 +216,16 @@ class BackendTests(unittest.TestCase):
             json=payload,
             headers={"X-Torrent-Panel-CSRF": self.csrf},
         )
+
+    def test_tracker_index_cache_accepts_supplied_torrents(self):
+        torrent_routes.invalidate_tracker_index()
+        torrent = {"hash": VALID_HASH, "name": "Ubuntu", "tracker": ""}
+        app.state.qbit.trackers_payload = [{"url": "https://tracker.test/announce"}]
+        request = mock.Mock(app=app)
+        first = asyncio.run(torrent_routes._tracker_index_payload(request, torrents=[torrent]))
+        second = asyncio.run(torrent_routes._tracker_index_payload(request, torrents=[torrent]))
+        self.assertEqual(first, second)
+        self.assertEqual([call for call in app.state.qbit.calls if call[0] == "trackers"], [("trackers", VALID_HASH)])
 
     def test_hash_validation_rejects_bad_hash(self):
         self.assertEqual(validate_hash(VALID_HASH.upper()), VALID_HASH)
@@ -627,6 +640,88 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(body["ratioThreshold"]["threshold"], 10.0)
         self.assertEqual(len(body["ratioAlerts"]), 1)
         self.assertEqual(body["ratioAlerts"][0]["ratio"], 100.0)
+
+
+class PerformanceCacheTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_ttl_cache_coalesces_and_invalidates(self):
+        cache = AsyncTTLCache(60)
+        calls = 0
+
+        async def factory():
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0)
+            return calls
+
+        self.assertEqual(await asyncio.gather(cache.get_or_set(factory), cache.get_or_set(factory)), [1, 1])
+        self.assertEqual(calls, 1)
+        self.assertEqual(await cache.get_or_set(factory), 1)
+        cache.invalidate()
+        self.assertEqual(await cache.get_or_set(factory), 2)
+
+    def test_repeated_state_observation_does_not_save(self):
+        state_dir = Path(tempfile.mkdtemp())
+        notification = NotificationCenter(state_dir / "notifications.json")
+        notification._save = mock.Mock()
+        alert = {"code": "same", "service": "qBittorrent", "severity": "warning", "message": "Stable", "date": "2026-08-17T00:00:00Z"}
+        notification.reconcile([alert])
+        notification.reconcile([alert])
+        self.assertEqual(notification._save.call_count, 1)
+
+        rules = AutomationRuleStore(state_dir / "rules.json")
+        rules._save = mock.Mock()
+        rules.simulate({"alerts": [], "services": []})
+        self.assertEqual(rules._save.call_count, 0)
+
+        stats = StatsStore(state_dir / "stats.json", history_days=7, persist_debounce_seconds=60)
+        stats._save = mock.Mock()
+        torrent = [{"hash": VALID_HASH, "downloaded": 100, "uploaded": 10, "state": "downloading"}]
+        stats.observe(torrent)
+        stats.observe(torrent)
+        self.assertEqual(stats._save.call_count, 1)
+
+        tracker = TrackerStatsStore(state_dir / "tracker.json", persist_debounce_seconds=60)
+        tracker._save = mock.Mock()
+        tracker.observe(torrent, {})
+        tracker.observe(torrent, {})
+        self.assertEqual(tracker._save.call_count, 1)
+
+
+class MetadataResolverTests(unittest.IsolatedAsyncioTestCase):
+    async def test_same_jellyfin_and_tmdb_result_is_not_ambiguous(self):
+        resolver = MediaMetadataResolver()
+        resolver._jellyfin = mock.AsyncMock(return_value=[
+            {"title": "House of the Dragon", "year": 2022, "source": "jellyfin"},
+        ])
+        resolver._tmdb = mock.AsyncMock(return_value=[
+            {"title": "House of the Dragon", "year": "2022", "source": "tmdb"},
+        ])
+
+        with (
+            mock.patch.object(metadata_service, "JELLYFIN_API_KEY", "configured"),
+            mock.patch.object(metadata_service, "TMDB_API_KEY", "configured"),
+        ):
+            result = await resolver._resolve_uncached("House Of The Dragon", "series", None)
+
+        self.assertEqual(result["confidence"], "certain")
+        self.assertEqual(result["source"], "jellyfin")
+
+    async def test_different_close_results_remain_ambiguous(self):
+        resolver = MediaMetadataResolver()
+        resolver._jellyfin = mock.AsyncMock(return_value=[
+            {"title": "The Office", "year": 2005, "source": "jellyfin"},
+        ])
+        resolver._tmdb = mock.AsyncMock(return_value=[
+            {"title": "The Office", "year": 1995, "source": "tmdb"},
+        ])
+
+        with (
+            mock.patch.object(metadata_service, "JELLYFIN_API_KEY", "configured"),
+            mock.patch.object(metadata_service, "TMDB_API_KEY", "configured"),
+        ):
+            result = await resolver._resolve_uncached("The Office", "series", None)
+
+        self.assertEqual(result["confidence"], "ambiguous")
 
 
 class RelinkTests(BackendTests):

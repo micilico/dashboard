@@ -26,7 +26,7 @@ services:
       # conteneur. Préférez des identifiants dédiés, à moindre privilège.
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
-      interval: 30s
+      interval: 60s
       timeout: 5s
       retries: 5
       start_period: 20s
@@ -64,7 +64,7 @@ services:
         max-file: "3"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3110/healthz', timeout=4)"]
-      interval: 30s
+      interval: 60s
       timeout: 5s
       retries: 5
       start_period: 20s
@@ -96,7 +96,7 @@ services:
         max-file: "3"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3120/healthz', timeout=4)"]
-      interval: 30s
+      interval: 60s
       timeout: 5s
       retries: 5
       start_period: 20s
@@ -136,7 +136,7 @@ services:
         max-file: "3"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3130/healthz', timeout=4)"]
-      interval: 30s
+      interval: 60s
       timeout: 5s
       retries: 5
       start_period: 20s

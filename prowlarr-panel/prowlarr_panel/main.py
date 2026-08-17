@@ -90,6 +90,7 @@ def build_client() -> ProwlarrClient:
             api_key=os.getenv("PROWLARR_API_KEY", ""),
             timeout_seconds=float(os.getenv("PROWLARR_TIMEOUT_SECONDS", "8")),
             release_cache_ttl_seconds=int(os.getenv("PROWLARR_RELEASE_CACHE_TTL_SECONDS", "900")),
+            snapshot_cache_ttl_seconds=float(os.getenv("PROWLARR_SNAPSHOT_CACHE_TTL_SECONDS", "45")),
         )
     )
 
@@ -100,6 +101,13 @@ def error_detail(code: str, message: str, recovery: str) -> dict[str, str]:
 
 def prowlarr_error_response(exc: ProwlarrError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=error_detail(exc.code, exc.public_message, exc.recovery))
+
+
+async def _panel_snapshot(force: bool = False) -> dict[str, Any] | None:
+    snapshot = getattr(app.state.prowlarr, "snapshot", None)
+    if snapshot is None:
+        return None
+    return await snapshot(force=force)
 
 
 init_sentry(os.getenv("SENTRY_DSN", ""), os.getenv("SENTRY_ENVIRONMENT", "production"))
@@ -134,6 +142,10 @@ app.state.limiters = {
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
+    if request.method != "GET":
+        invalidate = getattr(request.app.state.prowlarr, "invalidate_snapshot", None)
+        if invalidate is not None:
+            invalidate()
     response.headers["Content-Security-Policy"] = build_csp()
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -283,16 +295,36 @@ async def discover() -> dict[str, Any]:
 
 
 @api_router.get("/overview")
-async def overview() -> dict[str, Any]:
+async def overview(force: bool = False) -> dict[str, Any]:
     try:
+        snapshot = await _panel_snapshot(force)
+        if snapshot is not None:
+            status = snapshot["status"]
+            indexers = snapshot["indexers"]
+            applications = snapshot["applications"]
+            health = snapshot["health"]
+            active = [item for item in indexers if item.get("enabled")]
+            errored = [item for item in indexers if item.get("health") == "error"]
+            return {
+                "connection": "ready",
+                "version": status.get("version") or app.state.prowlarr.capabilities.get("version") or "inconnue",
+                "indexersTotal": len(indexers), "indexersActive": len(active),
+                "indexersDisabled": len(indexers) - len(active), "indexersError": len(errored),
+                "applicationsTotal": len(applications), "systemWarnings": len(health),
+                "lastSuccessfulRefresh": snapshot["refreshedAt"],
+                "capabilities": app.state.prowlarr.capabilities,
+            }
         return await app.state.prowlarr.overview()
     except ProwlarrError as exc:
         raise prowlarr_error_response(exc) from exc
 
 
 @api_router.get("/indexers")
-async def indexers() -> dict[str, Any]:
+async def indexers(force: bool = False) -> dict[str, Any]:
     try:
+        snapshot = await _panel_snapshot(force)
+        if snapshot is not None:
+            return {"indexers": snapshot["indexers"]}
         return {"indexers": await app.state.prowlarr.indexers()}
     except ProwlarrError as exc:
         raise prowlarr_error_response(exc) from exc
@@ -343,16 +375,22 @@ async def grab(payload: GrabPayload) -> dict[str, Any]:
 
 
 @api_router.get("/applications")
-async def applications() -> dict[str, Any]:
+async def applications(force: bool = False) -> dict[str, Any]:
     try:
+        snapshot = await _panel_snapshot(force)
+        if snapshot is not None:
+            return {"applications": snapshot["applications"]}
         return {"applications": await app.state.prowlarr.applications()}
     except ProwlarrError as exc:
         raise prowlarr_error_response(exc) from exc
 
 
 @api_router.get("/health")
-async def prowlarr_health() -> dict[str, Any]:
+async def prowlarr_health(force: bool = False) -> dict[str, Any]:
     try:
+        snapshot = await _panel_snapshot(force)
+        if snapshot is not None:
+            return {"alerts": snapshot["health"]}
         return {"alerts": await app.state.prowlarr.health()}
     except ProwlarrError as exc:
         raise prowlarr_error_response(exc) from exc

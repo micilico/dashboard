@@ -12,7 +12,14 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from .csrf_guard import require_action_guard
-from ..config import ALLOWED_SAVE_PATHS, HASH_RE, MEDIA_MOUNT_PATH, QBIT_SAVE_PATH, TR4KER_ANNOUNCE_URL
+from ..config import (
+    ALLOWED_SAVE_PATHS,
+    HASH_RE,
+    MEDIA_MOUNT_PATH,
+    QBIT_SAVE_PATH,
+    TRACKER_INDEX_CACHE_TTL_SECONDS,
+    TR4KER_ANNOUNCE_URL,
+)
 from ..models import (
     AddMagnet,
     AddTrackerPayload,
@@ -38,14 +45,18 @@ logger = logging.getLogger("torrent_panel.routes.trackers")
 
 _TRACKER_SPECIAL_PREFIXES = ("** [DHT]", "** [PeX]", "** [LSD]", "** [Metadata]")
 
-_TRACKER_INDEX_CACHE: dict[str, Any] = {"data": None, "ts": 0.0}
-_TRACKER_CACHE_TTL = 60
+_TRACKER_INDEX_CACHE: dict[str, Any] = {"key": None, "data": None, "ts": 0.0, "task": None}
+_TRACKER_CACHE_LOCK = asyncio.Lock()
 _TRACKER_CONCURRENCY = 6
 
 TRACKER_VALID_SCHEMES = ("http://", "https://", "udp://", "ws://", "wss://")
 _URL_IN_TEXT_RE = re.compile(r"(?:https?|udp|wss?)://\S+", re.IGNORECASE)
 
 router = APIRouter()
+
+
+def invalidate_tracker_index() -> None:
+    _TRACKER_INDEX_CACHE.update({"key": None, "data": None, "ts": 0.0})
 
 
 def validate_hash(torrent_hash: str) -> str:
@@ -123,6 +134,7 @@ async def delete_torrent(request: Request, payload: DeleteTorrent) -> dict[str, 
         await request.app.state.qbit.delete_many(hashes, payload.deleteFiles)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
+    invalidate_tracker_index()
     return {"status": "deleted", "count": len(hashes)}
 
 
@@ -568,14 +580,33 @@ async def tracker_index(request: Request) -> dict[str, Any]:
 
 
 async def _tracker_index_payload(request: Request, torrents: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    now = time.monotonic()
-    cache = _TRACKER_INDEX_CACHE
-    should_use_cache = torrents is None
-    if should_use_cache and cache["data"] is not None and now - cache["ts"] < _TRACKER_CACHE_TTL:
-        return cache["data"]
-
     if torrents is None:
         torrents = await request.app.state.qbit.torrents()
+
+    cache_key = tuple(sorted(str(item.get("hash") or "").lower() for item in torrents if item.get("hash")))
+    now = time.monotonic()
+    cache = _TRACKER_INDEX_CACHE
+    async with _TRACKER_CACHE_LOCK:
+        if cache["key"] == cache_key and cache["data"] is not None and now - cache["ts"] < TRACKER_INDEX_CACHE_TTL_SECONDS:
+            return cache["data"]
+        task = cache.get("task")
+        if cache["key"] != cache_key or task is None:
+            task = asyncio.create_task(_build_tracker_index(request, torrents))
+            cache.update({"key": cache_key, "task": task})
+    try:
+        payload = await task
+    except Exception:
+        async with _TRACKER_CACHE_LOCK:
+            if cache.get("task") is task:
+                cache["task"] = None
+        raise
+    async with _TRACKER_CACHE_LOCK:
+        if cache.get("task") is task:
+            cache.update({"data": payload, "ts": time.monotonic(), "task": None})
+    return payload
+
+
+async def _build_tracker_index(request: Request, torrents: list[dict[str, Any]]) -> dict[str, Any]:
 
     sem = asyncio.Semaphore(_TRACKER_CONCURRENCY)
 
@@ -604,11 +635,7 @@ async def _tracker_index_payload(request: Request, torrents: list[dict[str, Any]
             for d in domains:
                 domain_counter[d] = domain_counter.get(d, 0) + 1
 
-    payload = {"index": index, "domains": domain_counter}
-    if should_use_cache:
-        cache["data"] = payload
-        cache["ts"] = now
-    return payload
+    return {"index": index, "domains": domain_counter}
 
 
 @router.post("/torrents/add-tracker", dependencies=[Depends(require_action_guard)])
@@ -683,7 +710,7 @@ async def _add_tracker_to_hashes(
     missing = results.count("missing")
     failed = results.count("failed")
 
-    _TRACKER_INDEX_CACHE["ts"] = 0
+    invalidate_tracker_index()
 
     return {
         "status": "completed",
@@ -743,4 +770,5 @@ async def add_torrent(request: Request, payload: AddMagnet) -> dict[str, object]
         )
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
+    invalidate_tracker_index()
     return {"status": "added", "accepted": len(accepted), "rejected": rejected, "tr4kerTrackerApplied": tr4ker_tracker_applied}

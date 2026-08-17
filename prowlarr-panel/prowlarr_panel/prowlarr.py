@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import secrets
@@ -34,12 +35,49 @@ class ProwlarrError(Exception):
         self.recovery = recovery
 
 
+class AsyncSnapshotCache:
+    """One-value async TTL cache; concurrent readers share the same request."""
+
+    def __init__(self, ttl_seconds: float) -> None:
+        self.ttl_seconds = max(0.0, ttl_seconds)
+        self.value: Any = None
+        self.stored_at = 0.0
+        self.task: Any = None
+        self.lock = asyncio.Lock()
+
+    async def get(self, factory: Any, *, force: bool = False) -> Any:
+        now = time.monotonic()
+        async with self.lock:
+            if not force and self.value is not None and now - self.stored_at < self.ttl_seconds:
+                return self.value
+            if self.task is None:
+                self.task = asyncio.create_task(factory())
+            task = self.task
+        try:
+            value = await task
+        except Exception:
+            async with self.lock:
+                if self.task is task:
+                    self.task = None
+            raise
+        async with self.lock:
+            if self.task is task:
+                self.value = value
+                self.stored_at = time.monotonic()
+                self.task = None
+        return value
+
+    def invalidate(self) -> None:
+        self.stored_at = 0.0
+
+
 @dataclass(frozen=True)
 class ProwlarrConfig:
     url: str
     api_key: str
     timeout_seconds: float = 8.0
     release_cache_ttl_seconds: int = 900
+    snapshot_cache_ttl_seconds: float = 45.0
 
 
 def clean_text(value: Any) -> str:
@@ -117,6 +155,7 @@ class ProwlarrClient:
         self._api_root = "/api/v1"
         self._client = self._build_client(config.url)
         self._release_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._snapshot_cache = AsyncSnapshotCache(config.snapshot_cache_ttl_seconds)
         self._capabilities: dict[str, Any] = {
             "detected": False,
             "version": None,
@@ -219,6 +258,7 @@ class ProwlarrClient:
                         api_key=self._config.api_key,
                         timeout_seconds=self._config.timeout_seconds,
                         release_cache_ttl_seconds=self._config.release_cache_ttl_seconds,
+                        snapshot_cache_ttl_seconds=self._config.snapshot_cache_ttl_seconds,
                     )
                     return response
             raise self._request_error(exc) from exc
@@ -306,6 +346,7 @@ class ProwlarrClient:
             ],
             "lastDiscoveryAt": now_iso(),
         }
+        self.invalidate_snapshot()
         return self.capabilities
 
     async def system_status(self) -> dict[str, Any]:
@@ -334,15 +375,34 @@ class ProwlarrClient:
         payload = await self._json("GET", f"{self._api_root}/health")
         return [self._map_health(item) for item in as_list(payload)]
 
+    async def _snapshot_uncached(self) -> dict[str, Any]:
+        status, indexers, applications, health = await asyncio.gather(
+            self.system_status(), self.indexers(), self.applications(), self.health()
+        )
+        return {
+            "status": status,
+            "indexers": indexers,
+            "applications": applications,
+            "health": health,
+            "refreshedAt": now_iso(),
+        }
+
+    async def snapshot(self, *, force: bool = False) -> dict[str, Any]:
+        return await self._snapshot_cache.get(self._snapshot_uncached, force=force)
+
+    def invalidate_snapshot(self) -> None:
+        self._snapshot_cache.invalidate()
+
     async def history(self, page_size: int = 25) -> list[dict[str, Any]]:
         payload = await self._json("GET", f"{self._api_root}/history", params={"pageSize": page_size, "sortKey": "date", "sortDirection": "descending"})
         return [self._map_history(item) for item in as_list(payload)]
 
-    async def overview(self) -> dict[str, Any]:
-        status = await self.system_status()
-        indexers = await self.indexers()
-        applications = await self.applications()
-        health = await self.health()
+    async def overview(self, *, force: bool = False) -> dict[str, Any]:
+        snapshot = await self.snapshot(force=force)
+        status = snapshot["status"]
+        indexers = snapshot["indexers"]
+        applications = snapshot["applications"]
+        health = snapshot["health"]
         active = [item for item in indexers if item["enabled"]]
         errored = [item for item in indexers if item["health"] == "error"]
         return {
@@ -354,7 +414,7 @@ class ProwlarrClient:
             "indexersError": len(errored),
             "applicationsTotal": len(applications),
             "systemWarnings": len(health),
-            "lastSuccessfulRefresh": now_iso(),
+            "lastSuccessfulRefresh": snapshot["refreshedAt"],
             "capabilities": self.capabilities,
         }
 
@@ -362,6 +422,7 @@ class ProwlarrClient:
         if indexer_id is None:
             response = await self._request("POST", f"{self._api_root}/indexer/testall", acceptable={200, 202})
             payload = response.json() if response.content else {}
+            self.invalidate_snapshot()
             return {"status": "accepted", "result": scrub(payload)}
 
         current = await self._json("GET", f"{self._api_root}/indexer/{indexer_id}")
@@ -369,6 +430,7 @@ class ProwlarrClient:
             raise ProwlarrError(502, "Réponse Prowlarr invalide.", code="prowlarr_invalid_response")
         response = await self._request("POST", f"{self._api_root}/indexer/test", json=current, acceptable={200, 202})
         payload = response.json() if response.content else {}
+        self.invalidate_snapshot()
         return {"status": "accepted", "result": scrub(payload)}
 
     async def set_indexer_enabled(self, indexer_id: int, enabled: bool) -> dict[str, Any]:
@@ -378,6 +440,7 @@ class ProwlarrClient:
         current["enable"] = enabled
         current["enabled"] = enabled
         payload = await self._json("PUT", f"{self._api_root}/indexer/{indexer_id}", json=current)
+        self.invalidate_snapshot()
         return self._map_indexer(payload if isinstance(payload, dict) else current)
 
     async def search(self, query: str, categories: list[int], indexer_ids: list[int]) -> dict[str, Any]:

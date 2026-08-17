@@ -44,6 +44,7 @@ class NotificationCenter:
 
     def reconcile(self, alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen_codes: set[str] = set()
+        dirty = False
         for alert in alerts:
             code = str(alert.get("code") or "")
             if not code:
@@ -65,17 +66,29 @@ class NotificationCenter:
                     "action": alert.get("action"),
                 }
                 self._records[code] = record
+                dirty = True
                 continue
-            record["service"] = alert.get("service", record.get("service"))
-            record["severity"] = alert.get("severity", record.get("severity"))
-            record["message"] = alert.get("message", record.get("message"))
-            record["lastSeenAt"] = alert.get("date") or now_iso()
-            record["occurrences"] = int(record.get("occurrences", 0) or 0) + 1
-            record["action"] = alert.get("action")
+            observed_at = alert.get("date") or now_iso()
+            changed = any(
+                record.get(key) != alert.get(key, record.get(key))
+                for key in ("service", "severity", "message", "action")
+            )
+            if changed:
+                record["lastSeenAt"] = observed_at
+                record["occurrences"] = int(record.get("occurrences", 0) or 0) + 1
+                dirty = True
+            for key in ("service", "severity", "message", "action"):
+                value = alert.get(key, record.get(key))
+                if record.get(key) != value:
+                    record[key] = value
+                    dirty = True
         for code, record in self._records.items():
             if code not in seen_codes and record.get("status") == "open":
-                record["lastResult"] = "stable"
-        self._save()
+                if record.get("lastResult") != "stable":
+                    record["lastResult"] = "stable"
+                    dirty = True
+        if dirty:
+            self._save()
         return self.snapshot()
 
     def snapshot(self) -> list[dict[str, Any]]:

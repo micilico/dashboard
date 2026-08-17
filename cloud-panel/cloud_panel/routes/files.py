@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 
 from common import error_detail
 
-from ..config import INTERNAL_TOKEN, MOUNT_PATH, SEARCH_MAX_RESULTS
+from ..config import INTERNAL_TOKEN, MOUNT_PATH, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH
 from ..security import resolve_path_within
 from ..storage import (
     list_directory,
@@ -85,6 +85,8 @@ async def search(
 ):
     """Recursively search file names."""
     _read_limiter(request)
+    if len(q.strip()) < SEARCH_MIN_LENGTH:
+        raise HTTPException(status_code=422, detail=error_detail("search_query_too_short", "Saisir au moins 3 caractères.", "Compléter la recherche"))
     try:
         return await run_in_threadpool(search_files, q, path, offset, limit, SEARCH_MAX_RESULTS)
     except ValueError:

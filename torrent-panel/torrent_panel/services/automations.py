@@ -133,8 +133,5 @@ class AutomationRuleStore:
                 "trigger": trigger,
                 "date": now_iso(),
             }
-            rule["lastExecutedAt"] = result["date"]
-            rule["lastResult"] = "matched" if matched else "no_match"
             results.append(result)
-        self._save()
         return results
