@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from torrent_panel.services.organizer import detect_duplicate_groups, duplicate_cloud_operations
+from torrent_panel.services.organizer import _missing_torrents, detect_duplicate_groups, duplicate_cloud_operations
 
 
 def _library(tmp_path: Path) -> Path:
@@ -49,3 +49,20 @@ def test_same_name_with_different_content_is_blocked(tmp_path):
     assert duplicate_cloud_operations(groups[0], "/srv/qbittorrent") == [
         {"op": "mkdir", "path": "qbittorrent/Films", "name": "Dune (2021)"}
     ]
+
+
+def test_missing_check_accepts_unicode_normalization_and_unknown_qbit_size(tmp_path):
+    media = tmp_path / "qbittorrent" / "Films"
+    media.mkdir(parents=True)
+    cloud_name = "Quand Harry rencontré Sally (1989) (When Harry Met Sally...).mkv"
+    (media / cloud_name).write_bytes(b"movie")
+    torrent_name = "Quand Harry rencontre\u0301 Sally (1989) (When Harry Met Sally...).mkv"
+
+    missing = _missing_torrents(
+        str(tmp_path),
+        "/srv/qbittorrent",
+        [{"hash": "a" * 40, "name": "Quand Harry rencontre Sally", "state": "pausedDL"}],
+        [[{"name": torrent_name, "size": 0}]],
+    )
+
+    assert missing == []

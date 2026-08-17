@@ -16,6 +16,8 @@ import os
 import posixpath
 import re
 import time
+import unicodedata
+from urllib.parse import unquote
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +210,12 @@ def _safe_relative(value: str) -> str:
     if not normalized or normalized == "." or normalized.startswith("../") or "/../" in f"/{normalized}/":
         raise ValueError("Chemin torrent invalide")
     return normalized
+
+
+def _file_name_key(value: str) -> str:
+    """Normalize API/cloud filenames before comparing them."""
+    decoded = unquote(str(value or "").replace("\\", "/").rsplit("/", 1)[-1])
+    return unicodedata.normalize("NFKC", decoded).casefold()
 
 
 def _common_root(paths: list[str]) -> str:
@@ -434,7 +442,7 @@ def _missing_torrents(
     for directory, _dirs, filenames in os.walk(mount):
         for filename in filenames:
             try:
-                disk_signatures.add((filename.casefold(), os.path.getsize(os.path.join(directory, filename))))
+                disk_signatures.add((_file_name_key(filename), os.path.getsize(os.path.join(directory, filename))))
             except OSError:
                 continue
     missing: list[dict[str, str]] = []
@@ -448,10 +456,14 @@ def _missing_torrents(
             item for item in files
             if isinstance(item, dict) and posixpath.splitext(str(item.get("name") or ""))[1].lower() in _VIDEO_EXTENSIONS
         ]
-        if media_files and not any(
-            (posixpath.basename(str(item.get("name") or "")).casefold(), _size(item)) in disk_signatures
-            for item in media_files
-        ):
+        present = False
+        for item in media_files:
+            name = _file_name_key(str(item.get("name") or ""))
+            size = _size(item)
+            if (name, size) in disk_signatures or (size == 0 and any(filename == name for filename, _disk_size in disk_signatures)):
+                present = True
+                break
+        if media_files and not present:
             missing.append({
                 "hash": str(torrent.get("hash") or "").lower(),
                 "name": str(torrent.get("name") or "Torrent"),
@@ -537,7 +549,12 @@ async def build_organization_plan(
     file_payloads = await asyncio.gather(
         *(fetch_files(str(torrent.get("hash") or "").lower()) for torrent in torrents)
     )
-    missing_torrents = _missing_torrents(mount_root, root, torrents, file_payloads) if mount_root else []
+    # These functions walk the rclone mount.  Never run that blocking I/O in
+    # FastAPI's event loop: otherwise even /healthz times out during a preview.
+    missing_torrents = (
+        await asyncio.to_thread(_missing_torrents, mount_root, root, torrents, file_payloads)
+        if mount_root else []
+    )
     missing_hashes = {item["hash"] for item in missing_torrents}
     warnings.extend(missing_torrents)
     for torrent, files in zip(torrents, file_payloads):
@@ -604,10 +621,16 @@ async def build_organization_plan(
         warnings.append({"name": names, "reason": f"Collision de destination ({target_file}) — rangement refusé"})
     already_organized = [entry for entry in candidates if entry["alreadyOrganized"]]
     entries = [entry for entry in candidates if not entry["alreadyOrganized"] and entry["hash"] not in colliding_hashes]
-    orphan_media = _orphan_media(mount_root, root, signatures) if mount_root and not selected else []
+    orphan_media = (
+        await asyncio.to_thread(_orphan_media, mount_root, root, signatures)
+        if mount_root and not selected else []
+    )
     if mount_root and not selected:
-        warnings.extend(_unassociated_files(mount_root, root, signatures))
-    duplicate_groups = detect_duplicate_groups(mount_root, root) if mount_root and not selected else []
+        warnings.extend(await asyncio.to_thread(_unassociated_files, mount_root, root, signatures))
+    duplicate_groups = (
+        await asyncio.to_thread(detect_duplicate_groups, mount_root, root)
+        if mount_root and not selected else []
+    )
     torrent_by_file: dict[tuple[str, int], list[dict[str, str]]] = {}
     for torrent, files in zip(torrents, file_payloads):
         torrent_name = str(torrent.get("name") or "")
