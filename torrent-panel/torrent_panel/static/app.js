@@ -2040,6 +2040,10 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
   els.organizeMediaPlan.replaceChildren();
   els.confirmOrganizeMediaButton.disabled = true;
   try {
+    await api(route("/api/torrents/organize-library-refresh"), {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
     const previewPath = state.organizeHashes.length === 1
       ? `/api/torrents/organize-library-preview?hash=${encodeURIComponent(state.organizeHashes[0])}`
       : "/api/torrents/organize-library-preview";

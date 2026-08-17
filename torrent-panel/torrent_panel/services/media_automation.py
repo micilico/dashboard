@@ -422,16 +422,22 @@ class MediaAutomationManager:
         *,
         recursive: bool = True,
         async_run: bool = False,
+        timeout_seconds: float | None = None,
     ) -> None:
         mode = self._config.rclone_refresh_mode
         if mode not in {"auto", "rc", "systemd"}:
             raise MediaAutomationError("Mode de rafraîchissement rclone invalide.")
         if mode in {"auto", "rc"}:
-            await self._refresh_rclone_rc(dirs=dirs, recursive=recursive, async_run=async_run)
+            await self._refresh_rclone_rc(
+                dirs=dirs,
+                recursive=recursive,
+                async_run=async_run,
+                timeout_seconds=timeout_seconds,
+            )
             return
         if async_run:
             raise MediaAutomationError("Le mode systemd ne supporte pas le refresh asynchrone.")
-        await self._refresh_rclone_systemd()
+        await self._refresh_rclone_systemd(timeout_seconds=timeout_seconds)
         return
 
     async def _refresh_rclone_rc(
@@ -440,6 +446,7 @@ class MediaAutomationManager:
         *,
         recursive: bool = True,
         async_run: bool = False,
+        timeout_seconds: float | None = None,
     ) -> None:
         if not self._config.rclone_rc_refresh_url:
             raise MediaAutomationError("Endpoint RC rclone non configuré.")
@@ -454,14 +461,15 @@ class MediaAutomationManager:
         if async_run:
             params["_async"] = "true"
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(self._config.rclone_rc_timeout_seconds)) as client:
+            request_timeout = timeout_seconds or self._config.rclone_rc_timeout_seconds
+            async with httpx.AsyncClient(timeout=httpx.Timeout(request_timeout)) as client:
                 response = await client.post(self._config.rclone_rc_refresh_url, params=params)
         except httpx.HTTPError as exc:
             raise MediaAutomationError("Endpoint RC rclone inaccessible — montage non modifié.") from exc
         if response.status_code >= 400:
             raise MediaAutomationError(f"Rclone RC a refusé l'actualisation ({response.status_code}) — montage non modifié.")
 
-    async def _refresh_rclone_systemd(self) -> None:
+    async def _refresh_rclone_systemd(self, *, timeout_seconds: float | None = None) -> None:
         raw_cmd = self._config.rclone_systemd_restart_cmd.strip()
         if not raw_cmd:
             raise MediaAutomationError("Commande systemd rclone non configurée.")
@@ -474,7 +482,7 @@ class MediaAutomationManager:
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15)
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds or 15)
         except TimeoutError as exc:
             process.kill()
             with contextlib.suppress(ProcessLookupError):

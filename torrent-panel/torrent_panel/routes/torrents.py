@@ -336,12 +336,36 @@ async def organize_library_preview(
     return {"runId": run["runId"], "plan": plan}
 
 
+@router.post("/torrents/organize-library-refresh", dependencies=[Depends(require_action_guard)])
+async def organize_library_refresh(request: Request) -> dict[str, str]:
+    """Refresh the current qBittorrent library before building its plan."""
+    try:
+        await request.app.state.media_automation.refresh_rclone(
+            dirs=["qbittorrent"],
+            recursive=True,
+            async_run=False,
+            timeout_seconds=10,
+        )
+    except MediaAutomationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=error_detail("rclone_refresh_failed", exc.public_message, "Vérifier rclone puis réessayer"),
+        ) from exc
+    return {"status": "refreshed", "path": "qbittorrent"}
+
+
 @router.post("/torrents/organize-library", dependencies=[Depends(require_action_guard)])
 async def organize_library(request: Request, payload: LibraryOrganizeRequest) -> dict[str, Any]:
     """Apply a selected global plan; every torrent remains paused afterward."""
     hashes = [validate_hash(value) for value in payload.hashes]
     async with request.app.state.organize_lock:
         try:
+            await request.app.state.media_automation.refresh_rclone(
+                dirs=["qbittorrent"],
+                recursive=True,
+                async_run=False,
+                timeout_seconds=10,
+            )
             # Orphans live on disk, not in a qBittorrent selection.  When the
             # request contains both kinds of items, build one full read-only
             # plan, then keep only the explicitly selected torrent entries.
