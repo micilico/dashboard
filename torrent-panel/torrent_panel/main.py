@@ -31,6 +31,7 @@ from .config import (  # noqa: E402
     MEDIA_PUBLIC_PREFIX,
     NOTIFICATION_STATE_PATH,
     LIBRARY_ORGANIZER_RUNS_PATH,
+    LIBRARY_INVENTORY_CACHE_TTL_SECONDS,
     ORGANIZER_RESUME_POLL_SECONDS,
     ORGANIZER_RESUME_STATE_PATH,
     PROWLARR_PANEL_PUBLIC_PREFIX,
@@ -75,7 +76,7 @@ from .services.media_automation import (  # noqa: E402
 )
 from .services.notifications import NotificationCenter  # noqa: E402
 from .services.organization_runs import OrganizationRunStore  # noqa: E402
-from .services.organizer import VerifiedResumeManager  # noqa: E402
+from .services.organizer import LibraryInventoryCache, VerifiedResumeManager  # noqa: E402
 from .services.metadata import MediaMetadataResolver  # noqa: E402
 from .services.ratio_monitor import RatioMonitor  # noqa: E402
 from .services.stats import StatsStore  # noqa: E402
@@ -142,6 +143,7 @@ app.state.verified_resume = VerifiedResumeManager(
     poll_seconds=ORGANIZER_RESUME_POLL_SECONDS,
 )
 app.state.organization_runs = OrganizationRunStore(LIBRARY_ORGANIZER_RUNS_PATH)
+app.state.library_inventory = LibraryInventoryCache(LIBRARY_INVENTORY_CACHE_TTL_SECONDS)
 app.state.metadata_resolver = MediaMetadataResolver()
 app.state.automation_rules = AutomationRuleStore(AUTOMATION_RULES_STATE_PATH)
 app.state.tracker_stats = TrackerStatsStore(

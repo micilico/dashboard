@@ -40,6 +40,91 @@ _PAUSED_STATES = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL", "missingFile
 _CATEGORY_NAMES = {"Films", "Series"}
 
 
+class LibraryInventory:
+    """One bounded, reusable view of the mounted qBittorrent library."""
+
+    def __init__(self, mount_root: str, qbit_root: str, files: list[dict[str, Any]], generation: str) -> None:
+        self.mount_root = mount_root
+        self.qbit_root = qbit_root
+        self.files = files
+        self.generation = generation
+        self.signatures = {
+            (str(item.get("normalizedName") or item["name"]).casefold(), int(item.get("size") or 0))
+            for item in files
+        }
+
+    @property
+    def built_at(self) -> float:
+        return float(getattr(self, "_built_at", 0.0))
+
+
+def build_library_inventory(mount_root: str, qbit_root: str, *, max_entries: int = 100_000) -> LibraryInventory:
+    """List the library once, collecting cheap metadata only.
+
+    Deliberately does not open file contents.  The relative paths are safe to
+    expose to the rest of the backend and never leave the backend process.
+    """
+    mount = os.path.realpath(mount_root or "")
+    anchor = mount
+    root_name = posixpath.basename(qbit_root.rstrip("/"))
+    try:
+        direct = next((entry.path for entry in os.scandir(mount) if entry.is_dir() and entry.name.casefold() == root_name.casefold()), None)
+        if direct:
+            anchor = direct
+    except OSError:
+        return LibraryInventory(mount, qbit_root, [], str(time.time_ns()))
+    files: list[dict[str, Any]] = []
+    try:
+        for directory, _dirs, names in os.walk(anchor):
+            for filename in names:
+                if len(files) >= max_entries:
+                    break
+                path = os.path.join(directory, filename)
+                try:
+                    stat = os.stat(path)
+                except OSError:
+                    continue
+                relative = os.path.relpath(path, anchor).replace(os.sep, "/")
+                category = relative.split("/", 1)[0] if "/" in relative else ""
+                if category not in _CATEGORY_NAMES:
+                    continue
+                files.append({
+                    "path": relative,
+                    "name": filename,
+                    "normalizedName": _file_name_key(filename),
+                    "size": int(stat.st_size),
+                    "extension": posixpath.splitext(filename)[1].lower(),
+                    "parent": posixpath.dirname(relative),
+                    "category": category,
+                })
+            if len(files) >= max_entries:
+                break
+    except OSError:
+        pass
+    inventory = LibraryInventory(mount, qbit_root, files, str(time.time_ns()))
+    inventory._built_at = time.monotonic()
+    return inventory
+
+
+class LibraryInventoryCache:
+    def __init__(self, ttl_seconds: float = 180.0) -> None:
+        self.ttl_seconds = max(30.0, ttl_seconds)
+        self._inventory: LibraryInventory | None = None
+        self._lock = asyncio.Lock()
+
+    async def get(self, mount_root: str, qbit_root: str, *, force: bool = False) -> LibraryInventory:
+        async with self._lock:
+            current = self._inventory
+            if not force and current and current.mount_root == os.path.realpath(mount_root or "") and time.monotonic() - current.built_at < self.ttl_seconds:
+                return current
+            inventory = await asyncio.to_thread(build_library_inventory, mount_root, qbit_root)
+            self._inventory = inventory
+            return inventory
+
+    def invalidate(self) -> None:
+        self._inventory = None
+
+
 def _duplicate_key(directory: str, files: list[str]) -> tuple[str, str] | None:
     """Return a stable identity for one Jellyfin-like media directory."""
     value = posixpath.basename(directory)
@@ -183,6 +268,39 @@ def duplicate_cloud_operations(group: dict[str, Any], qbit_root: str) -> list[di
         elif decision == "reuse":
             operations.append({"op": "delete", "path": posixpath.dirname(source), "old_name": posixpath.basename(source)})
     return operations
+
+
+def verify_duplicate_group(group: dict[str, Any], mount_root: str, qbit_root: str) -> dict[str, Any]:
+    """Perform strong content checks only for a group the user selected."""
+    anchor = os.path.realpath(mount_root or "")
+    root_name = posixpath.basename(qbit_root.rstrip("/"))
+    try:
+        direct = next((entry.path for entry in os.scandir(anchor) if entry.is_dir() and entry.name.casefold() == root_name.casefold()), None)
+    except OSError:
+        direct = None
+    anchor = direct or anchor
+    canonical_files: dict[str, str] = {}
+    canonical = str(group.get("canonicalPath") or "")
+    for item in group.get("files", []):
+        if item.get("decision") not in {"verification_required", "reuse", "conflict"}:
+            continue
+        relative_target = str(item.get("targetPath") or "")
+        target = os.path.join(anchor, relative_target)
+        source = os.path.join(anchor, str(item.get("sourcePath") or ""))
+        try:
+            source_digest = _file_digest(source)
+            target_digest = _file_digest(target)
+        except OSError:
+            item["decision"] = "manual"
+        else:
+            item["decision"] = "reuse" if source_digest == target_digest else "conflict"
+        canonical_files[relative_target.casefold()] = target
+    conflicts = sum(1 for item in group.get("files", []) if item.get("decision") == "conflict")
+    group["status"] = "conflict" if conflicts else "ready"
+    group["warnings"] = ["Conflit de contenu — aucune suppression effectuée"] if conflicts else []
+    group["exactFiles"] = sum(1 for item in group.get("files", []) if item.get("decision") == "reuse")
+    group["recoverableBytes"] = sum(int(item.get("size") or 0) for item in group.get("files", []) if item.get("decision") == "reuse")
+    return group
 
 
 def _normalize_qbit_root(value: str) -> str:
@@ -472,6 +590,94 @@ def _missing_torrents(
     return missing
 
 
+def _missing_from_inventory(
+    torrents: list[dict[str, Any]],
+    file_payloads: list[list[dict[str, Any]]],
+    inventory: LibraryInventory,
+) -> list[dict[str, str]]:
+    """Cheap missing-file check using the already-built inventory."""
+    missing: list[dict[str, str]] = []
+    for torrent, files in zip(torrents, file_payloads):
+        media_files = [item for item in files if isinstance(item, dict) and posixpath.splitext(str(item.get("name") or ""))[1].lower() in _VIDEO_EXTENSIONS]
+        present = any(
+            ( _file_name_key(str(item.get("name") or "")), int(item.get("size") or 0) ) in inventory.signatures
+            or (int(item.get("size") or 0) == 0 and any(name == _file_name_key(str(item.get("name") or "")) for name, _size in inventory.signatures))
+            for item in media_files
+        )
+        if media_files and not present:
+            missing.append({"hash": str(torrent.get("hash") or "").lower(), "name": str(torrent.get("name") or "Torrent"), "reason": "Fichiers média introuvables sur le stockage — aucune mutation effectuée"})
+    return missing
+
+
+def _orphan_from_inventory(inventory: LibraryInventory, signatures: set[tuple[str, int]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for item in inventory.files:
+        if item["extension"] not in _VIDEO_EXTENSIONS or (item["normalizedName"], item["size"]) in signatures:
+            continue
+        result.append({"path": item["path"], "status": "orphan", "message": "Média rangé — aucun torrent associé", "confidence": "manual_review"})
+        if len(result) >= 500:
+            break
+    return result
+
+
+def _unassociated_from_inventory(inventory: LibraryInventory, signatures: set[tuple[str, int]]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    for item in inventory.files:
+        if (item["normalizedName"], item["size"]) in signatures:
+            continue
+        result.append({"name": item["path"], "reason": "Fichier présent mais non associé à qBittorrent"})
+        if len(result) >= 100:
+            result.append({"name": "Stockage", "reason": "Autres fichiers non associés non affichés"})
+            break
+    return result
+
+
+def duplicate_groups_from_inventory(inventory: LibraryInventory) -> list[dict[str, Any]]:
+    """Find probable duplicate groups without reading video contents."""
+    folders: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
+    for item in inventory.files:
+        parts = item["path"].split("/")
+        if len(parts) < 3:
+            continue
+        directory = "/".join(parts[:2])
+        grouped.setdefault((parts[0], directory), {}).setdefault(directory, []).append({"name": "/".join(parts[2:]), "size": item["size"]})
+    for (category, directory), values in grouped.items():
+        files = next(iter(values.values()))
+        identity = _duplicate_key(posixpath.basename(directory), [item["name"] for item in files])
+        if identity:
+            folders.append({"category": category, "name": posixpath.basename(directory), "path": directory, "identity": identity, "files": files})
+    groups: list[dict[str, Any]] = []
+    for identity in sorted({item["identity"] for item in folders}):
+        members = [item for item in folders if item["identity"] == identity]
+        if len(members) < 2:
+            continue
+        kind, key = identity
+        year = key.rsplit("|", 1)[-1] if kind == "film" else ""
+        title = key.split("|", 1)[0] if kind == "film" else key
+        canonical_name = f"{title} ({year})" if kind == "film" else title
+        canonical = next((item for item in members if item["name"] == canonical_name), members[0])
+        canonical_path = f"{canonical['category']}/{canonical_name}"
+        canonical_files = {item["name"].casefold(): item for item in canonical["files"]}
+        decisions: list[dict[str, Any]] = []
+        for member in members:
+            if member is canonical:
+                continue
+            for item in member["files"]:
+                target = canonical_files.get(item["name"].casefold())
+                if target is None:
+                    decision = "move"
+                elif int(target["size"]) != int(item["size"]):
+                    decision = "conflict"
+                else:
+                    decision = "verification_required"
+                decisions.append({"sourcePath": f"{member['path']}/{item['name']}", "targetPath": f"{canonical_path}/{item['name']}", "name": item["name"], "size": item["size"], "decision": decision})
+        conflicts = sum(1 for item in decisions if item["decision"] == "conflict")
+        needs_verification = any(item["decision"] == "verification_required" for item in decisions)
+        groups.append({"id": hashlib.sha256("|".join(sorted(item["path"] for item in members)).encode()).hexdigest()[:16], "kind": kind, "canonicalPath": canonical_path, "sourcePaths": [item["path"] for item in members if item is not canonical], "files": decisions, "status": "conflict" if conflicts else ("verification_required" if needs_verification else "ready"), "warnings": ["Contenu identique probable : vérification requise avant suppression"] if needs_verification else [], "exactFiles": 0, "complementaryFiles": sum(1 for item in decisions if item["decision"] == "move"), "conflicts": conflicts, "recoverableBytes": 0, "associatedTorrents": [], "proposedDecision": "manual" if conflicts or needs_verification else "merge"})
+    return groups
+
+
 def orphan_operations(orphan: dict[str, Any], qbit_root: str) -> list[dict[str, str]] | None:
     """Build a move-only plan for one orphan video, or return ``None`` if unclear."""
     source = _safe_relative(str(orphan.get("path") or ""))
@@ -508,7 +714,9 @@ async def build_organization_plan(
     *,
     mount_root: str | None = None,
     metadata_resolver: Any | None = None,
+    inventory: LibraryInventory | None = None,
 ) -> dict[str, Any]:
+    started_at = time.perf_counter()
     root = _normalize_qbit_root(qbit_root)
     if not root:
         return {"entries": [], "warnings": [{"reason": "Racine qBittorrent non configurée"}], "count": 0}
@@ -551,10 +759,14 @@ async def build_organization_plan(
     )
     # These functions walk the rclone mount.  Never run that blocking I/O in
     # FastAPI's event loop: otherwise even /healthz times out during a preview.
-    missing_torrents = (
-        await asyncio.to_thread(_missing_torrents, mount_root, root, torrents, file_payloads)
-        if mount_root else []
+    inventory = inventory or (await asyncio.to_thread(build_library_inventory, mount_root, root) if mount_root else None)
+    logger.info(
+        "organize phase=inventory duration_ms=%.1f entries=%d generation=%s",
+        (time.perf_counter() - started_at) * 1000,
+        len(inventory.files) if inventory else 0,
+        inventory.generation if inventory else "none",
     )
+    missing_torrents = _missing_from_inventory(torrents, file_payloads, inventory) if inventory else []
     missing_hashes = {item["hash"] for item in missing_torrents}
     warnings.extend(missing_torrents)
     for torrent, files in zip(torrents, file_payloads):
@@ -595,18 +807,25 @@ async def build_organization_plan(
         if entry is None:
             warnings.append({"hash": torrent_hash, "name": str(torrent.get("name") or "Torrent"), "reason": "Film ou série non identifié"})
             continue
-        if metadata_resolver is not None:
+        candidates.append(entry)
+    if metadata_resolver is not None and candidates:
+        async def resolve_entry(entry: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
             metadata = await metadata_resolver.resolve(
                 str(entry.get("folder") or entry.get("name") or ""),
                 "film" if entry.get("kind") == "film" else "series",
                 str(entry.get("folder") or "").rsplit("(", 1)[-1].rstrip(")") if entry.get("kind") == "film" else None,
             )
+            return entry, metadata
+        resolved = await asyncio.gather(*(resolve_entry(entry) for entry in candidates))
+        filtered: list[dict[str, Any]] = []
+        for entry, metadata in resolved:
             entry["metadata"] = metadata
             entry["confidence"] = metadata.get("confidence", entry.get("confidence", "heuristic"))
             if entry["confidence"] == "ambiguous":
-                warnings.append({"hash": torrent_hash, "name": str(torrent.get("name") or "Torrent"), "reason": "Correspondance Jellyfin/TMDB ambiguë — validation manuelle requise"})
+                warnings.append({"hash": entry["hash"], "name": entry["name"], "reason": "Correspondance Jellyfin/TMDB ambiguë — validation manuelle requise"})
                 continue
-        candidates.append(entry)
+            filtered.append(entry)
+        candidates = filtered
     owners: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for entry in candidates:
         for target_file in entry["targetFiles"]:
@@ -621,15 +840,12 @@ async def build_organization_plan(
         warnings.append({"name": names, "reason": f"Collision de destination ({target_file}) — rangement refusé"})
     already_organized = [entry for entry in candidates if entry["alreadyOrganized"]]
     entries = [entry for entry in candidates if not entry["alreadyOrganized"] and entry["hash"] not in colliding_hashes]
-    orphan_media = (
-        await asyncio.to_thread(_orphan_media, mount_root, root, signatures)
-        if mount_root and not selected else []
-    )
+    orphan_media = _orphan_from_inventory(inventory, signatures) if inventory and not selected else []
     if mount_root and not selected:
-        warnings.extend(await asyncio.to_thread(_unassociated_files, mount_root, root, signatures))
+        warnings.extend(_unassociated_from_inventory(inventory, signatures) if inventory else [])
     duplicate_groups = (
-        await asyncio.to_thread(detect_duplicate_groups, mount_root, root)
-        if mount_root and not selected else []
+        duplicate_groups_from_inventory(inventory)
+        if inventory and not selected else []
     )
     torrent_by_file: dict[tuple[str, int], list[dict[str, str]]] = {}
     for torrent, files in zip(torrents, file_payloads):
@@ -646,7 +862,7 @@ async def build_organization_plan(
             for torrent in torrent_by_file.get((posixpath.basename(item["name"]).casefold(), int(item["size"])), []):
                 associated[torrent["hash"]] = torrent["name"]
         group["associatedTorrents"] = [{"hash": key, "name": value} for key, value in sorted(associated.items())]
-    return {
+    result = {
         "entries": entries,
         "alreadyOrganized": already_organized,
         "orphanMedia": orphan_media,
@@ -667,6 +883,12 @@ async def build_organization_plan(
             "recoverableBytes": sum(int(group.get("recoverableBytes", 0)) for group in duplicate_groups),
         },
     }
+    logger.info(
+        "organize phase=plan duration_ms=%.1f torrents=%d entries=%d orphans=%d duplicates=%d warnings=%d",
+        (time.perf_counter() - started_at) * 1000,
+        len(torrents), len(entries), len(orphan_media), len(duplicate_groups), len(warnings),
+    )
+    return result
 
 
 def _temporary_path(torrent_hash: str, index: int, old_path: str) -> str:
