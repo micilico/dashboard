@@ -90,7 +90,9 @@ def build_library_inventory(mount_root: str, qbit_root: str, *, max_entries: int
                     continue
                 relative = os.path.relpath(path, anchor).replace(os.sep, "/")
                 category = relative.split("/", 1)[0] if "/" in relative else ""
-                if category not in _CATEGORY_NAMES:
+                # qBittorrent peut encore laisser des fichiers directement
+                # dans sa racine avant le rangement dans Films/Series.
+                if category not in _CATEGORY_NAMES and category != "":
                     continue
                 files.append({
                     "path": relative,
