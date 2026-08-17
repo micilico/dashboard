@@ -52,6 +52,10 @@ class LibraryInventory:
             (str(item.get("normalizedName") or item["name"]).casefold(), int(item.get("size") or 0))
             for item in files
         }
+        self.name_counts: dict[str, int] = {}
+        for item in files:
+            name = str(item.get("normalizedName") or item["name"]).casefold()
+            self.name_counts[name] = self.name_counts.get(name, 0) + 1
 
     @property
     def built_at(self) -> float:
@@ -600,8 +604,10 @@ def _missing_from_inventory(
     for torrent, files in zip(torrents, file_payloads):
         media_files = [item for item in files if isinstance(item, dict) and posixpath.splitext(str(item.get("name") or ""))[1].lower() in _VIDEO_EXTENSIONS]
         present = any(
-            ( _file_name_key(str(item.get("name") or "")), int(item.get("size") or 0) ) in inventory.signatures
-            or (int(item.get("size") or 0) == 0 and any(name == _file_name_key(str(item.get("name") or "")) for name, _size in inventory.signatures))
+            (
+                (_file_name_key(str(item.get("name") or "")), int(item.get("size") or 0)) in inventory.signatures
+                or inventory.name_counts.get(_file_name_key(str(item.get("name") or "")), 0) == 1
+            )
             for item in media_files
         )
         if media_files and not present:
@@ -611,8 +617,9 @@ def _missing_from_inventory(
 
 def _orphan_from_inventory(inventory: LibraryInventory, signatures: set[tuple[str, int]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
+    known_names = {name for name, _size in signatures}
     for item in inventory.files:
-        if item["extension"] not in _VIDEO_EXTENSIONS or (item["normalizedName"], item["size"]) in signatures:
+        if item["extension"] not in _VIDEO_EXTENSIONS or (item["normalizedName"], item["size"]) in signatures or (item["normalizedName"] in known_names and inventory.name_counts.get(item["normalizedName"], 0) == 1):
             continue
         result.append({"path": item["path"], "status": "orphan", "message": "Média rangé — aucun torrent associé", "confidence": "manual_review"})
         if len(result) >= 500:
@@ -622,8 +629,9 @@ def _orphan_from_inventory(inventory: LibraryInventory, signatures: set[tuple[st
 
 def _unassociated_from_inventory(inventory: LibraryInventory, signatures: set[tuple[str, int]]) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
+    known_names = {name for name, _size in signatures}
     for item in inventory.files:
-        if (item["normalizedName"], item["size"]) in signatures:
+        if (item["normalizedName"], item["size"]) in signatures or (item["normalizedName"] in known_names and inventory.name_counts.get(item["normalizedName"], 0) == 1):
             continue
         result.append({"name": item["path"], "reason": "Fichier présent mais non associé à qBittorrent"})
         if len(result) >= 100:
@@ -781,7 +789,7 @@ async def build_organization_plan(
             except (TypeError, ValueError):
                 size = 0
             total_bytes += max(0, size)
-            signatures.add((posixpath.basename(str(item["name"])).casefold(), size))
+            signatures.add((_file_name_key(str(item["name"])), size))
         dangerous = [
             str(item.get("name") or "")
             for item in files
