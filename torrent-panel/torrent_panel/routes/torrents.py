@@ -391,6 +391,16 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
     async with request.app.state.organize_lock:
         try:
             run = request.app.state.organization_runs.get(payload.runId) if payload.runId else None
+            if run and run.get("status") == "completed":
+                raise HTTPException(
+                    status_code=409,
+                    detail=error_detail("organization_already_applied", "Ce plan a déjà été appliqué.", "Relancer une analyse"),
+                )
+            if run and run.get("status") == "applying":
+                raise HTTPException(
+                    status_code=409,
+                    detail=error_detail("organization_in_progress", "Ce plan est déjà en cours d’application.", "Patienter puis actualiser"),
+                )
             stored_plan = run.get("plan") if isinstance(run, dict) else None
             if isinstance(stored_plan, dict) and isinstance(run.get("planCreatedAt"), (int, float)) and time.time() - float(run["planCreatedAt"]) <= 900:
                 if run.get("inventoryGeneration"):
@@ -411,8 +421,12 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
                     selected_hashes = set(hashes)
                     plan["entries"] = [entry for entry in plan.get("entries", []) if str(entry.get("hash") or "").lower() in selected_hashes]
                     plan["totalOperations"] = sum(len(entry.get("operations", [])) for entry in plan["entries"])
+            if run:
+                run = request.app.state.organization_runs.update(run["runId"], status="applying") or run
             result = await apply_organization_plan(request.app.state.qbit, plan, None)
         except QbitError as exc:
+            if run:
+                request.app.state.organization_runs.update(run["runId"], status="preview")
             raise qbit_error_response(exc) from exc
 
         if run is None:

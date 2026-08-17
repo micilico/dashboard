@@ -1,4 +1,5 @@
 async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+  if (options.retry === false) maxRetries = 0;
   const timeoutMs = options.timeout || 10000;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -6,6 +7,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
       const mergedOptions = { ...options, signal: controller.signal };
       delete mergedOptions.timeout;
+      delete mergedOptions.retry;
       const response = await fetch(url, mergedOptions);
       clearTimeout(timeout);
 

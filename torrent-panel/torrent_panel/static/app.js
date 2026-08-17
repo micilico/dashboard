@@ -2211,6 +2211,8 @@ async function confirmOrganizeMedia() {
     const payload = await api(route("/api/torrents/organize-library"), {
       method: "POST",
       body: JSON.stringify({ hashes, orphanPaths, duplicateGroupIds, runId: state.organizeRunId || null }),
+      timeout: 600000,
+      retry: false,
     });
     const result = payload.result || {};
     const refresh = payload.refresh || {};
