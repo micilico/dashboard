@@ -26,10 +26,7 @@ from torrent_panel.qbittorrent import AsyncTTLCache, QBittorrentClient, QbitConf
 from torrent_panel.routes import dashboard as dashboard_routes  # noqa: E402
 from torrent_panel.routes import torrents as torrent_routes  # noqa: E402
 from torrent_panel.services.monitoring import (
-    _disk_snapshot,
     _disk_unavailable,
-    _fetch_ultra_quota,
-    _parse_ultra_quota,
     storage_snapshot,
 )  # noqa: E402
 from torrent_panel.services import relink as relink_service  # noqa: E402
@@ -1238,6 +1235,38 @@ class OrganizerTests(BackendTests):
         ]
         app.state.qbit.files_payload = {VALID_HASH: [{"name": "Dune.2021.1080p.MULTi.mkv", "size": 10}]}
 
+    def test_library_inventory_keeps_release_folders_directly_under_qbittorrent(self):
+        mount = Path(tempfile.mkdtemp())
+        release = mount / "qbittorrent" / "Euphoria.S03.MULTi.VFF.1080p.WEB.EAC3.5.1.H265-TFA" / "Saison 3"
+        release.mkdir(parents=True)
+        (release / "Euphoria.S03E01.mkv").write_bytes(b"episode")
+        torrent_hash = "e" * 40
+        app.state.qbit.torrents_payload = [{
+            "hash": torrent_hash,
+            "name": "Euphoria.S03.MULTi.VFF.1080p.WEB.EAC3.5.1.H265-TFA",
+            "state": "uploading",
+            "progress": 1,
+            "size": 7,
+            "remaining": 0,
+            "savePath": self.QBIT_ROOT,
+        }]
+        app.state.qbit.files_payload = {torrent_hash: [{"name": "Euphoria.S03E01.mkv", "size": 7}]}
+
+        inventory = organizer_service.build_library_inventory(str(mount), self.QBIT_ROOT)
+        plan = asyncio.run(
+            organizer_service.build_organization_plan(
+                app.state.qbit,
+                self.QBIT_ROOT,
+                mount_root=str(mount),
+                inventory=inventory,
+            )
+        )
+
+        self.assertEqual(plan["warnings"], [])
+        self.assertEqual([entry["name"] for entry in plan["entries"]], [
+            "Euphoria.S03.MULTi.VFF.1080p.WEB.EAC3.5.1.H265-TFA",
+        ])
+
     def test_movie_preview_keeps_filename_and_builds_jellyfin_folder(self):
         self._movie_payload()
         with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
@@ -1760,185 +1789,7 @@ class MediaAutomationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dirs, ["films/Movie"])
 
 
-class StorageQuotaTests(unittest.TestCase):
-    def test_parse_ultra_quota_valid(self):
-        payload = {
-            "service_stats_info": {
-                "free_storage_bytes": 9664750157824,
-                "total_storage_unit": "G",
-                "total_storage_value": 11176,
-                "used_storage_value": 2175,
-            }
-        }
-        total, used, free = _parse_ultra_quota(payload)
-        self.assertEqual(total, 11176 * 1024**3)
-        self.assertEqual(free, 9664750157824)
-        self.assertEqual(used, total - free)
-
-    def test_parse_ultra_quota_handles_binary_units(self):
-        payload = {
-            "service_stats_info": {
-                "free_storage_bytes": 1024**3,
-                "total_storage_unit": "TiB",
-                "total_storage_value": 2,
-                "used_storage_value": 1,
-            }
-        }
-        total, _used, free = _parse_ultra_quota(payload)
-        self.assertEqual(total, 2 * 1024**4)
-        self.assertEqual(free, 1024**3)
-
-    def test_parse_ultra_quota_storage_info_key(self):
-        payload = {
-            "Storage Info": {
-                "free_storage_bytes": 104152956928,
-                "total_storage_unit": "G",
-                "total_storage_value": 932,
-                "used_storage_unit": "G",
-                "used_storage_value": 835,
-            }
-        }
-        total, used, free = _parse_ultra_quota(payload)
-        self.assertEqual(total, 932 * 1024**3)
-        self.assertEqual(free, 104152956928)
-        self.assertEqual(used, total - free)
-
-    def test_parse_ultra_quota_derives_free_from_used(self):
-        payload = {
-            "Storage Info": {
-                "total_storage_unit": "G",
-                "total_storage_value": 10,
-                "used_storage_unit": "G",
-                "used_storage_value": 4,
-            }
-        }
-        total, used, free = _parse_ultra_quota(payload)
-        self.assertEqual(total, 10 * 1024**3)
-        self.assertEqual(free, 6 * 1024**3)
-        self.assertEqual(used, 4 * 1024**3)
-
-    def test_parse_ultra_quota_returns_none_on_invalid_payload(self):
-        self.assertIsNone(_parse_ultra_quota({}))
-        self.assertIsNone(_parse_ultra_quota({"service_stats_info": {}}))
-        self.assertIsNone(_parse_ultra_quota({"service_stats_info": {"total_storage_value": 10}}))
-        self.assertIsNone(
-            _parse_ultra_quota(
-                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": "abc"}}
-            )
-        )
-        self.assertIsNone(
-            _parse_ultra_quota(
-                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": 1, "total_storage_unit": "X"}}
-            )
-        )
-        self.assertIsNone(
-            _parse_ultra_quota(
-                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": 20000000000, "total_storage_unit": "G"}}
-            )
-        )
-        self.assertIsNone(_parse_ultra_quota([]))
-
-
-class UltraUrlNormalizationTests(unittest.TestCase):
-    def test_strip_suffix_from_full_endpoint(self):
-        from torrent_panel.config import _strip_ultra_suffix
-
-        self.assertEqual(
-            _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get-diskquota"),
-            "https://user.host.usbx.me/ultra-api",
-        )
-        self.assertEqual(
-            _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get_diskquota"),
-            "https://user.host.usbx.me/ultra-api",
-        )
-        self.assertEqual(
-            _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/"),
-            "https://user.host.usbx.me/ultra-api",
-        )
-        self.assertEqual(_strip_ultra_suffix("https://user.host.usbx.me/ultra-api"), "https://user.host.usbx.me/ultra-api")
-        self.assertEqual(_strip_ultra_suffix(""), "")
-
-
-class UltraQuotaFetchTests(unittest.IsolatedAsyncioTestCase):
-    class FakeResponse:
-        def __init__(self, payload=None, status_code=200):
-            self._payload = payload if payload is not None else {}
-            self.status_code = status_code
-
-        def json(self):
-            return self._payload
-
-    def _make_client(self, responses):
-        requests = []
-
-        class FakeAsyncClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return None
-
-            async def get(self, url, headers=None):
-                requests.append(url)
-                return responses.get(url, UltraQuotaFetchTests.FakeResponse())
-
-        return FakeAsyncClient, requests
-
-    async def _fetch_with(self, url, token, client=None):
-        with ExitStack() as stack:
-            stack.enter_context(mock.patch("torrent_panel.services.monitoring.ULTRA_API_URL", url))
-            stack.enter_context(mock.patch("torrent_panel.services.monitoring.ULTRA_API_TOKEN", token))
-            if client is not None:
-                stack.enter_context(mock.patch("torrent_panel.services.monitoring.httpx.AsyncClient", client))
-            return await _fetch_ultra_quota()
-
-    async def test_fetch_prefers_hyphen_path(self):
-        responses = {
-            "https://slot/ultra-api/get-diskquota": self.FakeResponse(
-                {"Storage Info": {"free_storage_bytes": 104152956928, "total_storage_unit": "G", "total_storage_value": 932, "used_storage_unit": "G", "used_storage_value": 835}}
-            )
-        }
-        client, requests = self._make_client(responses)
-        quota, error = await self._fetch_with("https://slot/ultra-api", "token", client)
-        self.assertIsNone(error)
-        self.assertEqual(quota, (932 * 1024**3, 835 * 1024**3, 104152956928))
-        self.assertEqual(requests, ["https://slot/ultra-api/get-diskquota"])
-
-    async def test_fetch_falls_back_to_underscore_path(self):
-        responses = {
-            "https://slot/ultra-api/get-diskquota": self.FakeResponse(),
-            "https://slot/ultra-api/get_diskquota": self.FakeResponse(
-                {"Storage Info": {"free_storage_bytes": 10, "total_storage_unit": "G", "total_storage_value": 1}}
-            ),
-        }
-        client, requests = self._make_client(responses)
-        quota, error = await self._fetch_with("https://slot/ultra-api", "token", client)
-        self.assertIsNone(error)
-        self.assertEqual(quota, (1024**3, 1024**3 - 10, 10))
-        self.assertEqual(requests, ["https://slot/ultra-api/get-diskquota", "https://slot/ultra-api/get_diskquota"])
-
-    async def test_fetch_reports_http_error(self):
-        responses = {
-            "https://slot/ultra-api/get-diskquota": self.FakeResponse(status_code=404),
-            "https://slot/ultra-api/get_diskquota": self.FakeResponse(status_code=404),
-        }
-        client, requests = self._make_client(responses)
-        quota, error = await self._fetch_with("https://slot/ultra-api", "token", client)
-        self.assertIsNone(quota)
-        self.assertEqual(error, "http_404")
-        self.assertEqual(len(requests), 2)
-
-    async def test_fetch_not_configured(self):
-        quota, error = await self._fetch_with("", "")
-        self.assertIsNone(quota)
-        self.assertEqual(error, "not_configured")
-
-
-class StorageSnapshotQuotaTests(unittest.IsolatedAsyncioTestCase):
-    """storage_snapshot must only ever report the slot quota, never the server disk."""
+class StorageSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
     def _patch_rclone(self):
         class FakeResponse:
@@ -1962,81 +1813,19 @@ class StorageSnapshotQuotaTests(unittest.IsolatedAsyncioTestCase):
 
         return mock.patch("torrent_panel.services.monitoring.httpx.AsyncClient", FakeAsyncClient)
 
-    async def test_quota_ok_reports_ultra_api(self):
-        with ExitStack() as stack:
-            stack.enter_context(
-                mock.patch(
-                    "torrent_panel.services.monitoring._fetch_ultra_quota",
-                    mock.AsyncMock(return_value=((932 * 1024**3, 835 * 1024**3, 104152956928), None)),
-                )
-            )
-            stack.enter_context(self._patch_rclone())
+    async def test_storage_snapshot_disables_quota_without_external_request(self):
+        with self._patch_rclone():
             result = await storage_snapshot(mock.Mock())
-        disk = result["disk"]
-        self.assertEqual(disk["source"], "ultra-api")
-        self.assertTrue(disk["available"])
-        self.assertEqual(disk["totalBytes"], 932 * 1024**3)
-        self.assertEqual(disk["usedBytes"], 835 * 1024**3)
-
-    async def test_quota_failure_is_unavailable_not_server(self):
-        with ExitStack() as stack:
-            stack.enter_context(
-                mock.patch(
-                    "torrent_panel.services.monitoring._fetch_ultra_quota",
-                    mock.AsyncMock(return_value=(None, "timeout")),
-                )
-            )
-            stack.enter_context(self._patch_rclone())
-            result = await storage_snapshot(mock.Mock())
-        disk = result["disk"]
-        self.assertFalse(disk["available"])
-        self.assertEqual(disk["source"], "unavailable")
-        self.assertEqual(disk["totalBytes"], 0)
-        self.assertEqual(disk["usedBytes"], 0)
-        self.assertEqual(disk["quotaError"], "timeout")
-
-    async def test_quota_not_configured_is_unavailable(self):
-        with ExitStack() as stack:
-            stack.enter_context(
-                mock.patch(
-                    "torrent_panel.services.monitoring._fetch_ultra_quota",
-                    mock.AsyncMock(return_value=(None, "not_configured")),
-                )
-            )
-            stack.enter_context(self._patch_rclone())
-            result = await storage_snapshot(mock.Mock())
-        disk = result["disk"]
-        self.assertFalse(disk["available"])
-        self.assertEqual(disk["source"], "unavailable")
-        self.assertEqual(disk["quotaError"], "not_configured")
-        self.assertEqual(disk["totalBytes"], 0)
-
-    async def test_quota_failure_never_calls_disk_usage(self):
-        with ExitStack() as stack:
-            stack.enter_context(
-                mock.patch(
-                    "torrent_panel.services.monitoring._fetch_ultra_quota",
-                    mock.AsyncMock(return_value=(None, "http_500")),
-                )
-            )
-            stack.enter_context(self._patch_rclone())
-            result = await storage_snapshot(mock.Mock())
-        self.assertEqual(result["disk"]["source"], "unavailable")
+        self.assertEqual(result["disk"]["source"], "disabled")
+        self.assertFalse(result["disk"]["available"])
         self.assertEqual(result["disk"]["totalBytes"], 0)
         self.assertEqual(result["disk"]["usedBytes"], 0)
-        self.assertFalse(result["disk"]["available"])
 
     def test_disk_unavailable_payload(self):
-        payload = _disk_unavailable("connection")
+        payload = _disk_unavailable()
         self.assertFalse(payload["available"])
-        self.assertEqual(payload["source"], "unavailable")
+        self.assertEqual(payload["source"], "disabled")
         self.assertEqual(payload["totalBytes"], 0)
-        self.assertEqual(payload["quotaError"], "connection")
-
-    def test_disk_snapshot_available_flag(self):
-        payload = _disk_snapshot(1000, 400, "ultra-api")
-        self.assertTrue(payload["available"])
-        self.assertEqual(payload["source"], "ultra-api")
 
 
 if __name__ == "__main__":

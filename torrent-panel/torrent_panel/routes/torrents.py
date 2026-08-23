@@ -375,6 +375,9 @@ async def organize_library_refresh(request: Request) -> dict[str, str]:
             status_code=502,
             detail=error_detail("rclone_refresh_failed", exc.public_message, "Vérifier rclone puis réessayer"),
         ) from exc
+    # Le refresh rclone peut révéler des fichiers apparus depuis le dernier
+    # inventaire ; ne pas réutiliser le snapshot précédent pour la preview.
+    request.app.state.library_inventory.invalidate()
     return {"status": "refreshed", "path": "qbittorrent"}
 
 

@@ -12,125 +12,20 @@ import time
 import httpx
 from fastapi import UploadFile
 
-from .config import FOLDER_SIZE_CACHE_MAX_ENTRIES, MOUNT_PATH, PATH_LOCK_MAX_ENTRIES, SCANDIR_CACHE_MAX_ENTRIES, SCANDIR_CACHE_TTL, SEARCH_CACHE_MAX_ENTRIES, SEARCH_CACHE_TTL, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, ULTRA_API_CACHE_TTL, ULTRA_API_TIMEOUT_SECONDS, ULTRA_API_TOKEN, ULTRA_API_URL, UPLOAD_CHUNK_SIZE
+from .config import FOLDER_SIZE_CACHE_MAX_ENTRIES, MOUNT_PATH, PATH_LOCK_MAX_ENTRIES, SCANDIR_CACHE_MAX_ENTRIES, SCANDIR_CACHE_TTL, SEARCH_CACHE_MAX_ENTRIES, SEARCH_CACHE_TTL, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, UPLOAD_CHUNK_SIZE
 from .security import resolve_path_within
 
 logger = logging.getLogger(__name__)
 
 _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
 _folder_size_cache: dict[tuple[str, float], tuple[float, int]] = {}
-_disk_cache: tuple[float, dict[str, str | float]] | None = None
 _path_locks: dict[str, threading.Lock] = {}
 _search_cache: dict[tuple[str, str, int, int, int], tuple[float, dict]] = {}
 _path_locks_guard = threading.Lock()
 
-_ULTRA_UNIT_MULTIPLIERS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
-_ULTRA_PATHS = ("/get-diskquota", "/get_diskquota")
-
-
-def _normalize_ultra_unit(unit: str) -> str:
-    return unit.replace("B", "").replace("I", "").strip()
-
-
-def _parse_ultra_quota(payload: dict) -> tuple[int, int, int] | None:
-    """Parse the ultra.cc quota payload into (total, used, free) bytes."""
-    if not isinstance(payload, dict):
-        return None
-    info = payload.get("Storage Info")
-    if not isinstance(info, dict):
-        info = payload.get("service_stats_info")
-    if not isinstance(info, dict):
-        return None
-    total_value = info.get("total_storage_value")
-    if total_value is None:
-        return None
-    try:
-        total_value = int(total_value)
-    except (TypeError, ValueError):
-        return None
-    total_unit = _normalize_ultra_unit(str(info.get("total_storage_unit") or "G").strip().upper())
-    multiplier = _ULTRA_UNIT_MULTIPLIERS.get(total_unit)
-    if multiplier is None:
-        return None
-    total_bytes = total_value * multiplier
-    if total_bytes <= 0:
-        return None
-
-    free_bytes = info.get("free_storage_bytes")
-    if free_bytes is not None:
-        try:
-            free_bytes = int(free_bytes)
-        except (TypeError, ValueError):
-            free_bytes = None
-    if free_bytes is None:
-        used_value = info.get("used_storage_value")
-        if used_value is not None:
-            try:
-                used_value = int(used_value)
-            except (TypeError, ValueError):
-                used_value = None
-            if used_value is not None:
-                used_unit = _normalize_ultra_unit(str(info.get("used_storage_unit") or total_unit).strip().upper())
-                used_multiplier = _ULTRA_UNIT_MULTIPLIERS.get(used_unit)
-                if used_multiplier is not None:
-                    free_bytes = total_bytes - used_value * used_multiplier
-    if free_bytes is None or free_bytes < 0 or free_bytes > total_bytes:
-        return None
-    return total_bytes, max(0, total_bytes - free_bytes), free_bytes
-
-
-def _fetch_ultra_quota_sync() -> tuple[int, int, int] | None:
-    if not ULTRA_API_URL or not ULTRA_API_TOKEN:
-        return None
-    for path in _ULTRA_PATHS:
-        try:
-            with httpx.Client(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS)) as client:
-                response = client.get(
-                    f"{ULTRA_API_URL}{path}",
-                    headers={"Authorization": f"Bearer {ULTRA_API_TOKEN}"},
-                )
-        except (httpx.TimeoutException, httpx.HTTPError):
-            return None
-        if response.status_code != 200:
-            continue
-        try:
-            parsed = response.json()
-        except ValueError:
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        totals = _parse_ultra_quota(parsed)
-        if totals is not None:
-            return totals
-    return None
-
-
 def get_disk_usage() -> dict[str, str | float | bool]:
-    """Disk usage for the sidebar. Uses the ultra.cc quota API (user quota only).
-    When the quota is unavailable, returns N/A instead of falling back to the
-    server-wide mount stats. Cached for ULTRA_API_CACHE_TTL seconds."""
-    global _disk_cache
-    now = time.time()
-    if _disk_cache and now - _disk_cache[0] < ULTRA_API_CACHE_TTL:
-        return _disk_cache[1]
-    totals = _fetch_ultra_quota_sync()
-    if totals is not None:
-        total_bytes, used_bytes, _free = totals
-        result: dict[str, str | float | bool] = {
-            "disk_used": format_size(used_bytes),
-            "disk_total": format_size(total_bytes),
-            "disk_percent": round(used_bytes / total_bytes * 100, 1),
-            "available": True,
-        }
-    else:
-        result = {
-            "disk_used": "N/A",
-            "disk_total": "N/A",
-            "disk_percent": 0,
-            "available": False,
-        }
-    _disk_cache = (now, result)
-    return result
+    """Disk usage placeholder; remote quota monitoring is disabled."""
+    return {"disk_used": "N/A", "disk_total": "N/A", "disk_percent": 0, "available": False}
 
 
 def get_cached_scandir(path: str, ttl: int = SCANDIR_CACHE_TTL) -> list[dict]:

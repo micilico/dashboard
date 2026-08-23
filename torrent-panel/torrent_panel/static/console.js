@@ -275,12 +275,12 @@ async function renderStorage() {
     card("Erreurs", String(rclone.errors || 0), "", "stat-span-6 stat-compact"),
   );
   setSidebarStatus(
-    disk.available === false ? "Quota du slot indisponible" : disk.mounted ? "Montage opérationnel" : "Montage indisponible",
+    disk.available === false ? "Quota désactivé" : disk.mounted ? "Montage opérationnel" : "Montage indisponible",
     disk.path ? `Chemin surveillé: ${disk.path}` : "Surveillance du stockage active.",
     disk.available === false ? "unavailable" : disk.mounted ? "operational" : "unavailable",
   );
   setPageStatus(
-    disk.available === false ? "Quota du slot indisponible (API quota injoignable)." : disk.mounted ? "Montage et seuils surveillés en continu." : "Le montage doit être vérifié.",
+    disk.available === false ? "Le quota Ultra.cc n’est plus interrogé." : disk.mounted ? "Montage et seuils surveillés en continu." : "Le montage doit être vérifié.",
     disk.available === false ? "error" : disk.mounted ? "ok" : "error",
   );
 

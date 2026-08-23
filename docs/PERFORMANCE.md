@@ -8,7 +8,7 @@ they do not change the API response shapes or expose backend credentials.
 | qBittorrent `torrents/info` snapshot | 6 s |
 | Tracker index | 300 s |
 | Torrent dashboard | 8 s |
-| rclone and Ultra storage | 20 s |
+| rclone storage snapshot | 20 s |
 | Activity, health and statistics | 30 s |
 | Prowlarr and Jellyfin monitoring | 45 s |
 | Media metadata lookup | 3600 s, max 256 entries |

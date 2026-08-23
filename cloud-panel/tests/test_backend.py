@@ -22,7 +22,6 @@ from cloud_panel.security import resolve_path_within, validate_public_id
 from cloud_panel.storage import format_size, clear_scandir_cache, get_cached_scandir
 from cloud_panel.storage import clear_folder_size_cache, get_folder_size
 from cloud_panel.storage import sanitize_filename, list_directory
-from cloud_panel.storage import _parse_ultra_quota
 
 
 class TestSecurity:
@@ -349,61 +348,6 @@ class TestListDirectory:
         assert "disk_used" in result
         assert "disk_total" in result
         assert "disk_percent" in result
-
-
-class TestDiskUsageQuota:
-    """get_disk_usage must only report the slot quota, never the server disk."""
-
-    def _reload(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
-        import importlib
-        import cloud_panel.storage
-        importlib.reload(cloud_panel.storage)
-        return cloud_panel.storage
-
-    def test_quota_ok_reports_slot(self, tmp_path, monkeypatch):
-        storage = self._reload(monkeypatch, tmp_path)
-        monkeypatch.setattr(
-            "cloud_panel.storage._fetch_ultra_quota_sync",
-            lambda: (932 * 1024**3, 835 * 1024**3, 104152956928),
-        )
-        storage._disk_cache = None
-        result = storage.get_disk_usage()
-        assert result["available"] is True
-        assert "N/A" not in result["disk_total"]
-        assert "N/A" not in result["disk_used"]
-
-    def test_quota_failure_is_na_not_server(self, tmp_path, monkeypatch):
-        storage = self._reload(monkeypatch, tmp_path)
-        monkeypatch.setattr("cloud_panel.storage._fetch_ultra_quota_sync", lambda: None)
-        storage._disk_cache = None
-
-        def fail_disk_usage(*args, **kwargs):
-            raise AssertionError("server disk_usage must never be called for quota panels")
-
-        monkeypatch.setattr("cloud_panel.storage.shutil.disk_usage", fail_disk_usage)
-        result = storage.get_disk_usage()
-        assert result["available"] is False
-        assert result["disk_used"] == "N/A"
-        assert result["disk_total"] == "N/A"
-        assert result["disk_percent"] == 0
-
-    def test_not_configured_is_na(self, tmp_path, monkeypatch):
-        storage = self._reload(monkeypatch, tmp_path)
-        monkeypatch.setattr("cloud_panel.storage.ULTRA_API_URL", "")
-        monkeypatch.setattr("cloud_panel.storage.ULTRA_API_TOKEN", "")
-        storage._disk_cache = None
-        result = storage.get_disk_usage()
-        assert result["available"] is False
-        assert result["disk_used"] == "N/A"
-
-    def test_list_directory_exposes_available(self, tmp_path, monkeypatch):
-        storage = self._reload(monkeypatch, tmp_path)
-        (tmp_path / "a.txt").write_text("x")
-        monkeypatch.setattr("cloud_panel.storage._fetch_ultra_quota_sync", lambda: None)
-        storage._disk_cache = None
-        result = storage.list_directory("")
-        assert result["disk_available"] is False
 
 
 class TestCreateDirectory:
@@ -1628,113 +1572,6 @@ class TestMediaOrganizer:
         )
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "qbit_organize_coordinated"
-
-
-class TestUltraQuota:
-    def test_parse_ultra_quota_valid(self):
-        total, used, free = _parse_ultra_quota(
-            {
-                "service_stats_info": {
-                    "free_storage_bytes": 9664750157824,
-                    "total_storage_unit": "G",
-                    "total_storage_value": 11176,
-                    "used_storage_value": 2175,
-                }
-            }
-        )
-        assert total == 11176 * 1024**3
-        assert free == 9664750157824
-        assert used == total - free
-
-    def test_parse_ultra_quota_handles_binary_units(self):
-        total, _used, free = _parse_ultra_quota(
-            {
-                "service_stats_info": {
-                    "free_storage_bytes": 1024**3,
-                    "total_storage_unit": "TiB",
-                    "total_storage_value": 2,
-                    "used_storage_value": 1,
-                }
-            }
-        )
-        assert total == 2 * 1024**4
-        assert free == 1024**3
-
-    def test_parse_ultra_quota_storage_info_key(self):
-        total, used, free = _parse_ultra_quota(
-            {
-                "Storage Info": {
-                    "free_storage_bytes": 104152956928,
-                    "total_storage_unit": "G",
-                    "total_storage_value": 932,
-                    "used_storage_unit": "G",
-                    "used_storage_value": 835,
-                }
-            }
-        )
-        assert total == 932 * 1024**3
-        assert free == 104152956928
-        assert used == total - free
-
-    def test_parse_ultra_quota_derives_free_from_used(self):
-        total, used, free = _parse_ultra_quota(
-            {
-                "Storage Info": {
-                    "total_storage_unit": "G",
-                    "total_storage_value": 10,
-                    "used_storage_unit": "G",
-                    "used_storage_value": 4,
-                }
-            }
-        )
-        assert total == 10 * 1024**3
-        assert free == 6 * 1024**3
-        assert used == 4 * 1024**3
-
-    def test_strip_ultra_suffix_normalizes_url(self):
-        from cloud_panel.config import _strip_ultra_suffix
-
-        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get-diskquota") == "https://user.host.usbx.me/ultra-api"
-        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/get_diskquota") == "https://user.host.usbx.me/ultra-api"
-        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api/") == "https://user.host.usbx.me/ultra-api"
-        assert _strip_ultra_suffix("https://user.host.usbx.me/ultra-api") == "https://user.host.usbx.me/ultra-api"
-        assert _strip_ultra_suffix("") == ""
-
-    def test_parse_ultra_quota_returns_none_on_invalid_payload(self):
-        assert _parse_ultra_quota({}) is None
-        assert _parse_ultra_quota({"service_stats_info": {}}) is None
-        assert _parse_ultra_quota({"service_stats_info": {"total_storage_value": 10}}) is None
-        assert (
-            _parse_ultra_quota(
-                {"service_stats_info": {"total_storage_value": 10, "free_storage_bytes": "abc"}}
-            )
-            is None
-        )
-        assert (
-            _parse_ultra_quota(
-                {
-                    "service_stats_info": {
-                        "total_storage_value": 10,
-                        "free_storage_bytes": 1,
-                        "total_storage_unit": "X",
-                    }
-                }
-            )
-            is None
-        )
-        assert (
-            _parse_ultra_quota(
-                {
-                    "service_stats_info": {
-                        "total_storage_value": 10,
-                        "free_storage_bytes": 20000000000,
-                        "total_storage_unit": "G",
-                    }
-                }
-            )
-            is None
-        )
-        assert _parse_ultra_quota([]) is None
 
 
 class TestCopyItem:

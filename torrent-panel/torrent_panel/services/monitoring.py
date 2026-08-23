@@ -17,9 +17,7 @@ from ..config import (
     JELLYFIN_STATUS_URL,
     JELLYFIN_PUBLIC_URL,
     MEDIA_PUBLIC_PREFIX,
-    MONITOR_DISK_CRITICAL_PERCENT,
     MONITOR_DISK_PATH,
-    MONITOR_DISK_WARNING_PERCENT,
     MONITOR_ACTIVITY_CACHE_TTL_SECONDS,
     MONITOR_DASHBOARD_CACHE_TTL_SECONDS,
     MONITOR_HEALTH_CACHE_TTL_SECONDS,
@@ -39,9 +37,6 @@ from ..config import (
     SSH_PROWLARR_HOST,
     SSH_PROWLARR_PORT,
     STORAGE_PUBLIC_PREFIX,
-    ULTRA_API_TIMEOUT_SECONDS,
-    ULTRA_API_TOKEN,
-    ULTRA_API_URL,
 )
 from ..qbittorrent import AsyncTTLCache, QbitError
 from .media_automation import now_iso
@@ -50,25 +45,23 @@ from .media_automation import now_iso
 _PROWLARR_CACHE = AsyncTTLCache(MONITOR_PROWLARR_CACHE_TTL_SECONDS)
 _JELLYFIN_CACHE = AsyncTTLCache(MONITOR_JELLYFIN_CACHE_TTL_SECONDS)
 _LOCAL_HTTP_CLIENT: httpx.AsyncClient | None = None
-_EXTERNAL_HTTP_CLIENT: httpx.AsyncClient | None = None
 _JELLYFIN_HTTP_CLIENT: httpx.AsyncClient | None = None
 _HTTP_CLIENTS_MANAGED = False
 
 
 async def initialize_http_clients() -> None:
-    global _LOCAL_HTTP_CLIENT, _EXTERNAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT, _HTTP_CLIENTS_MANAGED
+    global _LOCAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT, _HTTP_CLIENTS_MANAGED
     _LOCAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True)
-    _EXTERNAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS), follow_redirects=True)
     _JELLYFIN_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), trust_env=False)
     _HTTP_CLIENTS_MANAGED = True
 
 
 async def close_http_clients() -> None:
-    global _LOCAL_HTTP_CLIENT, _EXTERNAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT, _HTTP_CLIENTS_MANAGED
-    for client in (_LOCAL_HTTP_CLIENT, _EXTERNAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT):
+    global _LOCAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT, _HTTP_CLIENTS_MANAGED
+    for client in (_LOCAL_HTTP_CLIENT, _JELLYFIN_HTTP_CLIENT):
         if client is not None:
             await client.aclose()
-    _LOCAL_HTTP_CLIENT = _EXTERNAL_HTTP_CLIENT = _JELLYFIN_HTTP_CLIENT = None
+    _LOCAL_HTTP_CLIENT = _JELLYFIN_HTTP_CLIENT = None
     _HTTP_CLIENTS_MANAGED = False
 
 
@@ -79,15 +72,6 @@ def _local_client() -> httpx.AsyncClient:
     if _LOCAL_HTTP_CLIENT is None:
         _LOCAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(MONITOR_HTTP_TIMEOUT_SECONDS), follow_redirects=True)
     return _LOCAL_HTTP_CLIENT
-
-
-def _external_client() -> httpx.AsyncClient:
-    global _EXTERNAL_HTTP_CLIENT
-    if not _HTTP_CLIENTS_MANAGED:
-        return httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS), follow_redirects=True)
-    if _EXTERNAL_HTTP_CLIENT is None:
-        _EXTERNAL_HTTP_CLIENT = httpx.AsyncClient(timeout=httpx.Timeout(ULTRA_API_TIMEOUT_SECONDS), follow_redirects=True)
-    return _EXTERNAL_HTTP_CLIENT
 
 
 def _jellyfin_client() -> httpx.AsyncClient:
@@ -545,87 +529,8 @@ async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     }
 
 
-_ULTRA_UNIT_MULTIPLIERS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
-_ULTRA_PATHS = ("/get-diskquota", "/get_diskquota")
-
-
-def _normalize_ultra_unit(unit: str) -> str:
-    return unit.replace("B", "").replace("I", "").strip()
-
-
-def _parse_ultra_quota(payload: dict[str, Any]) -> tuple[int, int, int] | None:
-    if not isinstance(payload, dict):
-        return None
-    info = payload.get("Storage Info")
-    if not isinstance(info, dict):
-        info = payload.get("service_stats_info")
-    if not isinstance(info, dict):
-        return None
-    total_value = info.get("total_storage_value")
-    if total_value is None:
-        return None
-    try:
-        total_value = int(total_value)
-    except (TypeError, ValueError):
-        return None
-    total_unit = _normalize_ultra_unit(str(info.get("total_storage_unit") or "G").strip().upper())
-    multiplier = _ULTRA_UNIT_MULTIPLIERS.get(total_unit)
-    if multiplier is None:
-        return None
-    total_bytes = total_value * multiplier
-    if total_bytes <= 0:
-        return None
-
-    free_bytes = info.get("free_storage_bytes")
-    if free_bytes is not None:
-        try:
-            free_bytes = int(free_bytes)
-        except (TypeError, ValueError):
-            free_bytes = None
-    if free_bytes is None:
-        used_value = info.get("used_storage_value")
-        if used_value is not None:
-            try:
-                used_value = int(used_value)
-            except (TypeError, ValueError):
-                used_value = None
-            if used_value is not None:
-                used_unit = _normalize_ultra_unit(str(info.get("used_storage_unit") or total_unit).strip().upper())
-                used_multiplier = _ULTRA_UNIT_MULTIPLIERS.get(used_unit)
-                if used_multiplier is not None:
-                    free_bytes = total_bytes - used_value * used_multiplier
-    if free_bytes is None or free_bytes < 0 or free_bytes > total_bytes:
-        return None
-    used_bytes = max(0, total_bytes - free_bytes)
-    return total_bytes, used_bytes, free_bytes
-
-
-def _disk_snapshot(total_bytes: int, free_bytes: int, source: str) -> dict[str, Any]:
-    used_bytes = max(0, total_bytes - free_bytes)
-    used_percent = (used_bytes / total_bytes * 100) if total_bytes else 0.0
-    free_percent = 100 - used_percent
-    status = (
-        "critical" if free_percent <= MONITOR_DISK_CRITICAL_PERCENT
-        else "warning" if free_percent <= MONITOR_DISK_WARNING_PERCENT
-        else "normal"
-    )
-    return {
-        "path": MONITOR_DISK_PATH,
-        "mounted": True,
-        "available": True,
-        "status": status,
-        "totalBytes": total_bytes,
-        "usedBytes": used_bytes,
-        "freeBytes": free_bytes,
-        "usedPercent": round(used_percent, 1),
-        "freePercent": round(free_percent, 1),
-        "estimateToFull": None,
-        "source": source,
-    }
-
-
-def _disk_unavailable(quota_error: str | None) -> dict[str, Any]:
-    """Disk payload when the slot quota is not available. Never uses server-wide sizes."""
+def _disk_unavailable() -> dict[str, Any]:
+    """Disk payload when slot quota monitoring is disabled."""
     return {
         "path": MONITOR_DISK_PATH,
         "mounted": False,
@@ -637,49 +542,13 @@ def _disk_unavailable(quota_error: str | None) -> dict[str, Any]:
         "usedPercent": 0.0,
         "freePercent": 0.0,
         "estimateToFull": None,
-        "source": "unavailable",
-        "quotaError": quota_error,
+        "source": "disabled",
     }
-
-
-async def _fetch_ultra_quota() -> tuple[tuple[int, int, int] | None, str | None]:
-    if not ULTRA_API_URL or not ULTRA_API_TOKEN:
-        return None, "not_configured"
-    errors: list[str] = []
-    for path in _ULTRA_PATHS:
-        try:
-            headers = {"Authorization": f"Bearer {ULTRA_API_TOKEN}"}
-            response = await _external_client().get(f"{ULTRA_API_URL}{path}", headers=headers)
-        except httpx.TimeoutException:
-            return None, "timeout"
-        except httpx.HTTPError:
-            return None, "connection"
-        if response.status_code != 200:
-            errors.append(f"http_{response.status_code}")
-            continue
-        try:
-            parsed = response.json()
-        except ValueError:
-            errors.append("invalid_payload")
-            continue
-        if not isinstance(parsed, dict):
-            errors.append("invalid_payload")
-            continue
-        quota = _parse_ultra_quota(parsed)
-        if quota is not None:
-            return quota, None
-        errors.append("invalid_payload")
-    return None, (errors[-1] if errors else "invalid_payload")
 
 
 async def _storage_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     generated_at = now_iso()
-    quota, quota_error = await _fetch_ultra_quota()
-    if quota is not None:
-        total_bytes, _used_bytes, free_bytes = quota
-        disk = _disk_snapshot(total_bytes, free_bytes, "ultra-api")
-    else:
-        disk = _disk_unavailable(quota_error)
+    disk = _disk_unavailable()
 
     rclone_stats: dict[str, Any] = {}
     rclone_error = ""
@@ -694,9 +563,6 @@ async def _storage_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     queue = rclone_stats.get("checking") or rclone_stats.get("transfers") or 0
     active_transfers = transfers if isinstance(transfers, list) else []
     speed = int(rclone_stats.get("speed", 0) or 0)
-    if speed > 0 and disk.get("freeBytes"):
-        disk["estimateToFull"] = round(disk["freeBytes"] / speed)
-
     return {
         "generatedAt": generated_at,
         "disk": disk,

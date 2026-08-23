@@ -89,11 +89,12 @@ def build_library_inventory(mount_root: str, qbit_root: str, *, max_entries: int
                 except OSError:
                     continue
                 relative = os.path.relpath(path, anchor).replace(os.sep, "/")
+                # Ne filtrer que sur la racine qBittorrent.  Un torrent peut
+                # être resté dans un dossier de release directement sous
+                # ``qbittorrent/`` (ou dans une arborescence créée par
+                # l'ancien rangement).  Le considérer comme absent ici
+                # empêcherait précisément sa réparation/organisation.
                 category = relative.split("/", 1)[0] if "/" in relative else ""
-                # qBittorrent peut encore laisser des fichiers directement
-                # dans sa racine avant le rangement dans Films/Series.
-                if category not in _CATEGORY_NAMES and category != "":
-                    continue
                 files.append({
                     "path": relative,
                     "name": filename,
