@@ -118,9 +118,19 @@ class FakeQbit:
         if old_path in self.fail_rename_old_paths:
             self.fail_rename_old_paths.discard(old_path)
             raise QbitError(409, "Renommage qBittorrent refusé.")
+        for item in self.files_payload.get(torrent_hash, []):
+            if item.get("name") == old_path:
+                item["name"] = new_path
+                break
 
     async def rename_folder(self, torrent_hash, old_path, new_path):
         self.calls.append(("rename_folder", torrent_hash, old_path, new_path))
+        for item in self.files_payload.get(torrent_hash, []):
+            name = str(item.get("name") or "")
+            if name == old_path:
+                item["name"] = new_path
+            elif name.startswith(old_path + "/"):
+                item["name"] = new_path + name[len(old_path):]
 
     async def set_content_layout_many(self, hashes, layout):
         self.calls.append(("set_content_layout", list(hashes), layout))
@@ -1471,13 +1481,110 @@ class OrganizerTests(BackendTests):
     def test_failed_rename_rolls_back_and_never_rechecks_or_resumes(self):
         self._movie_payload()
         plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
-        temp_path = organizer_service._temporary_path(VALID_HASH, 0, "Dune.2021.1080p.MULTi.mkv")
-        app.state.qbit.fail_rename_old_paths = {temp_path}
+        direct_path = plan["entries"][0]["operations"][0]["oldPath"]
+        app.state.qbit.fail_rename_old_paths = {direct_path}
         result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
         self.assertEqual(result["failed"], 1)
         self.assertEqual(result["results"][0]["rollback"], "ok")
         self.assertNotIn("recheck", [call[0] for call in app.state.qbit.calls])
         self.assertEqual(app.state.verified_resume.snapshot()["pending"], 0)
+
+    def test_single_file_movie_uses_one_direct_rename_without_hidden_staging(self):
+        self._movie_payload()
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        entry = plan["entries"][0]
+        self.assertEqual(
+            entry["operations"],
+            [{"oldPath": "Dune.2021.1080p.MULTi.mkv", "newPath": "Dune (2021)/Dune.2021.1080p.MULTi.mkv"}],
+        )
+        result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
+        self.assertEqual(result["organized"], 1)
+        rename_calls = [call for call in app.state.qbit.calls if call[0] == "rename_file"]
+        self.assertEqual(
+            rename_calls,
+            [("rename_file", VALID_HASH, "Dune.2021.1080p.MULTi.mkv", "Dune (2021)/Dune.2021.1080p.MULTi.mkv")],
+        )
+        self.assertFalse(any(".__dashboard_organize__" in str(call) for call in rename_calls))
+
+    def test_temporary_path_stays_in_the_existing_parent_directory(self):
+        self.assertEqual(
+            organizer_service._temporary_path(VALID_HASH, 0, "Films/Dune (2021)/Dune.mkv"),
+            "Films/Dune (2021)/.dashboard-organize-aaaaaaaaaaaa-00000.mkv",
+        )
+        self.assertEqual(
+            organizer_service._temporary_path(VALID_HASH, 1, "Dune.mkv"),
+            ".dashboard-organize-aaaaaaaaaaaa-00001.mkv",
+        )
+
+    def test_collision_staging_keeps_temporary_paths_next_to_their_files(self):
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Swap",
+                "state": "pausedDL",
+                "progress": 1,
+                "size": 2,
+                "remaining": 0,
+                "savePath": self.QBIT_ROOT,
+            }
+        ]
+        app.state.qbit.files_payload = {
+            VALID_HASH: [{"name": "A.mkv", "size": 1}, {"name": "B.mkv", "size": 1}],
+        }
+        plan = {
+            "entries": [
+                {
+                    "hash": VALID_HASH,
+                    "name": "Swap",
+                    "currentPath": self.QBIT_ROOT,
+                    "targetPath": self.QBIT_ROOT,
+                    "operations": [
+                        {"oldPath": "A.mkv", "newPath": "B.mkv"},
+                        {"oldPath": "B.mkv", "newPath": "A.mkv"},
+                    ],
+                }
+            ],
+            "warnings": [],
+        }
+        result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
+        self.assertEqual(result["organized"], 1)
+        rename_calls = [call for call in app.state.qbit.calls if call[0] == "rename_file"]
+        self.assertEqual(
+            [call[2] for call in rename_calls],
+            [
+                organizer_service._temporary_path(VALID_HASH, 0, "A.mkv"),
+                organizer_service._temporary_path(VALID_HASH, 1, "B.mkv"),
+                "B.mkv",
+                "A.mkv",
+            ],
+        )
+        self.assertFalse(any(".__dashboard_organize__" in str(call[2]) for call in rename_calls))
+
+    def test_wait_for_rename_tracks_qbittorrent_metadata_catch_up(self):
+        class SlowQbit:
+            def __init__(self):
+                self.snapshots = [
+                    [{"name": "A.mkv", "size": 1}],
+                    [{"name": "B.mkv", "size": 1}],
+                ]
+                self.calls = 0
+
+            async def files(self, torrent_hash):
+                self.calls += 1
+                return list(self.snapshots[min(self.calls - 1, len(self.snapshots) - 1)])
+
+        qbit = SlowQbit()
+        asyncio.run(
+            organizer_service._wait_for_rename(
+                qbit,
+                VALID_HASH,
+                "file",
+                "A.mkv",
+                "B.mkv",
+                timeout_seconds=1.0,
+            )
+        )
+        self.assertGreaterEqual(qbit.calls, 2)
 
     def test_resume_manager_never_resumes_automatically(self):
         self._movie_payload()

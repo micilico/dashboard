@@ -904,7 +904,111 @@ async def build_organization_plan(
 
 def _temporary_path(torrent_hash: str, index: int, old_path: str) -> str:
     basename = posixpath.basename(old_path)
-    return posixpath.join(".__dashboard_organize__", torrent_hash[:12], f"{index:05d}-{basename}")
+    parent = posixpath.dirname(old_path)
+    extension = posixpath.splitext(basename)[1]
+    # Un renommage temporaire doit rester dans un dossier qui existe déjà.
+    # Créer une arborescence cachée imbriquée ajoute des parents absents et
+    # une mutation supplémentaire avant que qBittorrent ait confirmé la
+    # première.  Le nom court évite aussi de dépasser la limite des 255 octets
+    # d'un composant.
+    temporary_name = f".dashboard-organize-{torrent_hash[:12]}-{index:05d}{extension}"
+    return posixpath.join(parent, temporary_name) if parent else temporary_name
+
+
+def _normalized_paths(payload: Any) -> set[str]:
+    """Return safe relative paths from a qBittorrent files payload."""
+    paths: set[str] = set()
+    for item in payload if isinstance(payload, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            paths.add(_safe_relative(name))
+        except ValueError:
+            continue
+    return paths
+
+
+def _targets_collide(operations: list[dict[str, Any]], current_paths: set[str]) -> bool:
+    """Detect whether a direct rename would land on an existing torrent path.
+
+    Only paths currently owned by the same torrent are relevant here.  When a
+    destination is already occupied, a staged rename is required to free it
+    first without overwriting anything.
+    """
+    for operation in operations:
+        old_path = _safe_relative(str(operation.get("oldPath") or ""))
+        new_path = _safe_relative(str(operation.get("newPath") or ""))
+        if new_path in current_paths:
+            return True
+        for path in current_paths:
+            if path == old_path or path.startswith(old_path + "/"):
+                continue
+            if path == new_path or path.startswith(new_path + "/"):
+                return True
+    return False
+
+
+def _expected_paths(
+    paths: set[str],
+    path_type: str,
+    old_path: str,
+    new_path: str,
+) -> set[str] | None:
+    """Project qBittorrent-owned paths after one rename operation."""
+    if path_type == "folder":
+        if not any(path == old_path or path.startswith(old_path + "/") for path in paths):
+            return None
+        return {
+            new_path + path[len(old_path):] if path == old_path or path.startswith(old_path + "/") else path
+            for path in paths
+        }
+    if old_path not in paths:
+        return None
+    return (paths - {old_path}) | {new_path}
+
+
+async def _wait_for_rename(
+    qbit: Any,
+    torrent_hash: str,
+    path_type: str,
+    old_path: str,
+    new_path: str,
+    *,
+    timeout_seconds: float = 20.0,
+    required: bool = True,
+) -> None:
+    """Wait until qBittorrent advertises a queued rename as applied.
+
+    ``renameFile``/``renameFolder`` update the torrent metadata on the next
+    file-renamed alert.  Chaining a second rename immediately can therefore
+    select the old path and be answered with 409.  Clients that cannot list
+    torrent files skip the wait.
+    """
+    if not callable(getattr(qbit, "files", None)):
+        return
+    try:
+        payload = await qbit.files(torrent_hash)
+    except QbitError:
+        return
+    expected = _expected_paths(_normalized_paths(payload), path_type, old_path, new_path)
+    if expected is None:
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        current = _normalized_paths(payload)
+        if expected <= current:
+            return
+        await asyncio.sleep(0.1)
+        try:
+            payload = await qbit.files(torrent_hash)
+        except QbitError:
+            return
+    if required:
+        raise QbitError(409, "qBittorrent n'a pas confirmé le renommage — rangement annulé.")
+    logger.warning("organize: rename not confirmed by qBittorrent (%s -> %s)", old_path, new_path)
 
 
 async def _rename_path(qbit: Any, torrent_hash: str, path_type: str, old_path: str, new_path: str) -> None:
@@ -943,9 +1047,60 @@ async def _rollback(
     for path_type, current, original in reversed(renamed):
         try:
             await _rename_path(qbit, entry["hash"], path_type, current, original)
+            await _wait_for_rename(qbit, entry["hash"], path_type, current, original, required=False)
         except QbitError as exc:
             errors.append(f"{current}: {exc.public_message}")
     return errors
+
+
+async def _apply_renames(
+    qbit: Any,
+    torrent_hash: str,
+    operations: list[dict[str, Any]],
+) -> list[tuple[str, str, str]]:
+    """Apply renames directly when possible, staging only real collisions.
+
+    A single-file movie or a simple episode move has no destination already
+    present in qBittorrent metadata.  Renaming straight to the final path is
+    both faster and safer: it removes the temporary hidden hop that used to be
+    created inside directories that did not exist yet.  Staging is reserved
+    for the rare case where a target path is already owned by the torrent.
+    """
+    try:
+        payload = await qbit.files(torrent_hash)
+    except QbitError:
+        payload = None
+    current_paths = _normalized_paths(payload)
+    renamed: list[tuple[str, str, str]] = []
+    if not _targets_collide(operations, current_paths):
+        for operation in operations:
+            path_type = str(operation.get("type") or "file")
+            old_path = _safe_relative(str(operation.get("oldPath") or ""))
+            new_path = _safe_relative(str(operation.get("newPath") or ""))
+            if old_path == new_path:
+                continue
+            await _rename_path(qbit, torrent_hash, path_type, old_path, new_path)
+            renamed.append((path_type, new_path, old_path))
+            await _wait_for_rename(qbit, torrent_hash, path_type, old_path, new_path)
+        return renamed
+
+    temporary: list[tuple[str, str, str, str]] = []
+    for index, operation in enumerate(operations):
+        path_type = str(operation.get("type") or "file")
+        old_path = _safe_relative(str(operation.get("oldPath") or ""))
+        new_path = _safe_relative(str(operation.get("newPath") or ""))
+        if old_path == new_path:
+            continue
+        temp_path = _temporary_path(torrent_hash, index, old_path)
+        await _rename_path(qbit, torrent_hash, path_type, old_path, temp_path)
+        renamed.append((path_type, temp_path, old_path))
+        await _wait_for_rename(qbit, torrent_hash, path_type, old_path, temp_path)
+        temporary.append((path_type, temp_path, new_path, old_path))
+    for index, (path_type, temp_path, new_path, old_path) in enumerate(temporary):
+        await _rename_path(qbit, torrent_hash, path_type, temp_path, new_path)
+        renamed[index] = (path_type, new_path, old_path)
+        await _wait_for_rename(qbit, torrent_hash, path_type, temp_path, new_path)
+    return renamed
 
 
 async def apply_organization_plan(
@@ -968,16 +1123,7 @@ async def apply_organization_plan(
         try:
             await qbit.pause_many([torrent_hash])
             await _wait_until_paused(qbit, torrent_hash)
-            temporary: list[tuple[str, str, str, str]] = []
-            for index, operation in enumerate(entry["operations"]):
-                path_type = str(operation.get("type") or "file")
-                temp_path = _temporary_path(torrent_hash, index, operation["oldPath"])
-                await _rename_path(qbit, torrent_hash, path_type, operation["oldPath"], temp_path)
-                renamed.append((path_type, temp_path, operation["oldPath"]))
-                temporary.append((path_type, temp_path, operation["newPath"], operation["oldPath"]))
-            for index, (path_type, temp_path, new_path, old_path) in enumerate(temporary):
-                await _rename_path(qbit, torrent_hash, path_type, temp_path, new_path)
-                renamed[index] = (path_type, new_path, old_path)
+            renamed = await _apply_renames(qbit, torrent_hash, entry["operations"])
             if entry["currentPath"] != entry["targetPath"]:
                 await qbit.set_location_many([torrent_hash], entry["targetPath"])
                 location_changed = True
