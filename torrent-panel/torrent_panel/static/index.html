@@ -396,11 +396,29 @@
       </form>
     </dialog>
 
-    <dialog id="organizeMediaDialog" class="dialog">
+    <dialog id="organizeMediaDialog" class="dialog organize-dialog">
       <form method="dialog" id="organizeMediaForm">
         <h2>Ranger les médias sans perdre le seeding</h2>
         <p id="organizeMediaSummary" class="dialog-name">Analyse des torrents terminés…</p>
-        <div class="selection-toolbar" aria-label="Sélection des opérations">
+        <section id="organizeWorkflow" class="organize-workflow" aria-labelledby="organizeWorkflowTitle" hidden>
+          <div class="organize-workflow-head">
+            <div>
+              <p class="organize-workflow-kicker">Rangement Jellyfin</p>
+              <h3 id="organizeWorkflowTitle" class="organize-workflow-title" tabindex="-1">Préparation du rangement</h3>
+              <p id="organizeWorkflowDetail" class="organize-workflow-detail" aria-live="polite">Sélection prête.</p>
+            </div>
+            <span id="organizeWorkflowCount" class="organize-workflow-count">0 / 0</span>
+          </div>
+          <ol id="organizeWorkflowSteps" class="organize-workflow-steps" aria-label="Étapes du rangement Jellyfin">
+            <li data-step="pause" data-state="pending"><span class="organize-workflow-step-mark" aria-hidden="true">1</span><span>Pause sécurisée</span></li>
+            <li data-step="move" data-state="pending"><span class="organize-workflow-step-mark" aria-hidden="true">2</span><span>Déplacement</span></li>
+            <li data-step="verify" data-state="pending"><span class="organize-workflow-step-mark" aria-hidden="true">3</span><span>Revérification</span></li>
+            <li data-step="jellyfin" data-state="pending"><span class="organize-workflow-step-mark" aria-hidden="true">4</span><span>Jellyfin</span></li>
+          </ol>
+          <div id="organizeWorkflowRoutes" class="organize-workflow-routes" aria-label="Trajets sélectionnés"></div>
+          <div id="organizeWorkflowResult" class="organize-workflow-result" role="status" aria-live="polite" hidden></div>
+        </section>
+        <div id="organizeSelectionToolbar" class="selection-toolbar" aria-label="Sélection des opérations">
           <label><input id="organizeSelectAll" type="checkbox" checked> Tout sélectionner</label>
           <span id="organizeSelectionSummary">0 sélectionné</span>
           <label for="organizeFilter">Filtrer</label>
@@ -415,7 +433,7 @@
           </select>
         </div>
         <div id="organizeMediaPlan" class="relink-plan" aria-live="polite"></div>
-        <p class="field-message">Les torrents seront mis en pause, déplacés via qBittorrent, puis revérifiés. Ils resteront toujours en pause : toute reprise devra être manuelle après confirmation d’une vérification à 100 %.</p>
+        <p class="field-message" id="organizeMediaNote">Les torrents seront mis en pause, déplacés via qBittorrent, puis revérifiés. Ils resteront toujours en pause : toute reprise devra être manuelle après confirmation d’une vérification à 100 %.</p>
         <p class="field-message" id="organizeMediaMessage" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="cancelOrganizeMediaButton" value="cancel" class="button secondary" type="button">Annuler</button>
@@ -425,7 +443,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=20260815-organizer"></script>
-    <script src="./static/dist/app.min.js?v=20260815-organizer" defer></script>
+    <script src="./config.js?v=20261019-organize-live"></script>
+    <script src="./static/dist/app.min.js?v=20261019-organize-live" defer></script>
   </body>
 </html>

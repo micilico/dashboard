@@ -1204,6 +1204,7 @@ async def apply_organization_plan(
         torrent_name = str(entry.get("name") or "Torrent")
         renamed: list[tuple[str, str, str]] = []
         location_changed = False
+        current_stage = "pausing"
         try:
             await report({
                 "stage": "pausing",
@@ -1216,6 +1217,7 @@ async def apply_organization_plan(
             })
             await qbit.pause_many([torrent_hash])
             await _wait_until_paused(qbit, torrent_hash)
+            current_stage = "moving"
             await report({
                 "stage": "moving",
                 "index": index,
@@ -1229,6 +1231,7 @@ async def apply_organization_plan(
             if entry["currentPath"] != entry["targetPath"]:
                 await qbit.set_location_many([torrent_hash], entry["targetPath"])
                 location_changed = True
+            current_stage = "rechecking"
             await report({
                 "stage": "rechecking",
                 "index": index,
@@ -1241,6 +1244,7 @@ async def apply_organization_plan(
             await qbit.recheck_many([torrent_hash])
             organized += 1
             results.append({"hash": torrent_hash, "name": entry["name"], "success": True, "status": "verification"})
+            current_stage = "verification"
             await report({
                 "stage": "verification",
                 "index": index,
@@ -1270,6 +1274,7 @@ async def apply_organization_plan(
                 "hash": torrent_hash,
                 "name": torrent_name,
                 "message": exc.public_message,
+                "failedStage": current_stage,
             })
     return {"organized": organized, "failed": len(results) - organized, "results": results, "warnings": plan.get("warnings", [])}
 

@@ -424,19 +424,106 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
                     selected_hashes = set(hashes)
                     plan["entries"] = [entry for entry in plan.get("entries", []) if str(entry.get("hash") or "").lower() in selected_hashes]
                     plan["totalOperations"] = sum(len(entry.get("operations", [])) for entry in plan["entries"])
-            if run:
-                run = request.app.state.organization_runs.update(run["runId"], status="applying") or run
-            result = await apply_organization_plan(request.app.state.qbit, plan, None)
+            if run is None:
+                run = request.app.state.organization_runs.create(hashes)
+                request.app.state.organization_runs.update(
+                    run["runId"],
+                    plan=plan,
+                    planCreatedAt=time.time(),
+                    warnings=plan.get("warnings", []),
+                )
+
+            entry_total = len(plan.get("entries", []))
+            progress_items: dict[str, dict[str, Any]] = {}
+            last_progress = {"index": 0, "total": entry_total, "processed": 0}
+            last_progress_write = {"at": 0.0}
+
+            def publish_stage(
+                stage: str,
+                *,
+                index: int | None = None,
+                total: int | None = None,
+                processed: int | None = None,
+                hash_value: str = "",
+                message: str = "",
+                failed_stage: str = "",
+                force: bool = False,
+            ) -> None:
+                if index is not None:
+                    last_progress["index"] = index
+                if total is not None:
+                    last_progress["total"] = total
+                if processed is not None:
+                    last_progress["processed"] = processed
+                if hash_value:
+                    progress_items[hash_value] = {
+                        "stage": stage,
+                        "message": message[:300],
+                        "updatedAt": time.time(),
+                    }
+                now = time.monotonic()
+                if not force and stage not in {"jellyfin", "failed", "completed", "partial_failure"} and now - last_progress_write["at"] < 0.75:
+                    return
+                last_progress_write["at"] = now
+                request.app.state.organization_runs.update(
+                    run["runId"],
+                    stage=stage,
+                    progress={
+                        **last_progress,
+                        "stage": stage,
+                        "message": message[:300],
+                        "hash": hash_value,
+                        "failedStage": failed_stage[:40],
+                        "items": dict(progress_items),
+                    },
+                )
+
+            def report_progress(event: dict[str, Any]) -> None:
+                publish_stage(
+                    str(event.get("stage") or "applying"),
+                    index=event.get("index"),
+                    total=event.get("total"),
+                    processed=event.get("processed"),
+                    hash_value=str(event.get("hash") or ""),
+                    message=str(event.get("message") or ""),
+                    failed_stage=str(event.get("failedStage") or ""),
+                    force=str(event.get("stage") or "") == "failed",
+                )
+
+            run = request.app.state.organization_runs.update(
+                run["runId"],
+                status="applying",
+                stage="preparing",
+                progress={
+                    **last_progress,
+                    "stage": "preparing",
+                    "message": "Sélection prête — démarrage du rangement.",
+                    "hash": "",
+                    "items": {},
+                },
+            ) or run
+            result = await apply_organization_plan(request.app.state.qbit, plan, None, progress=report_progress)
         except QbitError as exc:
             if run:
-                request.app.state.organization_runs.update(run["runId"], status="preview")
+                request.app.state.organization_runs.update(run["runId"], status="preview", stage="failed")
             raise qbit_error_response(exc) from exc
+        except HTTPException:
+            # Ne jamais rétrograder un run déjà en cours : un second appel
+            # concurrent doit obtenir sa 409 sans casser le suivi du premier.
+            raise
+        except Exception:
+            if run and run.get("status") == "applying":
+                request.app.state.organization_runs.update(run["runId"], status="preview", stage="failed")
+            raise
 
         if run is None:
             run = request.app.state.organization_runs.create(hashes)
+        last_progress["processed"] = int(result.get("organized", 0))
         orphan_paths = set(payload.orphanPaths)
         duplicate_results: list[dict[str, Any]] = []
         selected_duplicate_ids = set(payload.duplicateGroupIds)
+        if selected_duplicate_ids:
+            publish_stage("duplicates", message="Fusion des doublons sélectionnés.")
         for group in plan.get("duplicateGroups", []):
             if str(group.get("id")) not in selected_duplicate_ids:
                 continue
@@ -462,6 +549,8 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
         if not payload.hashes and not payload.orphanPaths:
             orphan_paths = {str(item.get("path")) for item in plan.get("orphanMedia", [])}
         orphan_items = [item for item in plan.get("orphanMedia", []) if str(item.get("path")) in orphan_paths]
+        if orphan_items:
+            publish_stage("orphans", message="Rangement des médias orphelins sélectionnés.")
         prepared_orphan_operations = {
             str(item.get("path") or ""): orphan_operations(item, QBIT_SAVE_PATH)
             for item in orphan_items
@@ -530,6 +619,7 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
             if str(group.get("id")) in selected_duplicate_ids
         )
         has_failure = bool(result.get("failed")) or any(not item.get("success") for item in orphan_results) or any(not item.get("success") for item in duplicate_results)
+        publish_stage("finalizing", message="Consolidation du journal de rangement.")
         stored = request.app.state.organization_runs.update(
             run["runId"],
             status="completed" if not has_failure else "partial_failure",
@@ -551,6 +641,7 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
 
     refresh = {"rclone": "skipped", "jellyfin": "skipped"}
     if result.get("organized") or result.get("orphansOrganized"):
+        publish_stage("rclone", message="Actualisation du montage rclone.")
         try:
             changed_categories = {"Films" if entry.get("kind") == "film" else "Series" for entry in plan.get("entries", [])}
             changed_categories.update(
@@ -570,6 +661,7 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
         except MediaAutomationError as exc:
             refresh["rclone"] = "failed"
             refresh["rcloneMessage"] = exc.public_message
+        publish_stage("jellyfin", message="Scan de la bibliothèque Jellyfin.")
         try:
             library_ids = sorted({request.app.state.media_automation._library_for_category(category) for category in changed_categories if request.app.state.media_automation._library_for_category(category)})
             await request.app.state.media_automation.trigger_jellyfin_scan(library_ids)
@@ -577,6 +669,11 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
         except MediaAutomationError as exc:
             refresh["jellyfin"] = "failed"
             refresh["jellyfinMessage"] = exc.public_message
+    publish_stage(
+        "completed" if not has_failure else "partial_failure",
+        message="Rangement terminé." if not has_failure else "Rangement terminé avec des éléments à vérifier.",
+        force=True,
+    )
     return {"runId": stored["runId"] if stored else run["runId"], "plan": plan, "result": result, "refresh": refresh}
 
 
