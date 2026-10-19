@@ -2090,9 +2090,19 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
       const detail = document.createElement("span");
       detail.className = "organize-plan-detail";
       detail.textContent = `${entry.kind === "series" ? "Série" : "Film"} · ${entry.hash.slice(0, 8)} · ${entry.fileCount} fichier${entry.fileCount > 1 ? "s" : ""} · ${entry.layout}`;
-      const path = document.createElement("span");
-      path.className = "organize-plan-path";
-      path.textContent = `${entry.currentPath || "Emplacement non renseigné"} → ${entry.targetPath}`;
+      const path = document.createElement("div");
+      path.className = "organize-route";
+      const source = document.createElement("span");
+      source.className = "organize-route-place organize-route-source";
+      source.textContent = entry.currentPath || "Emplacement non renseigné";
+      const arrow = document.createElement("span");
+      arrow.className = "organize-route-arrow";
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.textContent = "→";
+      const destination = document.createElement("span");
+      destination.className = "organize-route-place organize-route-destination";
+      destination.textContent = entry.targetPath;
+      path.append(source, arrow, destination);
       item.append(checkbox, title, detail, path);
       if (entry.operations?.length) {
         const operations = document.createElement("details");

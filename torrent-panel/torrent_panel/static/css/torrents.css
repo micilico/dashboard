@@ -370,6 +370,43 @@ tr:hover { background: var(--row-hover); }
   font-size: 0.78rem;
   word-break: break-all;
 }
+.organize-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 10px;
+}
+.organize-route-place {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+  font-size: .78rem;
+}
+.organize-route-place::before {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: .66rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.organize-route-source::before { content: "Emplacement actuel"; }
+.organize-route-destination {
+  color: var(--accent-strong);
+  border-color: color-mix(in oklab, var(--accent), transparent 65%);
+  background: var(--accent-soft);
+}
+.organize-route-destination::before { content: "Destination"; color: var(--accent-strong); }
+.organize-route-arrow { align-self: center; color: var(--accent-strong); font-size: 1.1rem; }
+@media (max-width: 767px) {
+  .organize-route { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .organize-route-arrow { display: none; }
+}
 .organize-operations {
   margin-top: 8px;
   font-size: 0.78rem;
