@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ import time
 import unicodedata
 from urllib.parse import unquote
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..qbittorrent import QbitError
 
@@ -32,6 +33,19 @@ _EPISODE_RE = re.compile(r"(?i)(?:^|[\s._\-/])S(\d{1,2})E\d{1,3}\b")
 _ALT_EPISODE_RE = re.compile(r"(?i)(?:^|[\s._\-/])(\d{1,2})x\d{1,3}\b")
 _SPECIAL_RE = re.compile(r"(?i)(?:^|[\s._\-/])(?:specials?|sp[eé]cial(?:e|es)?)\b")
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_TITLE_TOKEN_RE = re.compile(r"[^\W_]+(?:['’\-][^\W_]+)*", re.UNICODE)
+_RELEASE_NOISE_TOKENS = frozenset({
+    "2160p", "1440p", "1080p", "1080i", "720p", "576p", "480p",
+    "4k", "8k", "uhd", "bluray", "blu-ray", "bdrip", "brrip", "remux",
+    "webrip", "web-dl", "webdl", "web", "hdtv", "dvdrip", "dvd",
+    "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "xvid", "divx",
+    "ac3", "eac3", "dts", "dts-hd", "truehd", "atmos", "aac", "flac",
+    "hdr", "hdr10", "dolby", "vision", "sdr", "10bit", "8bit",
+    "multi", "multi-vff", "vf", "vff", "vfq", "vf2", "truefrench",
+    "vostfr", "vosta", "sub", "subs",
+    "proper", "repack", "rerip",
+})
+_LANGUAGE_NOISE_TOKENS = frozenset({"fr", "en", "eng", "fra", "fre"})
 _VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".webm"}
 _DANGEROUS_EXTENSIONS = {".rar", ".zip", ".7z", ".part", ".exe", ".msi", ".bat", ".cmd", ".scr", ".com"}
 _ACTIVE_SEED_STATES = {"uploading", "stalledUP", "forcedUP", "queuedUP", "checkingUP"}
@@ -373,12 +387,67 @@ def _series_title(value: str) -> str | None:
     return title or None
 
 
+def _is_release_noise(token: str) -> bool:
+    normalized = token.casefold().replace("’", "'")
+    return normalized in _RELEASE_NOISE_TOKENS or normalized in _LANGUAGE_NOISE_TOKENS
+
+
+def _adjacent_title(value: str, *, from_end: bool) -> str:
+    """Return the title run immediately touching one side of a year."""
+    tokens = list(_TITLE_TOKEN_RE.finditer(value))
+    if from_end:
+        tokens.reverse()
+    title_tokens: list[str] = []
+    started = False
+    for token in tokens:
+        if _is_release_noise(token.group()):
+            if started:
+                break
+            continue
+        started = True
+        title_tokens.append(token.group())
+    if from_end:
+        title_tokens.reverse()
+    return " ".join(title_tokens)
+
+
+def _movie_title_is_plausible(value: str) -> bool:
+    if not value:
+        return False
+    tokens = _TITLE_TOKEN_RE.findall(value)
+    return bool(tokens) and (
+        any(any(character.isalpha() for character in token) for token in tokens)
+        or any(re.fullmatch(r"\d{4}", token) for token in tokens)
+    )
+
+
 def _movie_identity(value: str) -> tuple[str, str] | None:
-    match = _YEAR_RE.search(value)
-    if not match:
-        return None
-    title = _clean_title(value[: match.start()])
-    return (title, match.group(1)) if title else None
+    """Extract a movie year and title without depending on their order.
+
+    Release names often interleave the year and technical tokens with the
+    title. Evaluate every year occurrence and keep the longest plausible
+    title immediately next to one of them. Numeric four-digit titles remain
+    eligible, which covers films such as ``1917`` when a release year follows.
+    """
+    name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem, extension = posixpath.splitext(name)
+    if extension.casefold() in _VIDEO_EXTENSIONS:
+        name = stem
+    best: tuple[tuple[int, int, int], str, str] | None = None
+    for match in _YEAR_RE.finditer(name):
+        title_options = (
+            (_adjacent_title(name[: match.start()], from_end=True), 1),
+            (_adjacent_title(name[match.end() :], from_end=False), 0),
+        )
+        for raw_title, before_year in title_options:
+            if not _movie_title_is_plausible(raw_title):
+                continue
+            title_tokens = _TITLE_TOKEN_RE.findall(raw_title)
+            alphabetic_tokens = sum(any(character.isalpha() for character in token) for token in title_tokens)
+            score = (alphabetic_tokens, len(title_tokens), before_year)
+            if best is None or score > best[0]:
+                best = (score, _clean_title(raw_title), match.group(1))
+    return (best[1], best[2]) if best else None
 
 
 def _is_complete(torrent: dict[str, Any]) -> bool:
@@ -1107,6 +1176,7 @@ async def apply_organization_plan(
     qbit: Any,
     plan: dict[str, Any],
     resume_manager: "VerifiedResumeManager | None" = None,
+    progress: Callable[[dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     """Apply a plan while keeping every torrent paused.
 
@@ -1116,20 +1186,70 @@ async def apply_organization_plan(
     """
     results: list[dict[str, Any]] = []
     organized = 0
-    for entry in plan.get("entries", []):
+    entries = plan.get("entries", [])
+    total = len(entries)
+
+    async def report(event: dict[str, Any]) -> None:
+        if progress is None:
+            return
+        try:
+            outcome = progress(event)
+            if inspect.isawaitable(outcome):
+                await outcome
+        except Exception:
+            logger.exception("organization progress callback failed")
+
+    for index, entry in enumerate(entries, start=1):
         torrent_hash = entry["hash"]
+        torrent_name = str(entry.get("name") or "Torrent")
         renamed: list[tuple[str, str, str]] = []
         location_changed = False
         try:
+            await report({
+                "stage": "pausing",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Mise en pause avant toute mutation.",
+            })
             await qbit.pause_many([torrent_hash])
             await _wait_until_paused(qbit, torrent_hash)
+            await report({
+                "stage": "moving",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Pause confirmée — renommage et déplacement en cours.",
+            })
             renamed = await _apply_renames(qbit, torrent_hash, entry["operations"])
             if entry["currentPath"] != entry["targetPath"]:
                 await qbit.set_location_many([torrent_hash], entry["targetPath"])
                 location_changed = True
+            await report({
+                "stage": "rechecking",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Déplacement effectué — revérification demandée.",
+            })
             await qbit.recheck_many([torrent_hash])
             organized += 1
             results.append({"hash": torrent_hash, "name": entry["name"], "success": True, "status": "verification"})
+            await report({
+                "stage": "verification",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Vérification qBittorrent demandée.",
+            })
         except QbitError as exc:
             rollback_errors = await _rollback(qbit, entry, renamed, location_changed)
             results.append(
@@ -1142,6 +1262,15 @@ async def apply_organization_plan(
                     "rollbackErrors": rollback_errors,
                 }
             )
+            await report({
+                "stage": "failed",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": exc.public_message,
+            })
     return {"organized": organized, "failed": len(results) - organized, "results": results, "warnings": plan.get("warnings", [])}
 
 

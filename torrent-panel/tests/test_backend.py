@@ -1290,6 +1290,39 @@ class OrganizerTests(BackendTests):
             [{"oldPath": "Dune.2021.1080p.MULTi.mkv", "newPath": "Dune (2021)/Dune.2021.1080p.MULTi.mkv"}],
         )
 
+    def test_movie_identity_accepts_year_before_title_and_surrounding_release_noise(self):
+        self.assertEqual(
+            organizer_service._movie_identity(
+                "1080p 2001 L'odyssée De L'espace - FR EN x264 ac3 mHDgz.mkv"
+            ),
+            ("L'odyssée De L'espace", "2001"),
+        )
+        self.assertEqual(
+            organizer_service._movie_identity("Dune.2021.WEB-DL.1080p.FR.mkv"),
+            ("Dune", "2021"),
+        )
+        self.assertEqual(
+            organizer_service._movie_identity("2021 1080p Dune FR.mkv"),
+            ("Dune", "2021"),
+        )
+        self.assertEqual(
+            organizer_service._movie_identity("Dune 1080p 2021.mkv"),
+            ("Dune", "2021"),
+        )
+
+    def test_movie_identity_prefers_the_release_year_over_a_year_in_the_title(self):
+        self.assertEqual(
+            organizer_service._movie_identity("Blade Runner 2049 2017 2160p HDR.mkv"),
+            ("Blade Runner 2049", "2017"),
+        )
+        self.assertEqual(
+            organizer_service._movie_identity("The French Connection 1971 1080p.mkv"),
+            ("The French Connection", "1971"),
+        )
+        self.assertIsNone(
+            organizer_service._movie_identity("1080p 2021 FR EN x264 ac3.mkv")
+        )
+
     def test_preview_can_be_scoped_to_one_torrent(self):
         self._movie_payload()
         other_hash = "b" * 40
