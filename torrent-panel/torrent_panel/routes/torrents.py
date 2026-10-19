@@ -462,17 +462,50 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
         if not payload.hashes and not payload.orphanPaths:
             orphan_paths = {str(item.get("path")) for item in plan.get("orphanMedia", [])}
         orphan_items = [item for item in plan.get("orphanMedia", []) if str(item.get("path")) in orphan_paths]
+        prepared_orphan_operations = {
+            str(item.get("path") or ""): orphan_operations(item, QBIT_SAVE_PATH)
+            for item in orphan_items
+        }
+        orphan_spans: list[tuple[str, int, int]] = []
+        orphan_batch_operations: list[dict[str, Any]] = []
+        for item in orphan_items:
+            path = str(item.get("path") or "")
+            operations = prepared_orphan_operations.get(path)
+            if operations is None:
+                continue
+            start = len(orphan_batch_operations)
+            orphan_batch_operations.extend(operations)
+            orphan_spans.append((path, start, len(operations)))
+        orphan_cloud_results: dict[str, dict[str, Any]] = {}
+        orphan_batch_error: str | None = None
+        if orphan_batch_operations:
+            try:
+                orphan_batch = await arrange_batch(orphan_batch_operations)
+                batch_items = orphan_batch.get("results")
+                if not isinstance(batch_items, list) or len(batch_items) != len(orphan_batch_operations):
+                    orphan_batch_error = "Réponse cloud-panel incomplète."
+                else:
+                    for path, start, count in orphan_spans:
+                        unit_results = batch_items[start:start + count]
+                        orphan_cloud_results[path] = {
+                            "results": unit_results,
+                            "failed": sum(1 for result in unit_results if not result.get("success")),
+                        }
+            except CloudPanelError as exc:
+                orphan_batch_error = exc.message
         orphan_results: list[dict[str, Any]] = []
         orphan_journal: list[dict[str, Any]] = []
         for orphan in orphan_items:
-            operations = orphan_operations(orphan, QBIT_SAVE_PATH)
+            operations = prepared_orphan_operations.get(str(orphan.get("path") or ""))
             if operations is None:
                 orphan_result = {"path": orphan.get("path", ""), "success": False, "error": "Identification ambiguë"}
                 orphan_results.append(orphan_result)
                 orphan_journal.append(journal_orphan_operation(orphan, [], orphan_result))
                 continue
             try:
-                cloud_result = await arrange_batch(operations)
+                cloud_result = orphan_cloud_results.get(str(orphan.get("path") or ""))
+                if cloud_result is None:
+                    raise CloudPanelError(orphan_batch_error or "cloud-panel n'a pas renvoyé de résultat.")
                 orphan_result = {
                     "path": orphan.get("path", ""),
                     "success": cloud_result.get("failed", 0) == 0,

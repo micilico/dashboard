@@ -11,7 +11,8 @@ from ..config import CLOUD_PANEL_API_URL, CLOUD_PANEL_INTERNAL_TOKEN, CLOUD_PANE
 
 logger = logging.getLogger("torrent_panel.cloud_panel")
 
-_TIMEOUT_SECONDS = 30.0
+_BASE_TIMEOUT_SECONDS = 30.0
+_MAX_TIMEOUT_SECONDS = 600.0
 
 
 class CloudPanelError(Exception):
@@ -33,7 +34,10 @@ async def arrange_batch(items: list[dict[str, Any]]) -> dict[str, Any]:
         return {"results": [], "failed": 0}
 
     endpoint = f"{CLOUD_PANEL_API_URL}{CLOUD_PANEL_PUBLIC_PREFIX}/api/files/internal-arrange-batch"
-    async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+    # A global arrange can contain hundreds of ordered FUSE operations. Budget
+    # time per operation, while retaining a hard ceiling for a stuck mount.
+    timeout_seconds = min(_MAX_TIMEOUT_SECONDS, max(_BASE_TIMEOUT_SECONDS, 30.0 + len(items) * 4.0))
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         try:
             response = await client.post(
                 endpoint,
