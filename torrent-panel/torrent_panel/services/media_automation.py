@@ -536,7 +536,18 @@ class MediaAutomationManager:
                     for library_id in library_ids:
                         response = await self._jellyfin_post(client, f"/Items/{library_id}/Refresh")
                         if response.status_code >= 400:
-                            raise MediaAutomationError(f"Bibliothèque Jellyfin refusée ({response.status_code}).")
+                            if not self._config.jellyfin_global_fallback:
+                                raise MediaAutomationError(f"Bibliothèque Jellyfin refusée ({response.status_code}).")
+                            logger.warning(
+                                "Jellyfin refused a targeted library refresh (status=%d); trying global refresh",
+                                response.status_code,
+                            )
+                            fallback_response = await self._jellyfin_post(client, "/Library/Refresh")
+                            if fallback_response.status_code >= 400:
+                                raise MediaAutomationError(
+                                    f"Bibliothèque Jellyfin refusée ({response.status_code}) et scan global refusé ({fallback_response.status_code})."
+                                )
+                            return {"scope": "global_fallback"}
                     return {"scope": "targeted"}
                 if not self._config.jellyfin_global_fallback:
                     raise MediaAutomationError("Aucune bibliothèque Jellyfin mappée.")
