@@ -57,7 +57,12 @@ def _build_renames(
     located = located.rstrip("/")
     parent_rel = posixpath.dirname(located)
     located_basename = posixpath.basename(located)
-    is_category_root = bool(anchor_prefix) and parent_rel == anchor_prefix.rstrip("/")
+    # The download root itself is shared by torrents, just like a category.
+    # Never rename either container to the name of one torrent.
+    is_category_root = located in {"", "."} or (
+        bool(anchor_prefix)
+        and (located == anchor_prefix.rstrip("/") or parent_rel == anchor_prefix.rstrip("/"))
+    )
     is_single_file = len(specs) <= 1
 
     ops: list[dict[str, str]] = []
@@ -396,7 +401,10 @@ async def build_relink_plan(
         renames = _build_renames(index, located, torrent_name, specs, index["anchor_prefix"])
         anchor = index["anchor_prefix"]
         located_clean = located.rstrip("/")
-        is_category_root = bool(anchor) and posixpath.dirname(located_clean) == anchor.rstrip("/")
+        is_category_root = located_clean in {"", "."} or (
+            bool(anchor)
+            and (located_clean == anchor.rstrip("/") or posixpath.dirname(located_clean) == anchor.rstrip("/"))
+        )
         parent_rel = located_clean if is_category_root else (posixpath.dirname(located_clean) or located_clean)
         target = _anchor_target(qbit_root, anchor, parent_rel)
         if not target:

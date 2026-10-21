@@ -1141,6 +1141,41 @@ class RelinkTests(BackendTests):
         self.assertEqual(plan["relinkCount"], 1)
         self.assertEqual(plan["relink"][0]["location"], "/home/micilico/downloads/qbittorrent/Films")
 
+    def test_relink_download_root_is_never_renamed(self):
+        root = self.mount / "Qbittorrent"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "Root.Movie.Renamed.mkv").write_bytes(b"root-movie-unique")
+        app.state.qbit.torrents_payload = [{
+            "hash": VALID_HASH,
+            "name": "Root.Movie.Torrent",
+            "state": "missingFiles",
+            "category": "Films",
+            "savePath": "/home/micilico/downloads/qbittorrent",
+            "contentPath": "/home/micilico/downloads/qbittorrent/Root.Movie.Torrent",
+        }]
+        for multi in (False, True):
+            with self.subTest(multi=multi):
+                specs = [{"name": "Root.Movie.mkv", "size": 17}]
+                if multi:
+                    (root / "Root.Movie.srt").write_bytes(b"root-subtitle-unique")
+                    specs.append({"name": "Root.Movie.srt", "size": 20})
+                app.state.qbit.files_payload = {VALID_HASH: specs}
+                relink_service._SCAN_CACHE["data"] = None
+                response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+                self.assertEqual(response.status_code, 200)
+                plan = response.json()["plan"]
+                self.assertEqual(plan["relinkCount"], 1)
+                group = plan["relink"][0]
+                self.assertEqual(group["location"], "/home/micilico/downloads/qbittorrent")
+                self.assertEqual(group["layout"], "Subfolder" if multi else "NoSubfolder")
+                ops = group["entries"][0]["renames"]
+                self.assertFalse(any(op.get("old_name") == "Qbittorrent" for op in ops))
+                if multi:
+                    self.assertEqual(ops[0]["op"], "mkdir")
+                    self.assertEqual(sum(op["op"] == "move" for op in ops), 2)
+                else:
+                    self.assertEqual(ops, [{"op": "rename", "path": "Qbittorrent", "old_name": "Root.Movie.Renamed.mkv", "new_name": "Root.Movie.mkv"}])
+
     def test_single_file_in_category_root_stays_flat(self):
         """Cas B mono-fichier : fichier directement dans Films → rename seul (pas de mkdir/move), layout NoSubfolder."""
         import shutil
