@@ -208,6 +208,7 @@ async def internal_arrange_batch(
         )
 
     results: list[dict[str, object]] = []
+    known_directories: set[str] = set()
     for item in parsed if isinstance(parsed, list) else []:
         op = str(item.get("op") or "rename")
         path = str(item.get("path") or "")
@@ -218,10 +219,13 @@ async def internal_arrange_batch(
         try:
             if op == "mkdir":
                 target = resolve_path_within(MOUNT_PATH, os.path.join(path, folder_name), must_exist=False)
-                if os.path.isdir(target):
+                if target in known_directories or os.path.isdir(target):
+                    known_directories.add(target)
                     result = {"success": True}
                 else:
                     result = await run_in_threadpool(create_directory, path, folder_name)
+                    if result.get("success", True):
+                        known_directories.add(target)
                 results.append({"success": bool(result.get("success", True)), "op": op, "path": path, "new_name": folder_name})
             elif op == "move":
                 await run_in_threadpool(move_item, path, old_name, dest)
@@ -238,6 +242,19 @@ async def internal_arrange_batch(
             reason = exc.args[0] if exc.args else "Opération refusée"
             logger.warning("internal-arrange-batch: op %s refusée (%s)", op, reason)
             results.append({"success": False, "op": op, "path": path, "old_name": old_name, "new_name": new_name, "dest": dest, "error": reason})
+        except OSError as exc:
+            # Never return a raw filesystem exception: it can contain an
+            # absolute mount path. Continue with later units of the batch.
+            logger.warning("internal-arrange-batch: storage failure on %s (%s)", op, exc.__class__.__name__)
+            results.append({
+                "success": False,
+                "op": op,
+                "path": path,
+                "old_name": old_name,
+                "new_name": new_name,
+                "dest": dest,
+                "error": "Opération de stockage refusée.",
+            })
     failed = sum(1 for result in results if not result.get("success"))
     return {"results": results, "failed": failed}
 

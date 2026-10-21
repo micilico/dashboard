@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -19,7 +20,7 @@ import time
 import unicodedata
 from urllib.parse import unquote
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..qbittorrent import QbitError
 
@@ -32,6 +33,19 @@ _EPISODE_RE = re.compile(r"(?i)(?:^|[\s._\-/])S(\d{1,2})E\d{1,3}\b")
 _ALT_EPISODE_RE = re.compile(r"(?i)(?:^|[\s._\-/])(\d{1,2})x\d{1,3}\b")
 _SPECIAL_RE = re.compile(r"(?i)(?:^|[\s._\-/])(?:specials?|sp[eé]cial(?:e|es)?)\b")
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_TITLE_TOKEN_RE = re.compile(r"[^\W_]+(?:['’\-][^\W_]+)*", re.UNICODE)
+_RELEASE_NOISE_TOKENS = frozenset({
+    "2160p", "1440p", "1080p", "1080i", "720p", "576p", "480p",
+    "4k", "8k", "uhd", "bluray", "blu-ray", "bdrip", "brrip", "remux",
+    "webrip", "web-dl", "webdl", "web", "hdtv", "dvdrip", "dvd",
+    "x264", "x265", "h264", "h265", "hevc", "avc", "av1", "xvid", "divx",
+    "ac3", "eac3", "dts", "dts-hd", "truehd", "atmos", "aac", "flac",
+    "hdr", "hdr10", "dolby", "vision", "sdr", "10bit", "8bit",
+    "multi", "multi-vff", "vf", "vff", "vfq", "vf2", "truefrench",
+    "vostfr", "vosta", "sub", "subs",
+    "proper", "repack", "rerip",
+})
+_LANGUAGE_NOISE_TOKENS = frozenset({"fr", "en", "eng", "fra", "fre"})
 _VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".m2ts", ".wmv", ".webm"}
 _BOOK_EXTENSIONS = {
     ".epub", ".kepub", ".pdf", ".mobi", ".azw", ".azw3", ".kfx", ".lit", ".fb2", ".djvu",
@@ -479,59 +493,67 @@ def _series_title(value: str) -> str | None:
     return title or None
 
 
-_MOVIE_RELEASE_NOISE = {
-    "2160p", "1440p", "1080p", "720p", "576p", "480p", "4k", "8k",
-    "web", "webdl", "bluray", "bdrip", "brrip", "dvdrip", "hdtv", "remux",
-    "hdr", "hdr10", "dv", "dolby", "vision", "proper", "repack", "extended",
-    "x264", "x265", "h264", "h265", "hevc", "av1", "aac", "ac3", "eac3",
-    "dts", "truehd", "atmos", "fr", "vf", "vff", "vfq", "vo", "vostfr",
-    "multi", "multilanguage", "en", "eng",
-}
-_MOVIE_RELEASE_NOISE_RE = re.compile(
-    r"(?i)^(?:\d{1,2}bit|\d(?:\.\d)?ch|10bit|8bit|10|8|mhdgz|tfa|ntb|rarbg)$"
-)
+def _is_release_noise(token: str) -> bool:
+    normalized = token.casefold().replace("’", "'")
+    return normalized in _RELEASE_NOISE_TOKENS or normalized in _LANGUAGE_NOISE_TOKENS
 
 
-def _movie_title_tokens(tokens: list[str]) -> list[str]:
-    def is_noise(token: str) -> bool:
-        key = unicodedata.normalize("NFKC", token).casefold()
-        return key in _MOVIE_RELEASE_NOISE or bool(_MOVIE_RELEASE_NOISE_RE.match(key))
+def _adjacent_title(value: str, *, from_end: bool) -> str:
+    """Return the title run immediately touching one side of a year."""
+    tokens = list(_TITLE_TOKEN_RE.finditer(value))
+    if from_end:
+        tokens.reverse()
+    title_tokens: list[str] = []
+    started = False
+    for token in tokens:
+        if _is_release_noise(token.group()):
+            if started:
+                break
+            continue
+        started = True
+        title_tokens.append(token.group())
+    if from_end:
+        title_tokens.reverse()
+    return " ".join(title_tokens)
 
-    start = 0
-    end = len(tokens)
-    while start < end and is_noise(tokens[start]):
-        start += 1
-    while end > start and is_noise(tokens[end - 1]):
-        end -= 1
-    selected: list[str] = []
-    for token in tokens[start:end]:
-        if is_noise(token):
-            break
-        selected.append(token)
-    return selected
+
+def _movie_title_is_plausible(value: str) -> bool:
+    if not value:
+        return False
+    tokens = _TITLE_TOKEN_RE.findall(value)
+    return bool(tokens) and (
+        any(any(character.isalpha() for character in token) for token in tokens)
+        or any(re.fullmatch(r"\d{4}", token) for token in tokens)
+    )
 
 
 def _movie_identity(value: str) -> tuple[str, str] | None:
-    """Extract a film title and release year from common release names.
+    """Extract a movie year and title without depending on their order.
 
-    A title can itself contain a year (``Blade Runner 2049``), so the final
-    year is treated as the release year.  Release tags may precede the title;
-    in that case the title is taken from the meaningful words after the year.
-    A release name containing only tags and a year is deliberately rejected.
+    Release names often interleave the year and technical tokens with the
+    title. Evaluate every year occurrence and keep the longest plausible
+    title immediately next to one of them. Numeric four-digit titles remain
+    eligible, which covers films such as ``1917`` when a release year follows.
     """
-    raw_value = str(value or "")
-    extension = posixpath.splitext(raw_value)[1].lower()
-    stem = raw_value[: -len(extension)] if extension in _VIDEO_EXTENSIONS else raw_value
-    tokens = [part for part in re.split(r"[\s._()\[\]+]+", stem) if part]
-    year_indexes = [index for index, token in enumerate(tokens) if _YEAR_RE.fullmatch(token)]
-    if not year_indexes:
-        return None
-    year_index = year_indexes[-1]
-    before = _movie_title_tokens(tokens[:year_index])
-    after = _movie_title_tokens(tokens[year_index + 1 :])
-    title_tokens = before or after
-    title = _clean_title(" ".join(title_tokens))
-    return (title, tokens[year_index]) if title else None
+    name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem, extension = posixpath.splitext(name)
+    if extension.casefold() in _VIDEO_EXTENSIONS:
+        name = stem
+    best: tuple[tuple[int, int, int], str, str] | None = None
+    for match in _YEAR_RE.finditer(name):
+        title_options = (
+            (_adjacent_title(name[: match.start()], from_end=True), 1),
+            (_adjacent_title(name[match.end() :], from_end=False), 0),
+        )
+        for raw_title, before_year in title_options:
+            if not _movie_title_is_plausible(raw_title):
+                continue
+            title_tokens = _TITLE_TOKEN_RE.findall(raw_title)
+            alphabetic_tokens = sum(any(character.isalpha() for character in token) for token in title_tokens)
+            score = (alphabetic_tokens, len(title_tokens), before_year)
+            if best is None or score > best[0]:
+                best = (score, _clean_title(raw_title), match.group(1))
+    return (best[1], best[2]) if best else None
 
 
 def _has_extension(paths: list[str], extensions: set[str]) -> bool:
@@ -1308,15 +1330,68 @@ def _temporary_path(torrent_hash: str, index: int, old_path: str) -> str:
     parent = posixpath.dirname(old_path)
     basename = posixpath.basename(old_path)
     extension = posixpath.splitext(basename)[1]
+    # Un renommage temporaire doit rester dans un dossier qui existe déjà.
+    # Créer une arborescence cachée imbriquée ajoute des parents absents et
+    # une mutation supplémentaire avant que qBittorrent ait confirmé la
+    # première.  Le nom court évite aussi de dépasser la limite des 255 octets
+    # d'un composant.
     temporary_name = f".dashboard-organize-{torrent_hash[:12]}-{index:05d}{extension}"
-    return posixpath.join(parent, temporary_name)
+    return posixpath.join(parent, temporary_name) if parent else temporary_name
 
 
-async def _rename_path(qbit: Any, torrent_hash: str, path_type: str, old_path: str, new_path: str) -> None:
+def _normalized_paths(payload: Any) -> set[str]:
+    """Return safe relative paths from a qBittorrent files payload."""
+    paths: set[str] = set()
+    for item in payload if isinstance(payload, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            paths.add(_safe_relative(name))
+        except ValueError:
+            continue
+    return paths
+
+
+def _targets_collide(operations: list[dict[str, Any]], current_paths: set[str]) -> bool:
+    """Detect whether a direct rename would land on an existing torrent path.
+
+    Only paths currently owned by the same torrent are relevant here.  When a
+    destination is already occupied, a staged rename is required to free it
+    first without overwriting anything.
+    """
+    for operation in operations:
+        old_path = _safe_relative(str(operation.get("oldPath") or ""))
+        new_path = _safe_relative(str(operation.get("newPath") or ""))
+        if new_path in current_paths:
+            return True
+        for path in current_paths:
+            if path == old_path or path.startswith(old_path + "/"):
+                continue
+            if path == new_path or path.startswith(new_path + "/"):
+                return True
+    return False
+
+
+def _expected_paths(
+    paths: set[str],
+    path_type: str,
+    old_path: str,
+    new_path: str,
+) -> set[str] | None:
+    """Project qBittorrent-owned paths after one rename operation."""
     if path_type == "folder":
-        await qbit.rename_folder(torrent_hash, old_path, new_path)
-    else:
-        await qbit.rename_file(torrent_hash, old_path, new_path)
+        if not any(path == old_path or path.startswith(old_path + "/") for path in paths):
+            return None
+        return {
+            new_path + path[len(old_path):] if path == old_path or path.startswith(old_path + "/") else path
+            for path in paths
+        }
+    if old_path not in paths:
+        return None
+    return (paths - {old_path}) | {new_path}
 
 
 async def _wait_for_rename(
@@ -1325,28 +1400,46 @@ async def _wait_for_rename(
     path_type: str,
     old_path: str,
     new_path: str,
-    timeout_seconds: float = 5.0,
+    *,
+    timeout_seconds: float = 20.0,
+    required: bool = True,
 ) -> None:
-    """Wait until qBittorrent exposes a successful path rename."""
-    deadline = time.monotonic() + max(0.0, timeout_seconds)
-    while True:
-        files = await qbit.files(torrent_hash)
-        names = {
-            str(item.get("name") or "").replace("\\", "/")
-            for item in files
-            if isinstance(item, dict)
-        }
-        if path_type == "folder":
-            new_visible = any(name == new_path or name.startswith(new_path + "/") for name in names)
-            old_visible = any(name == old_path or name.startswith(old_path + "/") for name in names)
-        else:
-            new_visible = new_path in names
-            old_visible = old_path in names
-        if new_visible and not old_visible:
+    """Wait until qBittorrent advertises a queued rename as applied.
+
+    ``renameFile``/``renameFolder`` update the torrent metadata on the next
+    file-renamed alert.  Chaining a second rename immediately can therefore
+    select the old path and be answered with 409.  Clients that cannot list
+    torrent files skip the wait.
+    """
+    if not callable(getattr(qbit, "files", None)):
+        return
+    try:
+        payload = await qbit.files(torrent_hash)
+    except QbitError:
+        return
+    expected = _expected_paths(_normalized_paths(payload), path_type, old_path, new_path)
+    if expected is None:
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        current = _normalized_paths(payload)
+        if expected <= current:
             return
-        if time.monotonic() >= deadline:
-            raise QbitError(409, "qBittorrent n'a pas confirmé le renommage — rangement annulé.")
-        await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        await asyncio.sleep(0.1)
+        try:
+            payload = await qbit.files(torrent_hash)
+        except QbitError:
+            return
+    if required:
+        raise QbitError(409, "qBittorrent n'a pas confirmé le renommage — rangement annulé.")
+    logger.warning("organize: rename not confirmed by qBittorrent (%s -> %s)", old_path, new_path)
+
+
+async def _rename_path(qbit: Any, torrent_hash: str, path_type: str, old_path: str, new_path: str) -> None:
+    if path_type == "folder":
+        await qbit.rename_folder(torrent_hash, old_path, new_path)
+    else:
+        await qbit.rename_file(torrent_hash, old_path, new_path)
 
 
 async def _wait_until_paused(qbit: Any, torrent_hash: str, timeout_seconds: float = 10.0) -> None:
@@ -1383,23 +1476,75 @@ async def _rollback(
         rollback_path = _temporary_path(entry["hash"], 100_000 + index, current)
         try:
             await _rename_path(qbit, entry["hash"], path_type, current, rollback_path)
-            await _wait_for_rename(qbit, entry["hash"], path_type, current, rollback_path)
+            await _wait_for_rename(qbit, entry["hash"], path_type, current, rollback_path, required=False)
             staged.append((path_type, rollback_path, original))
         except QbitError as exc:
             errors.append(f"{current}: {exc.public_message}")
     for path_type, rollback_path, original in staged:
         try:
             await _rename_path(qbit, entry["hash"], path_type, rollback_path, original)
-            await _wait_for_rename(qbit, entry["hash"], path_type, rollback_path, original)
+            await _wait_for_rename(qbit, entry["hash"], path_type, rollback_path, original, required=False)
         except QbitError as exc:
             errors.append(f"{rollback_path}: {exc.public_message}")
     return errors
+
+
+async def _apply_renames(
+    qbit: Any,
+    torrent_hash: str,
+    operations: list[dict[str, Any]],
+    renamed: list[tuple[str, str, str]] | None = None,
+) -> list[tuple[str, str, str]]:
+    """Apply renames directly when possible, staging only real collisions.
+
+    A single-file movie or a simple episode move has no destination already
+    present in qBittorrent metadata.  Renaming straight to the final path is
+    both faster and safer: it removes the temporary hidden hop that used to be
+    created inside directories that did not exist yet.  Staging is reserved
+    for the rare case where a target path is already owned by the torrent.
+    """
+    try:
+        payload = await qbit.files(torrent_hash)
+    except QbitError:
+        payload = None
+    current_paths = _normalized_paths(payload)
+    renamed = renamed if renamed is not None else []
+    if not _targets_collide(operations, current_paths):
+        for operation in operations:
+            path_type = str(operation.get("type") or "file")
+            old_path = _safe_relative(str(operation.get("oldPath") or ""))
+            new_path = _safe_relative(str(operation.get("newPath") or ""))
+            if old_path == new_path:
+                continue
+            await _rename_path(qbit, torrent_hash, path_type, old_path, new_path)
+            renamed.append((path_type, new_path, old_path))
+            await _wait_for_rename(qbit, torrent_hash, path_type, old_path, new_path)
+        return renamed
+
+    temporary: list[tuple[str, str, str, str]] = []
+    for index, operation in enumerate(operations):
+        path_type = str(operation.get("type") or "file")
+        old_path = _safe_relative(str(operation.get("oldPath") or ""))
+        new_path = _safe_relative(str(operation.get("newPath") or ""))
+        if old_path == new_path:
+            continue
+        temp_path = _temporary_path(torrent_hash, index, old_path)
+        await _rename_path(qbit, torrent_hash, path_type, old_path, temp_path)
+        renamed.append((path_type, temp_path, old_path))
+        await _wait_for_rename(qbit, torrent_hash, path_type, old_path, temp_path)
+        temporary.append((path_type, temp_path, new_path, old_path))
+    for index, (path_type, temp_path, new_path, old_path) in enumerate(temporary):
+        await _rename_path(qbit, torrent_hash, path_type, temp_path, new_path)
+        renamed[index] = (path_type, new_path, old_path)
+        await _wait_for_rename(qbit, torrent_hash, path_type, temp_path, new_path)
+    return renamed
 
 
 async def apply_organization_plan(
     qbit: Any,
     plan: dict[str, Any],
     resume_manager: "VerifiedResumeManager | None" = None,
+    progress: Callable[[dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     """Apply a plan while keeping every torrent paused.
 
@@ -1409,47 +1554,74 @@ async def apply_organization_plan(
     """
     results: list[dict[str, Any]] = []
     organized = 0
-    for entry in plan.get("entries", []):
+    entries = plan.get("entries", [])
+    total = len(entries)
+
+    async def report(event: dict[str, Any]) -> None:
+        if progress is None:
+            return
+        try:
+            outcome = progress(event)
+            if inspect.isawaitable(outcome):
+                await outcome
+        except Exception:
+            logger.exception("organization progress callback failed")
+
+    for index, entry in enumerate(entries, start=1):
         torrent_hash = entry["hash"]
+        torrent_name = str(entry.get("name") or "Torrent")
         renamed: list[tuple[str, str, str]] = []
         location_changed = False
+        current_stage = "pausing"
         try:
+            await report({
+                "stage": "pausing",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Mise en pause avant toute mutation.",
+            })
             await qbit.pause_many([torrent_hash])
             await _wait_until_paused(qbit, torrent_hash)
-            operations = list(entry.get("operations", []))
-            old_paths = {str(operation.get("oldPath") or "") for operation in operations}
-            requires_staging = any(
-                str(operation.get("newPath") or "") in old_paths
-                and operation.get("newPath") != operation.get("oldPath")
-                for operation in operations
-            )
-            if requires_staging:
-                temporary: list[tuple[str, str, str, str]] = []
-                for index, operation in enumerate(operations):
-                    path_type = str(operation.get("type") or "file")
-                    temp_path = _temporary_path(torrent_hash, index, operation["oldPath"])
-                    await _rename_path(qbit, torrent_hash, path_type, operation["oldPath"], temp_path)
-                    renamed.append((path_type, temp_path, operation["oldPath"]))
-                    await _wait_for_rename(qbit, torrent_hash, path_type, operation["oldPath"], temp_path)
-                    temporary.append((path_type, temp_path, operation["newPath"], operation["oldPath"]))
-                for index, (path_type, temp_path, new_path, old_path) in enumerate(temporary):
-                    await _rename_path(qbit, torrent_hash, path_type, temp_path, new_path)
-                    renamed[index] = (path_type, new_path, old_path)
-                    await _wait_for_rename(qbit, torrent_hash, path_type, temp_path, new_path)
-            else:
-                for operation in operations:
-                    path_type = str(operation.get("type") or "file")
-                    old_path = operation["oldPath"]
-                    new_path = operation["newPath"]
-                    await _rename_path(qbit, torrent_hash, path_type, old_path, new_path)
-                    renamed.append((path_type, new_path, old_path))
-                    await _wait_for_rename(qbit, torrent_hash, path_type, old_path, new_path)
+            current_stage = "moving"
+            await report({
+                "stage": "moving",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Pause confirmée — renommage et déplacement en cours.",
+            })
+            renamed = await _apply_renames(qbit, torrent_hash, entry["operations"], renamed)
             if entry["currentPath"] != entry["targetPath"]:
                 await qbit.set_location_many([torrent_hash], entry["targetPath"])
                 location_changed = True
+            current_stage = "rechecking"
+            await report({
+                "stage": "rechecking",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Déplacement effectué — revérification demandée.",
+            })
             await qbit.recheck_many([torrent_hash])
             organized += 1
             results.append({"hash": torrent_hash, "name": entry["name"], "success": True, "status": "verification"})
+            current_stage = "verification"
+            await report({
+                "stage": "verification",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": "Vérification qBittorrent demandée.",
+            })
         except QbitError as exc:
             rollback_errors = await _rollback(qbit, entry, renamed, location_changed)
             results.append(
@@ -1462,6 +1634,16 @@ async def apply_organization_plan(
                     "rollbackErrors": rollback_errors,
                 }
             )
+            await report({
+                "stage": "failed",
+                "index": index,
+                "total": total,
+                "processed": organized,
+                "hash": torrent_hash,
+                "name": torrent_name,
+                "message": exc.public_message,
+                "failedStage": current_stage,
+            })
     return {"organized": organized, "failed": len(results) - organized, "results": results, "warnings": plan.get("warnings", [])}
 
 

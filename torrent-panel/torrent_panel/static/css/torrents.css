@@ -370,6 +370,43 @@ tr:hover { background: var(--row-hover); }
   font-size: 0.78rem;
   word-break: break-all;
 }
+.organize-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  margin-top: 10px;
+}
+.organize-route-place {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+  font-size: .78rem;
+}
+.organize-route-place::before {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: .66rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.organize-route-source::before { content: "Emplacement actuel"; }
+.organize-route-destination {
+  color: var(--accent-strong);
+  border-color: color-mix(in oklab, var(--accent), transparent 65%);
+  background: var(--accent-soft);
+}
+.organize-route-destination::before { content: "Destination"; color: var(--accent-strong); }
+.organize-route-arrow { align-self: center; color: var(--accent-strong); font-size: 1.1rem; }
+@media (max-width: 767px) {
+  .organize-route { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .organize-route-arrow { display: none; }
+}
 .organize-operations {
   margin-top: 8px;
   font-size: 0.78rem;
@@ -405,4 +442,334 @@ tr:hover { background: var(--row-hover); }
 
 .torrent-table-more [hidden] {
   display: none;
+}
+
+/* Rangement Jellyfin — suivi visuel des étapes réelles */
+.dialog.organize-dialog {
+  width: min(880px, calc(100% - 32px));
+}
+.dialog.organize-dialog form {
+  max-height: min(88vh, 940px);
+  overflow: auto;
+}
+.organize-workflow {
+  --organize-workflow-radius: var(--radius-panel);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--organize-workflow-radius);
+  background: var(--surface-2);
+}
+.organize-workflow-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.organize-workflow-head > div {
+  min-width: 0;
+}
+.organize-workflow-kicker {
+  margin: 0;
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.organize-workflow-title {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
+}
+.organize-workflow-title:focus {
+  outline: none;
+}
+.organize-workflow-detail {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.organize-workflow-count {
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.organize-workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.organize-workflow-steps li {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.organize-workflow-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.organize-workflow-steps li[data-state="active"] {
+  border-color: color-mix(in oklab, var(--accent), transparent 55%);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.organize-workflow-steps li[data-state="active"] .organize-workflow-step-mark {
+  border-color: color-mix(in oklab, var(--accent), transparent 45%);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.organize-workflow-steps li[data-state="active"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  animation: organize-step-sheen 1.6s linear infinite;
+}
+.organize-workflow-steps li[data-state="done"] {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--text);
+}
+.organize-workflow-steps li[data-state="done"] .organize-workflow-step-mark {
+  border-color: var(--success-border);
+  background: var(--success);
+  color: var(--text-on-accent);
+}
+.organize-workflow-steps li[data-state="error"] {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.organize-workflow-steps li[data-state="error"] .organize-workflow-step-mark {
+  border-color: var(--danger-border);
+  background: var(--danger);
+  color: var(--text-on-accent);
+}
+.organize-workflow-routes {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.organize-workflow-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.organize-workflow-item[data-state="active"] {
+  border-color: color-mix(in oklab, var(--accent), transparent 50%);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent), transparent 78%);
+}
+.organize-workflow-item[data-state="done"] {
+  border-color: var(--success-border);
+}
+.organize-workflow-item[data-state="error"] {
+  border-color: var(--danger-border);
+}
+.organize-workflow-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.organize-workflow-item-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.organize-workflow-chip {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--border-faint);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.organize-workflow-item[data-state="active"] .organize-workflow-chip {
+  border-color: color-mix(in oklab, var(--accent), transparent 55%);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.organize-workflow-item[data-state="done"] .organize-workflow-chip {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.organize-workflow-item[data-state="error"] .organize-workflow-chip {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.organize-workflow-item-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.organize-workflow-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.organize-workflow-place {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+.organize-workflow-place.destination {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.organize-workflow-track {
+  position: relative;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.organize-workflow-dot {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: left var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-standard), background-color var(--motion-base) var(--ease-standard);
+}
+.organize-workflow-item[data-state="active"] .organize-workflow-track {
+  background: color-mix(in oklab, var(--accent), transparent 60%);
+}
+.organize-workflow-item[data-state="active"] .organize-workflow-dot {
+  background: var(--accent-strong);
+  animation: organize-travel 1.4s var(--ease-standard) infinite;
+}
+.organize-workflow-item[data-state="done"] .organize-workflow-track {
+  background: var(--success-border);
+}
+.organize-workflow-item[data-state="done"] .organize-workflow-dot {
+  background: var(--success);
+  transform: translateX(48px);
+}
+.organize-workflow-item[data-state="error"] .organize-workflow-track {
+  background: var(--danger-border);
+}
+.organize-workflow-item[data-state="error"] .organize-workflow-dot {
+  background: var(--danger);
+}
+.organize-workflow-result {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.organize-workflow-result p {
+  margin: 0;
+}
+.organize-workflow-steps li,
+.organize-workflow-item,
+.organize-workflow-chip,
+.organize-workflow-place,
+.organize-workflow-track {
+  transition: background-color var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard), color var(--motion-base) var(--ease-standard);
+}
+.organize-workflow-more {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 0.76rem;
+}
+@keyframes organize-travel {
+  0% { left: 0; }
+  100% { left: calc(100% - 8px); }
+}
+@keyframes organize-step-sheen {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (max-width: 767px) {
+  .dialog.organize-dialog {
+    width: calc(100% - 16px);
+  }
+  .organize-workflow-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .organize-workflow-route {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .organize-workflow-dot {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .organize-workflow-head {
+    flex-direction: column;
+  }
+  .organize-workflow-count {
+    align-self: flex-start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .organize-workflow-steps li[data-state="active"]::after {
+    animation: none;
+    background: var(--accent);
+  }
+  .organize-workflow-item[data-state="active"] .organize-workflow-dot {
+    animation: none;
+  }
+  .organize-workflow-dot {
+    transition: none;
+  }
+  .organize-workflow-steps li,
+  .organize-workflow-item,
+  .organize-workflow-chip,
+  .organize-workflow-place,
+  .organize-workflow-track {
+    transition: none;
+  }
 }

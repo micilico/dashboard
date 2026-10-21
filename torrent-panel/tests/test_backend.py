@@ -1510,7 +1510,6 @@ class OrganizerTests(BackendTests):
             "non associé au torrent" in warning["reason"]
             for warning in plan["warnings"]
         ))
-
     def test_preview_can_be_scoped_to_one_torrent(self):
         self._movie_payload()
         other_hash = "b" * 40
@@ -2028,7 +2027,6 @@ class OrganizerTests(BackendTests):
         )
         self.assertNotIn("recheck", [call[0] for call in app.state.qbit.calls])
         self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
-
     def test_resume_manager_never_resumes_automatically(self):
         self._movie_payload()
         manager = app.state.verified_resume
