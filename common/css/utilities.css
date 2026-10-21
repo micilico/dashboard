@@ -60,6 +60,11 @@
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-panel);
   font-weight: 700;
+  transition: opacity var(--motion-feedback) var(--ease-standard), transform var(--motion-feedback) var(--ease-standard);
+}
+
+@starting-style {
+  .reconnect-banner:not([hidden]) { opacity: 0; transform: translateY(6px); }
 }
 
 @media (max-width: 1023px) {

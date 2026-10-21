@@ -16,8 +16,19 @@ const state = {
   events: [],
   capabilities: {},
   busy: new Set(),
+  busyLabels: new Map(),
   activeView: "indexers",
   searchAbort: null,
+  searchRequestId: 0,
+  searchInFlight: false,
+  searchPromise: null,
+  loadPromise: null,
+  queuedRefreshPromise: null,
+  pollTimer: null,
+  resultPage: 0,
+  indexerRowNodes: new Map(),
+  resultRowNodes: new Map(),
+  releaseIndexerSelection: new Set(),
   sectionErrors: {},
   partialFailures: [],
   lastGrab: null,
@@ -28,6 +39,9 @@ const state = {
     health: false,
   },
 };
+
+const RESULT_PAGE_SIZE = 80;
+const POLL_INTERVAL_MS = 30000;
 
 const SEARCH_CATEGORY_PRESETS = [
   { label: "Films", value: 2000 },
@@ -94,6 +108,10 @@ const els = {
   resultCategory: document.querySelector("#resultCategory"),
   resultMaxSize: document.querySelector("#resultMaxSize"),
   resultSort: document.querySelector("#resultSort"),
+  resultPagination: document.querySelector("#resultPagination"),
+  resultRange: document.querySelector("#resultRange"),
+  resultPrevious: document.querySelector("#resultPrevious"),
+  resultNext: document.querySelector("#resultNext"),
   appsGrid: document.querySelector("#appsGrid"),
   appsSummary: document.querySelector("#appsSummary"),
   appsError: document.querySelector("#appsError"),
@@ -204,16 +222,36 @@ const prowlarrApiClient = createApiClient({
 const api = prowlarrApiClient.request;
 const refreshSession = prowlarrApiClient.refreshSession;
 
-function setBusy(key, busy) {
-  if (busy) state.busy.add(key);
-  else state.busy.delete(key);
+function applyBusyState(node, key, defaultLabel) {
+  const busy = state.busy.has(key);
+  node.disabled = busy;
+  node.setAttribute("aria-busy", String(busy));
+  node.textContent = busy ? (state.busyLabels.get(key) || "En cours...") : defaultLabel;
+}
+
+function setBusy(key, busy, label = "En cours...") {
+  if (busy) {
+    state.busy.add(key);
+    state.busyLabels.set(key, label);
+  } else {
+    state.busy.delete(key);
+    state.busyLabels.delete(key);
+  }
   document.querySelectorAll(`[data-busy-key="${CSS.escape(key)}"]`).forEach((node) => {
-    node.disabled = busy;
-    node.textContent = busy ? "En cours..." : node.dataset.label;
+    applyBusyState(node, key, node.dataset.label || String(node.textContent || ""));
   });
 }
 
 function fillSelect(select, entries, current = "all") {
+  const previous = select.value;
+  const unchanged = select.options?.length === entries.length && entries.every(
+    ([value, label], index) => select.options[index]?.value === String(value) && select.options[index]?.textContent === String(label),
+  );
+  if (unchanged) {
+    const available = entries.some(([value]) => String(value) === previous);
+    select.value = available ? previous : String(current);
+    return;
+  }
   const options = entries.map(([value, label]) => {
     const option = document.createElement("option");
     option.value = String(value);
@@ -221,7 +259,8 @@ function fillSelect(select, entries, current = "all") {
     return option;
   });
   select.replaceChildren(...options);
-  select.value = current;
+  const available = entries.some(([value]) => String(value) === previous);
+  select.value = available ? previous : String(current);
 }
 
 function renderSummary(overview) {
@@ -293,6 +332,135 @@ function filteredIndexers() {
     });
 }
 
+function removeDomNode(node) {
+  if (typeof node?.remove === "function") {
+    node.remove();
+  } else if (node?.parentNode?.removeChild) {
+    node.parentNode.removeChild(node);
+  }
+}
+
+function insertDomNode(container, node, reference = null) {
+  if (typeof container.insertBefore === "function") {
+    container.insertBefore(node, reference);
+  } else {
+    container.appendChild(node);
+  }
+}
+
+function rowKey(prefix, item, index, seen) {
+  const rawIdentity = item?.id || item?.guid || `${item?.indexer || "item"}:${item?.title || item?.name || index}`;
+  const base = `${prefix}:${String(rawIdentity)}`;
+  let key = base;
+  let suffix = 1;
+  while (seen.has(key)) {
+    key = `${base}#${suffix}`;
+    suffix += 1;
+  }
+  seen.add(key);
+  return key;
+}
+
+function syncKeyedRows(container, items, prefix, cache, createRow, updateRow) {
+  const activeBeforeRender = document.activeElement;
+  const orderedRows = [];
+  const seen = new Set();
+  items.forEach((item, index) => {
+    const key = rowKey(prefix, item, index, seen);
+    let row = cache.get(key);
+    if (!row) {
+      row = createRow(item, key);
+      row.className = "row-enter";
+      cache.set(key, row);
+    }
+    row.dataset.rowKey = key;
+    updateRow(row, item, key);
+    orderedRows.push(row);
+  });
+
+  [...cache.entries()].forEach(([key, row]) => {
+    if (seen.has(key)) return;
+    removeDomNode(row);
+    cache.delete(key);
+  });
+
+  orderedRows.forEach((row, index) => {
+    const current = container.childNodes[index];
+    if (current !== row) insertDomNode(container, row, current || null);
+  });
+  while (container.childNodes.length > orderedRows.length) {
+    removeDomNode(container.childNodes[container.childNodes.length - 1]);
+  }
+  if (activeBeforeRender && activeBeforeRender.isConnected === false) {
+    const fallback = prefix === "indexer" ? els.indexerSearch : els.resultSearch;
+    fallback?.focus();
+  }
+}
+
+function createIndexerRow(item, key) {
+  const row = element("tr");
+  ["Nom", "Protocole", "Etat", "Priorite", "Tags", "Categories", "Dernier test"].forEach((label) => {
+    row.append(element("td", { attrs: { "data-label": label } }));
+  });
+  const testButton = button("Tester", "button secondary", {
+    action: "test-indexer",
+    busyKey: `test:${item.id}`,
+    label: "Tester",
+  });
+  const toggleButton = button("Activer", "button secondary", {
+    action: "toggle-indexer",
+    busyKey: `toggle:${item.id}`,
+    label: "Activer",
+  });
+  row.appendChild(element("td", {
+    attrs: { "data-label": "Actions" },
+    children: [element("div", { className: "action-row", children: [testButton, toggleButton] })],
+  }));
+  row.indexerControls = { testButton, toggleButton };
+  row.dataset.rowKey = key;
+  return row;
+}
+
+function updateIndexerRow(row, item) {
+  const cells = row.children;
+  cells[0].className = "name-cell";
+  cells[0].setAttribute("data-label", "Nom");
+  cells[0].textContent = text(item.name);
+  cells[1].setAttribute("data-label", "Protocole");
+  cells[1].textContent = text(item.protocol);
+  cells[2].replaceChildren(
+    element("span", {
+      className: `badge ${item.health === "error" ? "error" : item.enabled ? "ok" : "disabled"}`,
+      text: indexerHealthLabel(item),
+    }),
+    ...(item.error ? [element("div", { className: "muted", text: text(item.error) })] : []),
+  );
+  cells[2].setAttribute("data-label", "Etat");
+  cells[3].className = "mono";
+  cells[3].setAttribute("data-label", "Priorite");
+  cells[3].textContent = text(item.priority, "0");
+  cells[4].setAttribute("data-label", "Tags");
+  const tags = (item.tags || []).map((tag) => element("span", { className: "badge", text: String(tag) }));
+  cells[4].replaceChildren(...(tags.length ? tags : [document.createTextNode("—")]));
+  cells[5].setAttribute("data-label", "Categories");
+  cells[5].textContent = Array.isArray(item.categories) ? String(item.categories.length) : "—";
+  cells[6].setAttribute("data-label", "Dernier test");
+  cells[6].textContent = text(item.lastTest);
+  cells[7].setAttribute("data-label", "Actions");
+
+  const { testButton, toggleButton } = row.indexerControls;
+  const toggleLabel = item.enabled ? "Desactiver" : "Activer";
+  testButton.dataset.id = String(item.id);
+  testButton.dataset.label = "Tester";
+  applyBusyState(testButton, `test:${item.id}`, "Tester");
+  toggleButton.dataset.id = String(item.id);
+  toggleButton.dataset.enabled = String(Boolean(item.enabled));
+  toggleButton.dataset.name = text(item.name);
+  toggleButton.dataset.label = toggleLabel;
+  toggleButton.className = `button ${item.enabled ? "danger" : "secondary"}`;
+  applyBusyState(toggleButton, `toggle:${item.id}`, toggleLabel);
+}
+
 function renderIndexers() {
   renderIndexerFilters();
   const rows = filteredIndexers();
@@ -301,46 +469,7 @@ function renderIndexers() {
     : `${rows.length} affiche(s) sur ${state.indexers.length}.`;
   els.indexersEmpty.hidden = rows.length > 0;
   renderReleaseIndexers();
-  els.indexerRows.replaceChildren(
-    ...rows.map((item) => {
-      const health = item.health === "error" ? "error" : item.enabled ? "ok" : "disabled";
-      const toggleLabel = item.enabled ? "Desactiver" : "Activer";
-      const tags = (item.tags || []).map((tag) => element("span", { className: "badge", text: String(tag) }));
-      const row = element("tr");
-      const cells = [
-        element("td", { className: "name-cell", attrs: { "data-label": "Nom" }, text: text(item.name) }),
-        element("td", { attrs: { "data-label": "Protocole" }, text: text(item.protocol) }),
-        element("td", {
-          attrs: { "data-label": "Etat" },
-          children: [
-            element("span", { className: `badge ${health}`, text: indexerHealthLabel(item) }),
-            ...(item.error ? [element("div", { className: "muted", text: text(item.error) })] : []),
-          ],
-        }),
-        element("td", { className: "mono", attrs: { "data-label": "Priorite" }, text: text(item.priority, "0") }),
-        element("td", { attrs: { "data-label": "Tags" }, children: tags.length ? tags : [document.createTextNode("—")] }),
-        element("td", { attrs: { "data-label": "Categories" }, text: Array.isArray(item.categories) ? String(item.categories.length) : "—" }),
-        element("td", { attrs: { "data-label": "Dernier test" }, text: text(item.lastTest) }),
-      ];
-      const actions = element("div", {
-        className: "action-row",
-        children: [
-          button("Tester", "button secondary", { action: "test-indexer", id: item.id, busyKey: `test:${item.id}`, label: "Tester" }),
-          button(toggleLabel, `button ${item.enabled ? "danger" : "secondary"}`, {
-            action: "toggle-indexer",
-            id: item.id,
-            enabled: item.enabled,
-            name: text(item.name),
-            busyKey: `toggle:${item.id}`,
-            label: toggleLabel,
-          }),
-        ],
-      });
-      cells.push(element("td", { attrs: { "data-label": "Actions" }, children: [actions] }));
-      row.append(...cells);
-      return row;
-    }),
-  );
+  syncKeyedRows(els.indexerRows, rows, "indexer", state.indexerRowNodes, createIndexerRow, updateIndexerRow);
 }
 
 function renderReleaseCategories() {
@@ -366,18 +495,27 @@ function selectedCategoryIds() {
 }
 
 function renderReleaseIndexers() {
-  const selected = new Set([...els.releaseIndexers.selectedOptions].map((option) => option.value));
+  const validIds = new Set(state.indexers.map((item) => String(item.id)));
+  [...state.releaseIndexerSelection].forEach((id) => {
+    if (!validIds.has(String(id))) state.releaseIndexerSelection.delete(id);
+  });
   const query = els.releaseIndexerSearch.value.trim().toLowerCase();
-  const options = state.indexers
+  const entries = state.indexers
     .filter((item) => !query || String(item.name || "").toLowerCase().includes(query))
-    .map((item) => {
+    .map((item) => [String(item.id), text(item.name)]);
+  const signature = JSON.stringify(entries);
+  if (els.releaseIndexers.dataset.optionsSignature !== signature) {
+    els.releaseIndexers.replaceChildren(...entries.map(([value, label]) => {
       const option = document.createElement("option");
-      option.value = String(item.id);
-      option.textContent = text(item.name);
-      option.selected = selected.has(option.value);
+      option.value = value;
+      option.textContent = label;
       return option;
-    });
-  els.releaseIndexers.replaceChildren(...options);
+    }));
+    els.releaseIndexers.dataset.optionsSignature = signature;
+  }
+  [...els.releaseIndexers.options].forEach((option) => {
+    option.selected = state.releaseIndexerSelection.has(option.value);
+  });
 }
 
 function filteredResults() {
@@ -412,10 +550,17 @@ function renderResultFilters() {
 function renderResults() {
   renderResultFilters();
   const rows = filteredResults();
+  const pageCount = Math.max(1, Math.ceil(rows.length / RESULT_PAGE_SIZE));
+  state.resultPage = Math.min(Math.max(0, state.resultPage), pageCount - 1);
+  const pageStart = state.resultPage * RESULT_PAGE_SIZE;
+  const visibleRows = rows.slice(pageStart, pageStart + RESULT_PAGE_SIZE);
   const partialCount = state.partialFailures.length;
+  const countLabel = rows.length > RESULT_PAGE_SIZE
+    ? `${pageStart + 1}-${pageStart + visibleRows.length} resultat(s) affiche(s) sur ${rows.length}`
+    : `${rows.length} resultat(s) affiche(s)`;
   els.searchSummary.textContent = partialCount > 0
-    ? `${rows.length} resultat(s) affiche(s). ${partialCount} source(s) ont repondu avec une erreur partielle.`
-    : `${rows.length} resultat(s) affiche(s). Les URLs privees restent cote serveur.`;
+    ? `${countLabel}. ${partialCount} source(s) ont repondu avec une erreur partielle.`
+    : `${countLabel}. Les URLs privees restent cote serveur.`;
   if (els.searchPartialFailures) {
     if (partialCount > 0) {
       els.searchPartialFailures.hidden = false;
@@ -428,36 +573,94 @@ function renderResults() {
     }
   }
   els.resultsEmpty.hidden = rows.length > 0;
-  els.resultRows.replaceChildren(
-    ...rows.map((item) => {
-      const row = element("tr");
-      row.append(
-        element("td", { className: "name-cell", attrs: { "data-label": "Titre" }, text: text(item.title) }),
-        element("td", { attrs: { "data-label": "Indexer" }, text: text(item.indexer) }),
-        element("td", { attrs: { "data-label": "Categorie" }, text: text(item.category) }),
-        element("td", { className: "mono", attrs: { "data-label": "Taille" }, text: formatBytes(item.size) }),
-        element("td", { attrs: { "data-label": "Age" }, text: text(item.age) }),
-        element("td", { className: "mono", attrs: { "data-label": "Seeders" }, text: text(item.seeders, "0") }),
-        element("td", { className: "mono", attrs: { "data-label": "Leechers" }, text: text(item.leechers, "0") }),
-        element("td", { attrs: { "data-label": "Protocole" }, text: text(item.protocol) }),
-        element("td", { attrs: { "data-label": "Statut" }, text: item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}` }),
-        element("td", {
-          attrs: { "data-label": "Action" },
-          children: [
-            button("Envoyer vers qBittorrent", "button primary", {
-              action: "grab",
-              releaseId: item.id,
-              title: text(item.title),
-              indexer: text(item.indexer),
-              busyKey: `grab:${item.id}`,
-              label: "Envoyer vers qBittorrent",
-            }),
-          ],
-        }),
-      );
-      return row;
-    }),
-  );
+  syncKeyedRows(els.resultRows, visibleRows, "result", state.resultRowNodes, createResultRow, updateResultRow);
+  if (els.resultPagination) {
+    els.resultPagination.hidden = rows.length <= RESULT_PAGE_SIZE;
+  }
+  if (els.resultRange) {
+    els.resultRange.textContent = rows.length > RESULT_PAGE_SIZE
+      ? `Page ${state.resultPage + 1} sur ${pageCount}`
+      : "";
+  }
+  if (els.resultPrevious) {
+    els.resultPrevious.disabled = state.resultPage === 0;
+  }
+  if (els.resultNext) {
+    els.resultNext.disabled = state.resultPage >= pageCount - 1;
+  }
+}
+
+function createResultRow(item, key) {
+  const row = element("tr");
+  ["Titre", "Indexer", "Categorie", "Taille", "Age", "Seeders", "Leechers", "Protocole", "Statut", "Action"].forEach((label) => {
+    row.append(element("td", { attrs: { "data-label": label } }));
+  });
+  const actionCell = row.children[9];
+  const grabButton = button("Envoyer vers qBittorrent", "button primary", {
+    action: "grab",
+    busyKey: `grab:${item.id}`,
+    label: "Envoyer vers qBittorrent",
+  });
+  actionCell.append(grabButton);
+  row.grabButton = grabButton;
+  row.dataset.rowKey = key;
+  return row;
+}
+
+function updateResultRow(row, item) {
+  const cells = row.children;
+  cells[0].className = "name-cell";
+  cells[0].setAttribute("data-label", "Titre");
+  cells[0].textContent = text(item.title);
+  cells[1].setAttribute("data-label", "Indexer");
+  cells[1].textContent = text(item.indexer);
+  cells[2].setAttribute("data-label", "Categorie");
+  cells[2].textContent = text(item.category);
+  cells[3].className = "mono";
+  cells[3].setAttribute("data-label", "Taille");
+  cells[3].textContent = formatBytes(item.size);
+  cells[4].setAttribute("data-label", "Age");
+  cells[4].textContent = text(item.age);
+  cells[5].className = "mono";
+  cells[5].setAttribute("data-label", "Seeders");
+  cells[5].textContent = text(item.seeders, "0");
+  cells[6].className = "mono";
+  cells[6].setAttribute("data-label", "Leechers");
+  cells[6].textContent = text(item.leechers, "0");
+  cells[7].setAttribute("data-label", "Protocole");
+  cells[7].textContent = text(item.protocol);
+  cells[8].setAttribute("data-label", "Statut");
+  cells[8].textContent = item.freeleech ? "Freeleech" : `DL ${text(item.downloadFactor)} / UL ${text(item.uploadFactor)}`;
+  cells[9].setAttribute("data-label", "Action");
+
+  const grabButton = row.grabButton;
+  grabButton.dataset.releaseId = String(item.id ?? "");
+  grabButton.dataset.title = text(item.title);
+  grabButton.dataset.indexer = text(item.indexer);
+  grabButton.dataset.label = "Envoyer vers qBittorrent";
+  applyBusyState(grabButton, `grab:${item.id}`, "Envoyer vers qBittorrent");
+}
+
+function scrollResultsToStart() {
+  const resultsStart = els.resultRows?.closest?.(".table-scroll") || els.resultRows;
+  if (!resultsStart) return;
+  const rect = resultsStart.getBoundingClientRect?.();
+  if (typeof window.scrollTo === "function" && Number.isFinite(rect?.top)) {
+    const documentOffset = Number(window.scrollY || window.pageYOffset || 0);
+    window.scrollTo({ top: Math.max(0, rect.top + documentOffset), behavior: "auto" });
+    return;
+  }
+  resultsStart.scrollIntoView?.({ block: "start", behavior: "auto" });
+}
+
+function showResultPage(delta) {
+  const pageCount = Math.max(1, Math.ceil(filteredResults().length / RESULT_PAGE_SIZE));
+  const nextPage = Math.min(Math.max(0, state.resultPage + delta), pageCount - 1);
+  if (nextPage === state.resultPage) return false;
+  state.resultPage = nextPage;
+  renderResults();
+  scrollResultsToStart();
+  return true;
 }
 
 function renderGrabNotice() {
@@ -598,9 +801,19 @@ function applyUrlState() {
   if (query) els.releaseQuery.value = query;
 }
 
-async function loadAll(force = false) {
-  clearError();
-  setSidebarStatus("Actualisation en cours", "Synchronisation Prowlarr.", "checking");
+function setRefreshBusy(busy) {
+  [els.refreshButton, els.retryButton].forEach((node) => {
+    if (!node) return;
+    node.disabled = busy;
+    node.setAttribute("aria-busy", String(busy));
+  });
+}
+
+async function performLoadAll(force = false, background = false) {
+  if (!background) {
+    clearError();
+    setSidebarStatus("Actualisation en cours", "Synchronisation Prowlarr.", "checking");
+  }
   const refreshQuery = force ? "?force=true" : "";
   const requests = {
     overview: api(route(`/api/overview${refreshQuery}`), { cache: "no-store" }),
@@ -645,6 +858,40 @@ async function loadAll(force = false) {
   }
 }
 
+function loadAll(force = false, options = {}) {
+  const activeRequests = [state.loadPromise, state.searchPromise].filter(Boolean);
+  if (activeRequests.length) {
+    if (!force) return state.loadPromise || state.searchPromise;
+    if (!state.queuedRefreshPromise) {
+      const activeLoad = state.loadPromise;
+      const activeSearch = state.searchPromise;
+      const queuedRequest = Promise.allSettled(activeRequests).then(() => {
+        if (state.loadPromise === activeLoad) state.loadPromise = null;
+        if (state.searchPromise === activeSearch) state.searchPromise = null;
+        if (state.queuedRefreshPromise === queuedRequest) state.queuedRefreshPromise = null;
+        return loadAll(true, options);
+      });
+      state.queuedRefreshPromise = queuedRequest;
+    }
+    return state.queuedRefreshPromise;
+  }
+  const background = Boolean(options.background);
+  if (!background) setRefreshBusy(true);
+  const request = performLoadAll(force, background);
+  state.loadPromise = request;
+  request.then(
+    () => {
+      if (state.loadPromise === request) state.loadPromise = null;
+      if (!background) setRefreshBusy(false);
+    },
+    () => {
+      if (state.loadPromise === request) state.loadPromise = null;
+      if (!background) setRefreshBusy(false);
+    },
+  );
+  return request;
+}
+
 function confirmAction(title, message) {
   return new Promise((resolve) => {
     els.confirmTitle.textContent = title;
@@ -669,11 +916,11 @@ function confirmAction(title, message) {
 async function testIndexer(id) {
   const key = `test:${id}`;
   if (state.busy.has(key)) return;
-  setBusy(key, true);
+  setBusy(key, true, "Test en cours...");
   try {
     await api(route("/api/indexers/test"), { method: "POST", body: JSON.stringify({ id: Number(id) }) });
     showToast("Test d'indexer demande.");
-    await loadAll();
+    await loadAll(true);
   } catch (error) {
     showError(error);
   } finally {
@@ -690,11 +937,11 @@ async function toggleIndexer(buttonNode) {
   }
   const key = `toggle:${id}`;
   if (state.busy.has(key)) return;
-  setBusy(key, true);
+  setBusy(key, true, enabled ? "Desactivation..." : "Activation...");
   try {
     await api(route("/api/indexers/enabled"), { method: "POST", body: JSON.stringify({ id, enabled: !enabled }) });
     showToast(enabled ? "Indexer desactive." : "Indexer active.");
-    await loadAll();
+    await loadAll(true);
   } catch (error) {
     showError(error);
   } finally {
@@ -702,36 +949,79 @@ async function toggleIndexer(buttonNode) {
   }
 }
 
+function searchFingerprint(parameters) {
+  return JSON.stringify([
+    parameters.query.trim(),
+    [...parameters.categories].sort((a, b) => a - b),
+    [...parameters.indexerIds].sort((a, b) => a - b),
+  ]);
+}
+
+function collectSearchParameters() {
+  const validIndexerIds = new Set(state.indexers.map((item) => String(item.id)));
+  return {
+    query: els.releaseQuery.value,
+    categories: selectedCategoryIds(),
+    indexerIds: [...state.releaseIndexerSelection]
+      .filter((id) => validIndexerIds.has(String(id)))
+      .map(Number)
+      .filter(Number.isFinite),
+  };
+}
+
 async function runSearch(event) {
   event.preventDefault();
+  state.searchInFlight = true;
   if (state.searchAbort) state.searchAbort.abort();
-  state.searchAbort = new AbortController();
-  const categories = selectedCategoryIds();
-  const indexerIds = [...els.releaseIndexers.selectedOptions].map((option) => Number(option.value)).filter(Number.isFinite);
-  els.searchButton.disabled = true;
-  els.searchButton.textContent = "Recherche...";
+  const requestId = ++state.searchRequestId;
+  const controller = new AbortController();
+  state.searchAbort = controller;
+  let settleSearch;
+  const searchPromise = new Promise((resolve) => {
+    settleSearch = resolve;
+  });
+  state.searchPromise = searchPromise;
+  setBusy("search", true, "Recherche...");
   try {
+    if (state.loadPromise) await state.loadPromise.catch(() => null);
+    if (requestId !== state.searchRequestId) return;
+    const parameters = collectSearchParameters();
+    const requestFingerprint = searchFingerprint(parameters);
     const payload = await api(route("/api/search"), {
       method: "POST",
-      body: JSON.stringify({ query: els.releaseQuery.value, categories, indexerIds }),
-      signal: state.searchAbort.signal,
+      body: JSON.stringify(parameters),
+      signal: controller.signal,
     });
+    if (requestId !== state.searchRequestId || searchFingerprint(collectSearchParameters()) !== requestFingerprint) return;
     state.results = payload.results || [];
     state.partialFailures = payload.partialFailures || [];
+    state.resultPage = 0;
     renderResults();
   } catch (error) {
-    if (error.name !== "AbortError") showError(error);
+    if (requestId === state.searchRequestId && error.name !== "AbortError") showError(error);
   } finally {
-    els.searchButton.disabled = false;
-    els.searchButton.textContent = "Rechercher";
-    updateUrl();
+    if (requestId === state.searchRequestId) {
+      state.searchInFlight = false;
+      state.searchAbort = null;
+      setBusy("search", false);
+      updateUrl();
+    }
+    settleSearch();
+    if (state.searchPromise === searchPromise) state.searchPromise = null;
   }
+}
+
+function syncReleaseIndexerSelection() {
+  [...els.releaseIndexers.options].forEach((option) => {
+    if (option.selected) state.releaseIndexerSelection.add(option.value);
+    else state.releaseIndexerSelection.delete(option.value);
+  });
 }
 
 async function grabRelease(buttonNode) {
   const key = buttonNode.dataset.busyKey;
   if (state.busy.has(key)) return;
-  setBusy(key, true);
+  setBusy(key, true, "Envoi en cours...");
   try {
     await api(route("/api/grab"), {
       method: "POST",
@@ -775,8 +1065,58 @@ function handleTabKeydown(event) {
 function bindSectionRetries() {
   document.querySelectorAll("[data-section-retry]").forEach((node) => {
     node.addEventListener("click", async () => {
-      await loadAll();
+      await loadAll(true);
     });
+  });
+}
+
+function debounce(callback, delay) {
+  let timer = null;
+  return (...args) => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => callback(...args), delay);
+  };
+}
+
+const scheduleIndexerRender = debounce(renderIndexers, 70);
+const scheduleReleaseIndexerRender = debounce(renderReleaseIndexers, 90);
+const scheduleResultRender = debounce(() => {
+  state.resultPage = 0;
+  renderResults();
+}, 90);
+
+function isPanelVisible() {
+  return document.visibilityState !== "hidden" && document.hidden !== true;
+}
+
+function stopPolling() {
+  if (state.pollTimer === null) return;
+  window.clearInterval(state.pollTimer);
+  state.pollTimer = null;
+}
+
+function startPolling() {
+  if (state.pollTimer !== null || !isPanelVisible()) return;
+  state.pollTimer = window.setInterval(() => {
+    if (!isPanelVisible() || state.searchInFlight || state.loadPromise) return;
+    if (document.activeElement?.matches("input, select, textarea, [contenteditable='true']")) return;
+    loadAll(false, { background: true }).catch(showError);
+  }, POLL_INTERVAL_MS);
+}
+
+function handleVisibilityChange() {
+  if (!isPanelVisible()) {
+    stopPolling();
+    return;
+  }
+  startPolling();
+  if (!state.loadPromise) loadAll(false, { background: true }).catch(showError);
+}
+
+function clearReleaseIndexerSelection() {
+  state.releaseIndexerSelection.clear();
+  [...els.releaseIndexers.options].forEach((option) => {
+    option.selected = false;
   });
 }
 
@@ -799,16 +1139,21 @@ function bindEvents() {
   els.testAllButton.addEventListener("click", async () => {
     const ok = await confirmAction("Tester tous les indexers", "Cette action interroge tous les indexers configures.");
     if (!ok) return;
+    if (state.busy.has("test-all")) return;
+    setBusy("test-all", true, "Tests en cours...");
     try {
       await api(route("/api/indexers/test-all"), { method: "POST", body: "{}" });
       showToast("Test global demande.");
-      await loadAll();
+      await loadAll(true);
     } catch (error) {
       showError(error);
+    } finally {
+      setBusy("test-all", false);
     }
   });
   els.searchForm.addEventListener("submit", runSearch);
-  [els.indexerSearch, els.indexerState, els.indexerProtocol, els.indexerTag, els.indexerSort].forEach((node) => node.addEventListener("input", renderIndexers));
+  els.indexerSearch.addEventListener("input", scheduleIndexerRender);
+  [els.indexerState, els.indexerProtocol, els.indexerTag, els.indexerSort].forEach((node) => node.addEventListener("input", renderIndexers));
   els.resetIndexers.addEventListener("click", () => {
     els.indexerSearch.value = "";
     els.indexerState.value = "all";
@@ -817,22 +1162,28 @@ function bindEvents() {
     els.indexerSort.value = "name";
     renderIndexers();
   });
-  [els.resultSearch, els.resultIndexer, els.resultProtocol, els.resultCategory, els.resultMaxSize, els.resultSort].forEach((node) => node.addEventListener("input", renderResults));
-  els.releaseIndexerSearch.addEventListener("input", renderReleaseIndexers);
+  els.resultSearch.addEventListener("input", scheduleResultRender);
+  els.resultCategory.addEventListener("input", scheduleResultRender);
+  els.resultMaxSize.addEventListener("input", scheduleResultRender);
+  [els.resultIndexer, els.resultProtocol, els.resultSort].forEach((node) => node.addEventListener("input", scheduleResultRender));
+  els.resultPrevious?.addEventListener("click", () => showResultPage(-1));
+  els.resultNext?.addEventListener("click", () => showResultPage(1));
+  els.releaseIndexerSearch.addEventListener("input", scheduleReleaseIndexerRender);
+  els.releaseIndexers.addEventListener("change", syncReleaseIndexerSelection);
   els.selectAllIndexers.addEventListener("click", () => {
     [...els.releaseIndexers.options].forEach((option) => {
       option.selected = true;
+      state.releaseIndexerSelection.add(option.value);
     });
   });
   els.clearIndexers.addEventListener("click", () => {
-    [...els.releaseIndexers.options].forEach((option) => {
-      option.selected = false;
-    });
+    clearReleaseIndexerSelection();
   });
   window.addEventListener?.("popstate", () => {
     applyUrlState();
     setView(state.activeView, { replace: false });
   });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
   bindSectionRetries();
 }
 
@@ -845,6 +1196,7 @@ async function init() {
   setView(state.activeView, { replace: false });
   await refreshSession();
   await loadAll();
+  startPolling();
   const confirmActionName = currentUrl().searchParams.get("confirm");
   if (confirmActionName === "test-all") {
     state.activeView = "indexers";

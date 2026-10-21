@@ -395,3 +395,14 @@ tr:hover { background: var(--row-hover); }
   border-color: var(--warning-border);
   color: var(--warning-text);
 }
+
+.torrent-table-more {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+.torrent-table-more [hidden] {
+  display: none;
+}

@@ -12,6 +12,8 @@ const formsCss = read("common/css/components/forms.css");
 const tablesCss = read("common/css/components/tables.css");
 const tokensCss = read("common/css/tokens.css");
 const utilitiesCss = read("common/css/utilities.css");
+const baseCss = read("common/css/base.css");
+const dialogsCss = read("common/css/components/dialogs.css");
 const prowlarrAppCss = read("prowlarr-panel/prowlarr_panel/static/app.css");
 const prowlarrResponsiveCss = read("prowlarr-panel/prowlarr_panel/static/css/responsive.css");
 const torrentTorrentsCss = read("torrent-panel/torrent_panel/static/css/torrents.css");
@@ -26,6 +28,12 @@ assert.match(tablesCss, /@media \(max-width: 767px\)[\s\S]*\.data-table td::befo
 assert.match(utilitiesCss, /\.split\s*\{[\s\S]*grid-template-columns: 7fr 5fr/);
 assert.match(utilitiesCss, /\.card-grid\s*\{[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/);
 assert.equal(/--space-(6|10|20)([^0-9]|$)/.test(tokensCss), false);
+assert.match(tokensCss, /--motion-transition: 160ms/);
+assert.match(tokensCss, /--motion-feedback: 120ms/);
+assert.match(baseCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transition-duration: 0\.01ms !important/);
+assert.match(dialogsCss, /dialog[\s\S]*transition: opacity var\(--motion-transition\)[\s\S]*transform var\(--motion-transition\)/);
+assert.match(dialogsCss, /@starting-style[\s\S]*dialog\[open\][\s\S]*opacity: 0/);
+assert.match(dialogsCss, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transition: none/);
 
 assert.equal(/\.filters,\s*\.search-form\s*\{[\s\S]*border-radius: var\(--radius-panel\)/.test(prowlarrAppCss), false);
 assert.equal(/\.data-table, \.data-table thead/.test(prowlarrResponsiveCss), false);

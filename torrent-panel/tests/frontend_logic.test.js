@@ -56,6 +56,7 @@ const context = {
   },
   clearInterval() {},
   window: {
+    location: { href: "http://localhost/torrent-panel/" },
     setTimeout(fn) {
       return fn ? 1 : 0;
     },
@@ -121,6 +122,12 @@ assert.match(source, /organize-library-preview\?hash=/);
 assert.match(source, /hashes/);
 assert.match(source, /organizeSelectAll/);
 assert.match(overviewHtml, /id="organizeFilter"/);
+assert.match(overviewHtml, /<option value="game">Jeux vidéo<\/option>/);
+assert.match(overviewHtml, /<option value="book">Livres<\/option>/);
+assert.match(overviewHtml, /Ranger la bibliothèque/);
+assert.match(source, /ORGANIZE_KIND_LABELS/);
+assert.match(source, /game: "Jeu vidéo"/);
+assert.match(source, /book: "Livre"/);
 assert.match(source, /function applyOrganizeFilter/);
 assert.equal(source.includes("renderStorageCard"), false);
 assert.equal(source.includes("storageVisualization"), false);
@@ -153,6 +160,27 @@ assert.match(source, /Services indisponibles/);
 assert.match(source, /Aucune activité récente/);
 assert.match(source, /metric-card\$\{card\.available \? "" : " unavailable"\}/);
 assert.equal(source.includes('empty.className = "activity-empty"'), false);
+assert.match(source, /const SEARCH_DEBOUNCE_MS = 250/);
+assert.match(source, /const MAX_RENDERED_TORRENTS = 300/);
+assert.ok(source.includes("document.hidden)) return null"));
+assert.match(source, /state\.refreshPromise = request\.finally/);
+assert.match(source, /state\.forceRefreshQueued = true/);
+assert.match(source, /function endGlobalAction/);
+assert.equal((source.match(/state\.globalActionCount -= 1/g) || []).length, 0);
+assert.match(source, /function updateTorrentRowValues/);
+assert.match(consoleSource, /state\.loadPromise = request\.finally/);
+assert.match(consoleSource, /payloadAlreadyRendered/);
+assert.match(source, /visible\.slice\(state\.renderOffset, state\.renderOffset \+ state\.renderLimit\)/);
+assert.ok(source.includes("state.renderOffset += MAX_RENDERED_TORRENTS"));
+assert.ok(source.includes("showPreviousRows"));
+assert.equal(source.includes("state.renderLimit += MAX_RENDERED_TORRENTS"), false);
+assert.match(source, /function resetTorrentWindow\(\)/);
+assert.match(source, /Math\.floor\(\(visible\.length - 1\) \/ state\.renderLimit\) \* state\.renderLimit/);
+assert.match(source, /const rendered = torrentWindow\(visible\)/);
+assert.match(source, /renderSelection\(rendered\)/);
+assert.match(consoleSource, /async function postJson\(path, payload, successMessage, trigger = null\)/);
+assert.match(consoleSource, /trigger\?\.tagName === "BUTTON"/);
+assert.match(consoleSource, /async \(event\) => \{\s*await postJson\([^\n]+event\.currentTarget\)/);
 
 const overviewCss = fs.readFileSync("torrent-panel/torrent_panel/static/css/home.css", "utf8");
 assert.equal(overviewCss.includes("min-height: 350px"), false);
@@ -162,7 +190,7 @@ assert.match(overviewCss, /\.metric-card\.unavailable/);
 vm.runInNewContext(
   `${commonApiSource}
 ${source}
-globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, formatFreshness, showUndoToast, state, els };`,
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, formatFreshness, showUndoToast, torrentRowSignature, updateTorrentRowValues, resetTorrentWindow, torrentWindow, applyUrlState, state, els };`,
   context,
 );
 
@@ -180,6 +208,113 @@ assert.equal(api.formatFreshness(null), "");
 assert.equal(api.formatFreshness(new Date(Date.now() - 15000)), "il y a 15 s");
 assert.equal(api.formatFreshness(new Date(Date.now() - 5000)), "à l'instant");
 assert.equal(typeof api.showUndoToast, "function");
+
+const rowTemplate = { hash: "a", name: "Ubuntu ISO", state: "downloading", progress: 0.3, downloadSpeed: 200, uploadSpeed: 10 };
+const initialRowSignature = api.torrentRowSignature(rowTemplate);
+assert.equal(
+  api.torrentRowSignature({ ...rowTemplate, downloadSpeed: 900, uploadSpeed: 60, ratio: 2.4, eta: 90, progress: 0.6 }),
+  initialRowSignature,
+  "speed and progress-only changes must patch existing rows instead of rebuilding them",
+);
+assert.notEqual(api.torrentRowSignature({ ...rowTemplate, state: "pausedDL" }), initialRowSignature);
+
+const progressBar = { style: {}, textContent: "" };
+const progressTrack = {
+  attrs: {},
+  setAttribute(name, value) { this.attrs[name] = value; },
+  querySelector() { return progressBar; },
+};
+const rowCells = new Map([
+  ["download-speed", { textContent: "" }],
+  ["upload-speed", { textContent: "" }],
+  ["uploaded", { textContent: "" }],
+  ["ratio", { textContent: "" }],
+  ["size", { textContent: "" }],
+  ["eta", { textContent: "" }],
+  ["added", { textContent: "" }],
+  ["progress", { querySelector() { return progressTrack; } }],
+]);
+const fakeRow = {
+  querySelector(selector) {
+    const match = selector.match(/data-cell="([^"]+)"/);
+    if (match) return rowCells.get(match[1]);
+    if (selector === 'input[type="checkbox"]') return null;
+    return null;
+  },
+};
+api.updateTorrentRowValues(fakeRow, { ...rowTemplate, downloadSpeed: 1536, uploadSpeed: 2048, progress: 0.5 });
+assert.equal(rowCells.get("download-speed").textContent, "1.5 Ko/s");
+assert.equal(rowCells.get("upload-speed").textContent, "2.0 Ko/s");
+assert.equal(progressTrack.attrs["aria-valuenow"], "50.0");
+assert.equal(progressBar.style.width, "50%");
+
+const stressTorrents = Array.from({ length: 650 }, (_, index) => ({
+  hash: `stress-${index}`,
+  name: `Stress ${index}`,
+  state: "downloading",
+  progress: 0.5,
+  tags: "test",
+  category: "Archives",
+}));
+api.state.prefs.search = "";
+api.state.prefs.status = "all";
+api.state.prefs.category = "all";
+api.state.prefs.tag = "all";
+api.state.prefs.tracker = "all";
+api.state.torrents = stressTorrents;
+api.state.renderOffset = 300;
+assert.equal(api.torrentWindow(api.filteredTorrents()).length, 300, "offset 300 renders the second 300-row window");
+api.state.torrents = stressTorrents.slice(0, 100);
+assert.equal(api.torrentWindow(api.filteredTorrents()).length, 100, "650 to 100 renders all 100 rows");
+assert.equal(api.state.renderOffset, 0, "650 to 100 clamps offset 300 back to zero");
+
+context.window.location.href = "http://localhost/torrent-panel/?view=torrents&status=downloading";
+api.state.renderOffset = 300;
+api.applyUrlState();
+assert.equal(api.state.renderOffset, 0, "popstate state application resets the torrent window");
+assert.equal(api.state.prefs.status, "downloading");
+
+api.state.torrents = stressTorrents;
+api.state.renderOffset = 300;
+const renderedStressWindow = api.torrentWindow(api.filteredTorrents());
+api.state.selected = new Set(renderedStressWindow.slice(0, 150).map((torrent) => torrent.hash));
+api.state.selected.add("stress-640");
+api.renderSelection(renderedStressWindow);
+assert.equal(api.els.visibleSelectionSummary.textContent, "150 sur 300 sélectionnés");
+assert.equal(api.els.selectVisible.indeterminate, true);
+api.state.selected = new Set([...renderedStressWindow.map((torrent) => torrent.hash), "stress-640"]);
+api.renderSelection(renderedStressWindow);
+assert.equal(api.els.selectVisible.checked, true);
+assert.equal(api.els.selectVisible.indeterminate, false);
+assert.equal(api.state.selected.has("stress-640"), true, "selection outside the rendered window stays explicit");
+
+const postJsonStart = consoleSource.indexOf("async function postJson");
+const postJsonEnd = consoleSource.indexOf("async function renderActivity", postJsonStart);
+assert.ok(postJsonStart >= 0 && postJsonEnd > postJsonStart, "postJson source must be extractable for runtime coverage");
+const bodyChild = { tagName: "MAIN" };
+const body = {
+  tagName: "BODY",
+  children: [bodyChild],
+  _textContent: "Contenu de page",
+  get textContent() { return this._textContent; },
+  set textContent(value) { this.children = []; this._textContent = String(value); },
+};
+const postJsonContext = {
+  console,
+  document: { activeElement: body },
+  state: { section: "activity", payloadSignatures: {} },
+  api: async () => ({ ok: true }),
+  load: async () => {},
+  showToast() {},
+  setPageStatus() {},
+  describeError: (error) => error.message || "Erreur",
+};
+vm.runInNewContext(
+  `${consoleSource.slice(postJsonStart, postJsonEnd)}\nglobalThis.__postJson = postJson;`,
+  postJsonContext,
+);
+postJsonContext.__postJson("/notifications/ack", { code: "test" }, "Alerte acquittée.");
+assert.equal(body.children[0], bodyChild, "postJson must not use document.body as an implicit action trigger");
 
 api.state.torrents = [
   { hash: "a", name: "Ubuntu ISO", state: "downloading", downloadSpeed: 200, progress: 0.3, tags: "linux", category: "Images", addedOn: 20 },

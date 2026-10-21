@@ -22,6 +22,7 @@ from ..storage import (
     move_items,
     delete_item,
     clear_scandir_cache,
+    clear_folder_size_cache,
     get_folder_size,
     get_folder_sizes,
     copy_item,
@@ -451,6 +452,7 @@ async def refresh(
 ):
     """Clear cache and refresh directory listing."""
     clear_scandir_cache()
+    clear_folder_size_cache()
     return {"success": True, "message": "Cache vide"}
 
 
@@ -504,7 +506,7 @@ async def organize_preview(
     _=Depends(require_action_guard),
     path: str = Form(""),
 ):
-    """Preview how the directory would be reorganized (series, movies, parasites)."""
+    """Preview how the directory would be reorganized (media, games, books, parasites)."""
     from ..services.media import is_qbittorrent_tree
 
     if is_qbittorrent_tree(path):
@@ -536,7 +538,7 @@ async def organize_apply(
     _=Depends(require_action_guard),
     path: str = Form(""),
 ):
-    """Group seasons into series folders, rename them, and move movies to Films/."""
+    """Group media seasons and route movies, games and books without inner-tree merges."""
     from ..services.media import is_qbittorrent_tree
 
     if is_qbittorrent_tree(path):

@@ -324,7 +324,7 @@
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   cursor: pointer;
-  transition: background 160ms var(--ease-standard), border-color 160ms var(--ease-standard), transform 160ms var(--ease-standard);
+  transition: background var(--motion-transition) var(--ease-standard), border-color var(--motion-transition) var(--ease-standard), transform var(--motion-transition) var(--ease-standard);
 }
 
 .tab:hover { color: var(--text); background: var(--surface-soft); }

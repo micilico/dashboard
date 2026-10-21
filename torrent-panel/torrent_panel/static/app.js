@@ -1,5 +1,13 @@
 const panelConfig = window.__TORRENT_PANEL_CONFIG__ || {};
 const STORAGE_KEY = "torrent-panel-preferences";
+const SEARCH_DEBOUNCE_MS = 250;
+const MAX_RENDERED_TORRENTS = 300;
+const ORGANIZE_KIND_LABELS = Object.freeze({
+  film: "Film",
+  series: "Série",
+  game: "Jeu vidéo",
+  book: "Livre",
+});
 const DEFAULT_PREFS = {
   search: "",
   status: "all",
@@ -70,7 +78,14 @@ const state = {
   lastFocus: null,
   refreshTimer: null,
   refreshPromise: null,
+  refreshRevision: null,
+  forceRefreshQueued: false,
   pollCycle: 0,
+  actionRevision: 0,
+  searchTimer: null,
+  renderLimit: MAX_RENDERED_TORRENTS,
+  renderOffset: 0,
+  renderedOffset: null,
   undoToastTimer: null,
   lastSignature: "",
   lastUpdatedAt: null,
@@ -79,6 +94,8 @@ const state = {
   sourceHint: "",
   autoTr4kerAttempted: false,
   trackerIndex: { index: {}, domains: {} },
+  rowNodes: new Map(),
+  rowSignatures: new Map(),
   prefs: loadPrefs(),
 };
 
@@ -108,6 +125,8 @@ const els = {
   statusText: document.querySelector("#statusText"),
   lastCheck: document.querySelector("#lastCheck"),
   rows: document.querySelector("#torrentRows"),
+  loadMoreRows: document.querySelector("#loadMoreRows"),
+  showPreviousRows: document.querySelector("#showPreviousRows"),
   summary: document.querySelector("#summary"),
   summaryGrid: document.querySelector("#summaryGrid"),
   alert: document.querySelector("#alert"),
@@ -461,6 +480,7 @@ function updateUrl(replace = true) {
 }
 
 function applyUrlState() {
+  resetTorrentWindow();
   const url = currentUrl();
   state.activeView = url.searchParams.get("view") === "torrents" ? "torrents" : "home";
   const search = url.searchParams.get("search");
@@ -540,10 +560,14 @@ function renderSummary() {
     [null, "Montant", formatSpeed(data.upSpeed)],
     [null, "Restant", formatBytes(data.remaining)],
   ];
-  els.summaryGrid.replaceChildren(
-    ...cards.map(([filterKey, label, value]) => {
+  const existing = Array.from(els.summaryGrid.children || []);
+  const reusable = existing.length === cards.length && cards.every(([filterKey], index) =>
+    existing[index]?.dataset?.summaryKey === (filterKey || "metric"));
+  if (!reusable) {
+    els.summaryGrid.replaceChildren(...cards.map(([filterKey, label, value]) => {
       const item = document.createElement(filterKey ? "button" : "div");
       item.className = `stat${filterKey ? " stat-button" : ""}`;
+      item.dataset.summaryKey = filterKey || "metric";
       if (filterKey) {
         item.type = "button";
         item.dataset.filter = filterKey;
@@ -555,8 +579,17 @@ function renderSummary() {
       span.textContent = label;
       item.append(strong, span);
       return item;
-    }),
-  );
+    }));
+    return;
+  }
+  cards.forEach(([filterKey, label, value], index) => {
+    const item = existing[index];
+    const strong = item.children?.[0];
+    const span = item.children?.[1];
+    if (strong) strong.textContent = value;
+    if (span) span.textContent = label;
+    if (filterKey) item.setAttribute("aria-pressed", String(matchesQuickFilter(state.prefs.status, filterKey)));
+  });
 }
 
 function uniqueValues(getter) {
@@ -565,20 +598,25 @@ function uniqueValues(getter) {
 
 function fillSelect(select, entries, value) {
   const current = value || select.value;
-  select.replaceChildren(
-    ...entries.map(([optionValue, label]) => {
+  const signature = JSON.stringify(entries);
+  if (select.dataset?.optionsSignature !== signature) {
+    select.replaceChildren(...entries.map(([optionValue, label]) => {
       const option = document.createElement("option");
       option.value = optionValue;
       option.textContent = label;
       return option;
-    }),
-  );
+    }));
+    if (select.dataset) select.dataset.optionsSignature = signature;
+  }
   select.value = entries.some(([optionValue]) => optionValue === current) ? current : entries[0]?.[0];
 }
 
 function renderQuickFilters() {
-  els.quickFilters.replaceChildren(
-    ...QUICK_FILTERS.map((item) => {
+  const existing = Array.from(els.quickFilters.children || []);
+  const reusable = existing.length === QUICK_FILTERS.length && QUICK_FILTERS.every((item, index) =>
+    existing[index]?.dataset?.quickFilter === item.key);
+  if (!reusable) {
+    els.quickFilters.replaceChildren(...QUICK_FILTERS.map((item) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `button ${matchesQuickFilter(state.prefs.status, item.key) ? "primary" : "secondary"}`;
@@ -586,8 +624,15 @@ function renderQuickFilters() {
       button.textContent = item.label;
       button.setAttribute("aria-pressed", String(matchesQuickFilter(state.prefs.status, item.key)));
       return button;
-    }),
-  );
+    }));
+    return;
+  }
+  QUICK_FILTERS.forEach((item, index) => {
+    const button = existing[index];
+    const active = matchesQuickFilter(state.prefs.status, item.key);
+    button.className = `button ${active ? "primary" : "secondary"}`;
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function activeFilterLabels() {
@@ -610,8 +655,9 @@ function renderFilterChips() {
   const container = document.querySelector("#activeFilters");
   if (!container) return;
   const labels = activeFilterLabels();
-  container.replaceChildren(
-    ...labels.map((label) => {
+  const signature = JSON.stringify(labels);
+  if (container.dataset?.signature === signature) return;
+  container.replaceChildren(...labels.map((label) => {
       const chip = document.createElement("span");
       chip.className = "filter-chip";
       const text = document.createElement("span");
@@ -623,8 +669,8 @@ function renderFilterChips() {
       close.addEventListener("click", resetFilters);
       chip.append(text, close);
       return chip;
-    }),
-  );
+    }));
+  if (container.dataset) container.dataset.signature = signature;
 }
 
 function renderFilterNotice() {
@@ -638,7 +684,13 @@ function renderFollowNotice() {
   if (!els.followNotice) return;
   if (state.sourceHint !== "prowlarr" || !state.pendingReleaseTitle) {
     els.followNotice.hidden = true;
-    els.followNotice.replaceChildren();
+    if (els.followNotice.children?.length) els.followNotice.replaceChildren();
+    if (els.followNotice.dataset) els.followNotice.dataset.signature = "";
+    return;
+  }
+  const signature = `${state.prowlarrPanelPrefix}|${state.pendingReleaseTitle}`;
+  if (els.followNotice.dataset?.signature === signature) {
+    els.followNotice.hidden = false;
     return;
   }
   const backLink = document.createElement("a");
@@ -652,10 +704,13 @@ function renderFollowNotice() {
     }),
     backLink,
   );
+  if (els.followNotice.dataset) els.followNotice.dataset.signature = signature;
 }
 
 function renderControls() {
-  els.searchInput.value = state.prefs.search;
+  if (document.activeElement !== els.searchInput && els.searchInput.value !== state.prefs.search) {
+    els.searchInput.value = state.prefs.search;
+  }
   els.autoRefreshToggle.checked = state.prefs.autoRefresh;
   els.refreshInterval.value = String(state.prefs.refreshIntervalMs);
   if (document.activeElement !== els.categoryInput) els.categoryInput.value = state.prefs.lastCategory || "";
@@ -666,15 +721,7 @@ function renderControls() {
   fillSelect(els.tagFilter, [["all", "Tous"], ...uniqueValues((torrent) => normalizeTags(torrent.tags)).map((value) => [value, value])], state.prefs.tag);
   const domainEntries = Object.entries(state.trackerIndex.domains).sort(([a], [b]) => a.localeCompare(b, "fr"));
   fillSelect(els.trackerFilter, [["all", "Tous les trackers"], ["__none__", "Sans tracker"], ...domainEntries.map(([domain, count]) => [domain, `${domain} — ${count}`])], state.prefs.tracker);
-  els.sortSelect.replaceChildren(
-    ...Object.entries(SORT_LABELS).map(([value, label]) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      return option;
-    }),
-  );
-  els.sortSelect.value = state.prefs.sort;
+  fillSelect(els.sortSelect, Object.entries(SORT_LABELS), state.prefs.sort);
   if (els.sortDirectionSelect) els.sortDirectionSelect.value = state.prefs.direction;
   if (els.densityToggle) {
     const compact = state.prefs.density === "compact";
@@ -713,6 +760,22 @@ function filteredTorrents() {
   return sortTorrents(filtered);
 }
 
+function resetTorrentWindow() {
+  state.renderOffset = 0;
+}
+
+function torrentWindow(visible) {
+  const maxOffset = visible.length
+    ? Math.floor((visible.length - 1) / state.renderLimit) * state.renderLimit
+    : 0;
+  state.renderOffset = Math.min(state.renderOffset, maxOffset);
+  return visible.slice(state.renderOffset, state.renderOffset + state.renderLimit);
+}
+
+function renderedTorrents() {
+  return torrentWindow(filteredTorrents());
+}
+
 function sortValue(torrent, key) {
   if (key === "state") return GROUP_ORDER[stateMeta(torrent).group] ?? 99;
   if (key === "name") return String(torrent.name || "").toLocaleLowerCase("fr");
@@ -736,6 +799,7 @@ function sortTorrents(torrents) {
 }
 
 function setStatusFromQuickFilter(filterKey) {
+  resetTorrentWindow();
   state.prefs.status = filterKey;
   savePrefs();
   updateUrl();
@@ -743,6 +807,7 @@ function setStatusFromQuickFilter(filterKey) {
 }
 
 function setSort(key) {
+  resetTorrentWindow();
   if (state.prefs.sort === key) {
     state.prefs.direction = state.prefs.direction === "asc" ? "desc" : "asc";
   } else {
@@ -769,6 +834,7 @@ function quickActionButton(item) {
     trigger.disabled = true;
     const previous = trigger.textContent;
     trigger.textContent = "Lancement…";
+    state.actionRevision += 1;
     try {
       const payload = await api(`api/media-actions/${item.actionId}`, { method: "POST" });
       showToast(payload.message || "Action lancée.");
@@ -841,10 +907,12 @@ function renderRow(torrent) {
 
   const selectTd = document.createElement("td");
   selectTd.dataset.label = "Sélection";
+  selectTd.dataset.cell = "select";
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = state.selected.has(hash);
   checkbox.disabled = Boolean(busyText);
+  checkbox.dataset.focusKey = "select";
   checkbox.setAttribute("aria-label", `Sélectionner ${torrent.name}`);
   checkbox.addEventListener("change", () => {
     if (checkbox.checked) state.selected.add(hash);
@@ -855,10 +923,12 @@ function renderRow(torrent) {
 
   const nameTd = document.createElement("td");
   nameTd.dataset.label = "Nom";
+  nameTd.dataset.cell = "name";
   const nameButton = document.createElement("button");
   nameButton.type = "button";
   nameButton.className = "name-button";
   nameButton.title = torrent.name;
+  nameButton.dataset.focusKey = "name";
   const searchQuery = String(state.prefs.search || "").trim().toLowerCase();
   if (searchQuery && String(torrent.name || "").toLowerCase().includes(searchQuery)) {
     const idx = String(torrent.name).toLowerCase().indexOf(searchQuery);
@@ -875,23 +945,26 @@ function renderRow(torrent) {
 
   const stateTd = document.createElement("td");
   stateTd.dataset.label = "État";
+  stateTd.dataset.cell = "state";
   stateTd.append(renderBadge(meta));
 
   const progressTd = document.createElement("td");
   progressTd.dataset.label = "Progression";
   progressTd.className = "progress-cell";
+  progressTd.dataset.cell = "progress";
   progressTd.append(renderProgress(torrent));
 
-  const downTd = textCell("Téléchargement", formatSpeed(torrent.downloadSpeed), "mono");
-  const upTd = textCell("Envoi", formatSpeed(torrent.uploadSpeed), "mono");
-  const uploadedTd = textCell("Uploadé", formatBytes(torrent.uploaded), "mono");
-  const ratioTd = textCell("Ratio", formatRatio(torrent.ratio), "mono");
-  const sizeTd = textCell("Taille", formatBytes(torrent.size), "mono");
-  const etaTd = textCell("ETA", formatEta(torrent.eta), "mono");
-  const addedTd = textCell("Ajout", formatDate(torrent.addedOn), "mono");
+  const downTd = textCell("Téléchargement", formatSpeed(torrent.downloadSpeed), "mono", "download-speed");
+  const upTd = textCell("Envoi", formatSpeed(torrent.uploadSpeed), "mono", "upload-speed");
+  const uploadedTd = textCell("Uploadé", formatBytes(torrent.uploaded), "mono", "uploaded");
+  const ratioTd = textCell("Ratio", formatRatio(torrent.ratio), "mono", "ratio");
+  const sizeTd = textCell("Taille", formatBytes(torrent.size), "mono", "size");
+  const etaTd = textCell("ETA", formatEta(torrent.eta), "mono", "eta");
+  const addedTd = textCell("Ajout", formatDate(torrent.addedOn), "mono", "added");
 
   const actionTd = document.createElement("td");
   actionTd.dataset.label = "Actions";
+  actionTd.dataset.cell = "actions";
   const actions = document.createElement("div");
   actions.className = "action-row";
   const isPaused = meta.group === "paused";
@@ -906,6 +979,11 @@ function renderRow(torrent) {
     ? button(isForcedShare ? "Partage normal" : "Partage forcé", isForcedShare ? "primary" : "secondary", () => runTorrentAction([hash], "force-start", { enabled: !isForcedShare }))
     : null;
   const remove = button("Supprimer", "danger", (event) => openDeleteDialog([torrent], event.currentTarget));
+  pauseOrResume.dataset.focusKey = "toggle";
+  detail.dataset.focusKey = "details";
+  if (organize) organize.dataset.focusKey = "organize";
+  if (forceShare) forceShare.dataset.focusKey = "force-share";
+  remove.dataset.focusKey = "delete";
   for (const control of [pauseOrResume, detail, organize, forceShare, remove].filter(Boolean)) control.disabled = Boolean(busyText);
   actions.append(...[pauseOrResume, detail, organize, forceShare, remove].filter(Boolean));
   const inline = document.createElement("div");
@@ -918,15 +996,134 @@ function renderRow(torrent) {
   return tr;
 }
 
-function textCell(label, value, className = "") {
+function captureTorrentRowFocus() {
+  const active = document.activeElement;
+  if (!active || !els.rows?.contains?.(active)) return null;
+  const row = active.closest?.("tr[data-hash]");
+  if (!row) return null;
+  return { hash: String(row.dataset.hash || ""), focusKey: String(active.dataset?.focusKey || "") };
+}
+
+function restoreTorrentRowFocus(record) {
+  if (!record?.hash) return;
+  const row = [...(els.rows.children || [])].find((item) => String(item.dataset?.hash || "") === record.hash);
+  if (!row) return;
+  const controls = row.querySelectorAll ? [...row.querySelectorAll("[data-focus-key]")] : [];
+  const target = controls.find((item) => item.dataset?.focusKey === record.focusKey)
+    || controls.find((item) => item.dataset?.focusKey === "name")
+    || row;
+  target?.focus?.({ preventScroll: true });
+}
+
+function torrentRowSignature(torrent) {
+  const meta = stateMeta(torrent);
+  return JSON.stringify([
+    String(torrent.hash || ""),
+    String(torrent.name || ""),
+    String(torrent.state || ""),
+    meta.group,
+    isComplete(torrent),
+    state.rowBusy.get(torrent.hash) || "",
+    state.rowErrors.get(torrent.hash) || "",
+    state.prefs.search,
+  ]);
+}
+
+function syncTorrentRowSelection(row, hash) {
+  const checkbox = row.querySelector?.('input[type="checkbox"]');
+  if (!checkbox) return;
+  checkbox.checked = state.selected.has(hash);
+  checkbox.disabled = state.rowBusy.has(hash);
+}
+
+function updateTorrentRowValues(row, torrent) {
+  const findCell = (key) => row.querySelector?.(`[data-cell="${key}"]`);
+  const setText = (key, value) => {
+    const cell = findCell(key);
+    if (cell) cell.textContent = value;
+  };
+  syncTorrentRowSelection(row, String(torrent.hash));
+  setText("download-speed", formatSpeed(torrent.downloadSpeed));
+  setText("upload-speed", formatSpeed(torrent.uploadSpeed));
+  setText("uploaded", formatBytes(torrent.uploaded));
+  setText("ratio", formatRatio(torrent.ratio));
+  setText("size", formatBytes(torrent.size));
+  setText("eta", formatEta(torrent.eta));
+  setText("added", formatDate(torrent.addedOn));
+
+  const progressCell = findCell("progress");
+  const progress = Math.max(0, Math.min(100, (Number(torrent.progress) || 0) * 100));
+  const track = progressCell?.querySelector?.('[role="progressbar"]');
+  const bar = track?.querySelector?.(".progress-bar");
+  const label = progressCell?.querySelector?.(".progress-text");
+  if (track) track.setAttribute("aria-valuenow", progress.toFixed(1));
+  if (bar) bar.style.width = `${progress}%`;
+  if (label) label.textContent = `${progress.toFixed(1)} %`;
+}
+
+function renderTorrentRows(visible) {
+  const focused = captureTorrentRowFocus();
+  const scrollShell = els.rows?.closest?.(".torrent-table-shell");
+  const previousScrollTop = scrollShell?.scrollTop;
+  const previousNodes = [...(els.rows.children || [])];
+  const rendered = torrentWindow(visible);
+  const windowChanged = state.renderedOffset !== state.renderOffset;
+  const nextNodes = [];
+  const nextNodeMap = new Map();
+  const nextSignatureMap = new Map();
+  for (const torrent of rendered) {
+    const hash = String(torrent.hash);
+    const signature = torrentRowSignature(torrent);
+    let row = state.rowNodes.get(hash);
+    if (!row || state.rowSignatures.get(hash) !== signature) {
+      row = renderRow(torrent);
+    } else {
+      updateTorrentRowValues(row, torrent);
+    }
+    nextNodes.push(row);
+    nextNodeMap.set(hash, row);
+    nextSignatureMap.set(hash, signature);
+  }
+  const orderChanged = previousNodes.length !== nextNodes.length
+    || previousNodes.some((node, index) => node !== nextNodes[index]);
+  if (orderChanged) els.rows.replaceChildren(...nextNodes);
+  state.rowNodes = nextNodeMap;
+  state.rowSignatures = nextSignatureMap;
+  const sameRowSet = previousNodes.length === nextNodes.length
+    && previousNodes.every((node) => nextNodeMap.has(String(node.dataset?.hash || "")));
+  if (windowChanged && scrollShell) {
+    scrollShell.scrollTop = 0;
+  } else if (sameRowSet && scrollShell && Number.isFinite(previousScrollTop)) {
+    scrollShell.scrollTop = previousScrollTop;
+  }
+  state.renderedOffset = state.renderOffset;
+  restoreTorrentRowFocus(focused);
+  return rendered;
+}
+
+function renderTorrentRowLimit(visible, rendered) {
+  const hasPrevious = state.renderOffset > 0;
+  const remaining = Math.max(0, visible.length - state.renderOffset - rendered.length);
+  if (els.showPreviousRows) els.showPreviousRows.hidden = !hasPrevious;
+  if (els.loadMoreRows) {
+    els.loadMoreRows.hidden = remaining === 0;
+    if (remaining > 0) {
+      const amount = Math.min(MAX_RENDERED_TORRENTS, remaining);
+      els.loadMoreRows.textContent = "Afficher " + amount + " torrent" + (amount > 1 ? "s" : "") + " suivants";
+    }
+  }
+}
+
+function textCell(label, value, className = "", cellKey = "") {
   const td = document.createElement("td");
   td.dataset.label = label;
   td.className = className;
+  if (cellKey) td.dataset.cell = cellKey;
   td.textContent = value;
   return td;
 }
 
-function renderSelection(visible = filteredTorrents()) {
+function renderSelection(visible = renderedTorrents()) {
   for (const hash of [...state.selected]) {
     if (!state.torrents.some((torrent) => torrent.hash === hash)) state.selected.delete(hash);
   }
@@ -1241,6 +1438,7 @@ function retryWorkflow(entryId, scope, trigger) {
     trigger.disabled = true;
     trigger.textContent = "Relance…";
   }
+  state.actionRevision += 1;
   return api(`api/media-workflows/${entryId}/retry`, {
     method: "POST",
     body: JSON.stringify({ scope }),
@@ -1359,15 +1557,18 @@ function renderBandwidthChart() {
 function render() {
   renderSummary();
   renderControls();
-  renderHome();
+  if (state.activeView === "home") renderHome();
   setView(state.activeView, { push: false });
   const visible = filteredTorrents();
-  els.rows.replaceChildren(...visible.map(renderRow));
+  const rendered = renderTorrentRows(visible);
+  renderTorrentRowLimit(visible, rendered);
   els.empty.textContent = state.torrents.length === 0 ? "Aucun torrent pour le moment." : "Aucun torrent ne correspond aux filtres.";
   els.empty.hidden = visible.length !== 0;
-  els.summary.textContent = `${visible.length} affiché${visible.length > 1 ? "s" : ""} sur ${state.torrents.length}`;
+  els.summary.textContent = visible.length > rendered.length
+    ? `${state.renderOffset + 1}–${state.renderOffset + rendered.length} affichés sur ${visible.length} filtrés (${state.torrents.length} au total)`
+    : `${visible.length} affiché${visible.length > 1 ? "s" : ""} sur ${state.torrents.length}`;
   renderTrackerStats();
-  renderSelection(visible);
+  renderSelection(rendered);
   renderRelinkButton();
   renderSortHeaders();
   updateDetails();
@@ -1455,13 +1656,28 @@ async function loadDashboard() {
 }
 
 async function loadTorrents({ silent = false, force = false } = {}) {
-  if (state.refreshPromise) return state.refreshPromise;
   if (!force && (state.globalActionCount > 0 || document.hidden)) return null;
-  if (!silent) els.refreshStatus.textContent = "Actualisation...";
+  if (state.refreshPromise) {
+    if (force && state.refreshRevision !== state.actionRevision) state.forceRefreshQueued = true;
+    const activeRefresh = state.refreshPromise;
+    return activeRefresh.then((result) => {
+      if (!force || !state.forceRefreshQueued || document.hidden || state.globalActionCount > 0) return result;
+      state.forceRefreshQueued = false;
+      return loadTorrents({ silent: true, force: true });
+    });
+  }
+  if (force) state.forceRefreshQueued = false;
+  if (!silent) {
+    els.refreshStatus.textContent = "Actualisation...";
+    if (!state.lastUpdatedAt) {
+      state.backendStatus = BACKEND_STATES.loading;
+      if (state.activeView === "home") renderHome();
+    }
+  }
 
-  state.refreshPromise = (async () => {
-    state.backendStatus = BACKEND_STATES.loading;
-    renderHome();
+  const revisionAtStart = state.actionRevision;
+  state.refreshRevision = revisionAtStart;
+  const request = (async () => {
     try {
       const cycle = state.pollCycle++;
       const refreshActivity = force || cycle % 3 === 0;
@@ -1475,6 +1691,10 @@ async function loadTorrents({ silent = false, force = false } = {}) {
         refreshTrackers ? api(route("/api/torrents/stats/trackers"), { cache: "no-store" }).catch(() => ({ stats: state.trackerStats })) : Promise.resolve({ stats: state.trackerStats }),
         api(route("/api/torrents/relink-status"), { cache: "no-store" }).catch(() => ({ count: 0 })),
       ]);
+      if (revisionAtStart !== state.actionRevision || state.globalActionCount > 0) {
+        state.forceRefreshQueued = true;
+        return null;
+      }
       state.relinkStatus = { count: Number(relinkStatusPayload?.count) || 0 };
       state.dashboard = {
         alerts: Array.isArray(dashboardPayload.alerts) ? dashboardPayload.alerts : [],
@@ -1523,8 +1743,8 @@ async function loadTorrents({ silent = false, force = false } = {}) {
         els.refreshStatus.textContent = `À jour ${formatFreshness(state.lastUpdatedAt)}`;
       }
     } catch (error) {
-      state.backendStatus = "unavailable";
-      renderHome();
+      state.backendStatus = state.lastUpdatedAt ? BACKEND_STATES.degraded : BACKEND_STATES.unavailable;
+      if (state.activeView === "home") renderHome();
       showError(error);
       const lastCheck = els.lastCheck;
       if (lastCheck && state.lastUpdatedAt) {
@@ -1532,10 +1752,12 @@ async function loadTorrents({ silent = false, force = false } = {}) {
       } else if (!state.lastUpdatedAt) {
         els.refreshStatus.textContent = "Erreur";
       }
-    } finally {
-      state.refreshPromise = null;
     }
   })();
+  state.refreshPromise = request.finally(() => {
+    state.refreshPromise = null;
+    state.refreshRevision = null;
+  });
   return state.refreshPromise;
 }
 
@@ -1561,13 +1783,27 @@ function actionText(action) {
   }[action] || "Action…";
 }
 
+function beginGlobalAction() {
+  state.globalActionCount += 1;
+}
+
+function endGlobalAction() {
+  state.globalActionCount = Math.max(0, state.globalActionCount - 1);
+  if (state.globalActionCount > 0 || !state.forceRefreshQueued || document.hidden) return;
+  window.setTimeout(() => {
+    if (state.globalActionCount > 0 || !state.forceRefreshQueued || document.hidden) return;
+    loadTorrents({ silent: true, force: true });
+  }, 0);
+}
+
 async function runTorrentAction(hashes, action, options = {}) {
+  state.actionRevision += 1;
   const busy = actionText(action);
   hashes.forEach((hash) => {
     state.rowBusy.set(hash, busy);
     state.rowErrors.delete(hash);
   });
-  state.globalActionCount += 1;
+  beginGlobalAction();
   render();
   try {
     await api(route(`/api/torrents/${action}`), {
@@ -1589,14 +1825,14 @@ async function runTorrentAction(hashes, action, options = {}) {
             : "Torrent supprimé.",
       );
     }
-    hashes.forEach((hash) => state.selected.delete(hash));
+    if (action === "delete") hashes.forEach((hash) => state.selected.delete(hash));
     await loadTorrents({ silent: true, force: true });
   } catch (error) {
     hashes.forEach((hash) => state.rowErrors.set(hash, describeError(error)));
     render();
   } finally {
     hashes.forEach((hash) => state.rowBusy.delete(hash));
-    state.globalActionCount -= 1;
+    endGlobalAction();
     render();
   }
 }
@@ -1673,7 +1909,8 @@ function detailRows(torrent) {
 }
 
 async function runAdvancedAction(hash, action, payload = {}, successMessage = "Action appliquée.") {
-  state.globalActionCount += 1;
+  state.actionRevision += 1;
+  beginGlobalAction();
   try {
     await api(route(`/api/torrents/${action}`), {
       method: "POST",
@@ -1684,7 +1921,7 @@ async function runAdvancedAction(hash, action, payload = {}, successMessage = "A
   } catch (error) {
     showError(error);
   } finally {
-    state.globalActionCount -= 1;
+    endGlobalAction();
   }
 }
 
@@ -1891,6 +2128,7 @@ async function confirmAddTracker() {
   els.confirmAddTrackerButton.textContent = "Ajout…";
   els.addTrackerMessage.textContent = "";
   try {
+    state.actionRevision += 1;
     const payload = await api(route("/api/torrents/add-tracker"), {
       method: "POST",
       body: JSON.stringify({ hashes: selectedHashes, trackerUrl }),
@@ -1918,6 +2156,7 @@ async function addConfiguredTrackerToHashes(hashes, endpoint, successLabel) {
     return;
   }
   try {
+    state.actionRevision += 1;
     const payload = await api(route(endpoint), {
       method: "POST",
       body: JSON.stringify({ hashes }),
@@ -1960,6 +2199,7 @@ function renderRelinkButton() {
 
 async function runRelink(hashes = []) {
   try {
+    state.actionRevision += 1;
     const payload = await api(route("/api/torrents/relink"), {
       method: "POST",
       body: JSON.stringify(hashes.length ? { hashes } : {}),
@@ -2089,7 +2329,7 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
       title.textContent = entry.name;
       const detail = document.createElement("span");
       detail.className = "organize-plan-detail";
-      detail.textContent = `${entry.kind === "series" ? "Série" : "Film"} · ${entry.hash.slice(0, 8)} · ${entry.fileCount} fichier${entry.fileCount > 1 ? "s" : ""} · ${entry.layout}`;
+      detail.textContent = `${ORGANIZE_KIND_LABELS[entry.kind] || "Média"} · ${entry.hash.slice(0, 8)} · ${entry.fileCount} fichier${entry.fileCount > 1 ? "s" : ""} · ${entry.layout}`;
       const path = document.createElement("span");
       path.className = "organize-plan-path";
       path.textContent = `${entry.currentPath || "Emplacement non renseigné"} → ${entry.targetPath}`;
@@ -2205,6 +2445,7 @@ async function confirmOrganizeMedia() {
   els.confirmOrganizeMediaButton.textContent = "Rangement…";
   els.organizeMediaMessage.textContent = "";
   try {
+    state.actionRevision += 1;
     const hashes = [...(state.organizeSelected || new Set())];
     const orphanPaths = [...(state.organizeOrphanSelected || new Set())];
     const duplicateGroupIds = [...(state.organizeDuplicateSelected || new Set())];
@@ -2249,7 +2490,8 @@ async function submitMagnets(event) {
   }
   els.addButton.disabled = true;
   els.addButton.textContent = "Ajout…";
-  state.globalActionCount += 1;
+  state.actionRevision += 1;
+  beginGlobalAction();
   try {
     const payload = await api(route("/api/torrents/add"), {
       method: "POST",
@@ -2276,7 +2518,7 @@ async function submitMagnets(event) {
     els.magnetMessage.textContent = describeError(error);
     els.magnetInput.focus();
   } finally {
-    state.globalActionCount -= 1;
+    endGlobalAction();
     els.addButton.disabled = false;
     els.addButton.textContent = "Ajouter";
   }
@@ -2292,14 +2534,29 @@ function restartRefreshTimer() {
 }
 
 function updatePreference(key, value) {
+  if (["search", "status", "category", "tag", "tracker", "sort", "direction"].includes(key)) {
+    resetTorrentWindow();
+  }
   state.prefs[key] = value;
   savePrefs();
   updateUrl();
   render();
 }
 
+function scheduleSearchPreference(value) {
+  window.clearTimeout(state.searchTimer);
+  state.searchTimer = window.setTimeout(() => {
+    state.searchTimer = null;
+    if (state.prefs.search === value) return;
+    updatePreference("search", value);
+  }, SEARCH_DEBOUNCE_MS);
+}
+
 function resetFilters() {
+  window.clearTimeout(state.searchTimer);
+  state.searchTimer = null;
   state.prefs = { ...state.prefs, search: "", status: "all", category: "all", tag: "all", tracker: "all", sort: "default", direction: "asc" };
+  resetTorrentWindow();
   savePrefs();
   updateUrl();
   render();
@@ -2311,14 +2568,23 @@ function openAddPanel() {
   state.activeView = "torrents";
   setView("torrents");
   els.magnetInput.focus();
+  render();
 }
 
 function bindEvents() {
   els.refreshButton.addEventListener("click", () => loadTorrents({ force: true }));
+  els.showPreviousRows?.addEventListener("click", () => {
+    state.renderOffset = Math.max(0, state.renderOffset - MAX_RENDERED_TORRENTS);
+    render();
+  });
+  els.loadMoreRows?.addEventListener("click", () => {
+    state.renderOffset += MAX_RENDERED_TORRENTS;
+    render();
+  });
   els.openAddPanelButton.addEventListener("click", openAddPanel);
   els.addTorrentButton?.addEventListener("click", openAddPanel);
   els.retryButton.addEventListener("click", () => loadTorrents({ force: true }));
-  els.searchInput.addEventListener("input", () => updatePreference("search", els.searchInput.value));
+  els.searchInput.addEventListener("input", (event) => scheduleSearchPreference(event.currentTarget?.value ?? els.searchInput.value));
   els.statusFilter.addEventListener("change", () => updatePreference("status", els.statusFilter.value));
   els.categoryFilter.addEventListener("change", () => updatePreference("category", els.categoryFilter.value));
   els.tagFilter.addEventListener("change", () => updatePreference("tag", els.tagFilter.value));
@@ -2352,7 +2618,7 @@ function bindEvents() {
     setStatusFromQuickFilter(clicked.dataset.filter);
   });
   els.selectVisible.addEventListener("change", () => {
-    const visible = filteredTorrents();
+    const visible = renderedTorrents();
     if (els.selectVisible.checked) visible.forEach((torrent) => state.selected.add(torrent.hash));
     else visible.forEach((torrent) => state.selected.delete(torrent.hash));
     render();
@@ -2435,6 +2701,8 @@ function bindEvents() {
     if (!document.hidden) loadTorrents({ silent: true, force: true });
   });
   window.addEventListener?.("popstate", () => {
+    window.clearTimeout(state.searchTimer);
+    state.searchTimer = null;
     applyUrlState();
     render();
   });

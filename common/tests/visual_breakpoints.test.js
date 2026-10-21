@@ -49,14 +49,28 @@ function metricScript(name) {
           const box = node.getBoundingClientRect();
           return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
         };
+        const rightWithinOverflow = (node) => {
+          let right = rect(node).right;
+          let ancestor = node.parentElement;
+          while (ancestor) {
+            const overflowX = getComputedStyle(ancestor).overflowX;
+            if (["auto", "scroll", "hidden", "clip"].includes(overflowX)) {
+              right = Math.min(right, rect(ancestor).right);
+            }
+            ancestor = ancestor.parentElement;
+          }
+          return right;
+        };
         const nodes = Array.from(document.body.querySelectorAll("*")).filter(visible);
         const interactive = Array.from(document.querySelectorAll("a, button, input, select, summary")).filter(visible);
+        const motionSample = document.querySelector("button, a");
+        const motionStyle = motionSample ? getComputedStyle(motionSample) : null;
         const metrics = {
           fixture: ${JSON.stringify(name)},
           viewportWidth: window.innerWidth,
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
-          maxRight: Math.max(0, ...nodes.map((node) => rect(node).right)),
+          maxRight: Math.max(0, ...nodes.map(rightWithinOverflow)),
           minTouchWidth: Math.min(...interactive.map((node) => rect(node).width)),
           minTouchHeight: Math.min(...interactive.map((node) => rect(node).height)),
           smallTargets: interactive
@@ -83,6 +97,9 @@ function metricScript(name) {
           cloudActionButtons: Array.from(document.querySelectorAll("#filesView .file-table .action-btn")).filter(visible).length,
           cloudInlineActions: Array.from(document.querySelectorAll("#filesView .file-table .row-actions .button:not(.action-btn)")).filter(visible).length,
           cloudCheckboxes: Array.from(document.querySelectorAll("#filesView .file-table input[type='checkbox']")).filter(visible).length,
+          reducedMotionQuery: matchMedia("(prefers-reduced-motion: reduce)").matches,
+          sampleTransitionDuration: motionStyle ? motionStyle.transitionDuration : "0s",
+          sampleAnimationDuration: motionStyle ? motionStyle.animationDuration : "0s",
         };
         const pre = document.createElement("pre");
         pre.id = "metrics";
@@ -173,7 +190,9 @@ function cloudFixture() {
       <td><div class="file-name-cell"><span class="file-icon folder" aria-hidden="true"></span><button class="file-name dir" type="button" aria-label="Ouvrir dossier ${index + 1}">Dossier média ${index + 1}</button></div></td>
       <td>1.2 Go</td>
       <td>30/07/2026</td>
+      <td>30/07/2026</td>
       <td>Vidéo</td>
+      <td>—</td>
       <td class="action-cell"><div class="row-actions"><button class="action-btn" type="button" aria-label="Actions fichier ${index + 1}">Actions</button></div></td>
     </tr>`).join("");
   return `<!doctype html>
@@ -188,7 +207,7 @@ function cloudFixture() {
           <section id="filesView" class="content-panel">
             <div class="table-wrap">
               <table class="file-table">
-                <thead><tr><th></th><th>Nom</th><th>Taille</th><th>Date</th><th>Type</th><th>Actions</th></tr></thead>
+                <thead><tr><th></th><th>Nom</th><th>Taille</th><th>Date</th><th>Création</th><th>Type</th><th>Partage</th><th>Actions</th></tr></thead>
                 <tbody>${rows}</tbody>
               </table>
             </div>
@@ -205,7 +224,7 @@ const fixtures = {
   cloud: cloudFixture,
 };
 
-function render(fixture, width) {
+function render(fixture, width, extraArgs = []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-visual-"));
   const file = path.join(dir, `${fixture}.html`);
   fs.writeFileSync(file, `<!doctype html>
@@ -228,6 +247,7 @@ function render(fixture, width) {
     "--virtual-time-budget=1000",
     "--window-size=1200,1000",
     "--dump-dom",
+    ...extraArgs,
     pathToFileURL(file).href,
   ], { encoding: "utf8", maxBuffer: 1024 * 1024 * 8 });
 
@@ -249,7 +269,10 @@ for (const fixture of Object.keys(fixtures)) {
     results.push(metrics);
     assert.equal(metrics.viewportWidth, width, `${fixture} viewport width should match requested breakpoint`);
     assert.ok(metrics.scrollWidth <= metrics.clientWidth + 1, `${fixture} ${width}px has horizontal overflow`);
-    assert.ok(metrics.maxRight <= metrics.clientWidth + 1, `${fixture} ${width}px has visible content outside viewport`);
+    assert.ok(
+      metrics.maxRight <= metrics.clientWidth + 1,
+      `${fixture} ${width}px has visible content outside viewport: ${JSON.stringify(metrics)}`,
+    );
     assert.ok(metrics.minTouchHeight >= 44, `${fixture} ${width}px has a touch target below 44px high: ${JSON.stringify(metrics.smallTargets)}`);
   }
 }
@@ -276,5 +299,13 @@ const cloudMobile = results.find((item) => item.fixture === "cloud" && item.view
 assert.equal(cloudMobile.cloudActionButtons, 6);
 assert.equal(cloudMobile.cloudInlineActions, 0);
 assert.equal(cloudMobile.cloudCheckboxes, 0);
+
+const reducedMotion = render("states", 375, ["--force-prefers-reduced-motion"]);
+assert.equal(reducedMotion.reducedMotionQuery, true);
+const maxReducedDuration = Math.max(
+  ...reducedMotion.sampleTransitionDuration.split(",").map((value) => Number.parseFloat(value) || 0),
+  ...reducedMotion.sampleAnimationDuration.split(",").map((value) => Number.parseFloat(value) || 0),
+);
+assert.ok(maxReducedDuration <= 0.001, `reduced-motion still has visible animation: ${JSON.stringify(reducedMotion)}`);
 
 console.log("visual breakpoints contract ok");

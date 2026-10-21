@@ -163,6 +163,13 @@
 .file-table tr:hover { background: var(--row-hover); }
 .file-table tr.selected { background: var(--accent-soft); }
 .file-table tr.focused { outline: 2px solid var(--focus); outline-offset: -2px; }
+#filesView.is-refreshing .table-wrap,
+#filesView.is-refreshing .file-grid { opacity: .72; }
+.table-wrap,
+.file-grid { transition: opacity var(--motion-fast); }
+.file-table tr.is-busy,
+.grid-tile.is-busy { opacity: .58; cursor: progress; }
+.action-btn:disabled { cursor: progress; opacity: .65; }
 .skeleton-row { pointer-events: none; }
 .skeleton-line {
   display: block;
@@ -527,7 +534,7 @@
   background: var(--accent);
 }
 
-/* ── Ranger les médias ── */
+/* ── Ranger les contenus ── */
 .organize-dialog { width: min(560px, calc(100% - 32px)); }
 .organize-summary { color: var(--text); font-weight: 600; }
 .organize-sections {
@@ -634,8 +641,10 @@
 .organize-to { color: var(--accent-strong); overflow-wrap: anywhere; }
 .organize-parasite { opacity: .75; }
 .organize-duplicate { background: var(--warning-soft); }
+.organize-conflict { background: var(--danger-soft); }
 .organize-parasite .organize-to,
 .organize-note { color: var(--warning); font-size: .78rem; }
+.organize-conflict .organize-to { color: var(--danger-text); }
 @media (max-width: 767px) {
   .organize-arrow { display: none; }
   .organize-to::before { content: "→ "; }
@@ -714,6 +723,7 @@
 
 /* ── Éditeur de texte ── */
 .edit-dialog { width: min(720px, calc(100% - 32px)); height: min(78vh, 640px); display: flex; flex-direction: column; }
+.edit-dialog:not([open]) { display: none; }
 .edit-dialog form { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 0; }
 .edit-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); padding: var(--space-16) var(--space-24); border-bottom: 1px solid var(--border); }
 .edit-head h2 { margin: 0; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -768,4 +778,10 @@
   .progress-row .pstatus { grid-column: 2; grid-row: 1; }
   .progress-row .pcontrols { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
   .page-head { flex-direction: column; align-items: stretch; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-wrap,
+  .file-grid,
+  .file-table tr { transition: none; }
 }

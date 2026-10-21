@@ -36,7 +36,7 @@ from ..models import (
 )
 from ..qbittorrent import QbitError
 from ..services.relink import relink_missing
-from ..services.organizer import apply_organization_plan, build_organization_plan, duplicate_cloud_operations, orphan_operations, verify_duplicate_group
+from ..services.organizer import apply_organization_plan, build_organization_plan, duplicate_cloud_operations, organization_categories, organization_plan_revalidation_reason, orphan_operations, verify_duplicate_group
 from ..services.cloud_panel import CloudPanelError, arrange_batch
 from ..services.organization_runs import journal_duplicate_operation, journal_operation, journal_orphan_operation
 from ..services.media_automation import MediaAutomationError
@@ -299,9 +299,16 @@ async def organize_torrents(request: Request, payload: OrganizeRequest) -> dict[
 
     refresh = {"rclone": "skipped", "jellyfin": "skipped"}
     if result["organized"]:
+        changed_categories = organization_categories(plan)
+        refresh_categories = set(changed_categories)
+        video_categories = sorted(refresh_categories & {"Films", "Series"})
+        if video_categories:
+            # Preserve the existing full video-root refresh while unrelated
+            # game/book plans only invalidate their own directories.
+            refresh_categories.update({"Films", "Series"})
         try:
             await request.app.state.media_automation.refresh_rclone(
-                dirs=["qbittorrent/Films", "qbittorrent/Series"],
+                dirs=[f"qbittorrent/{category}" for category in sorted(refresh_categories)] or ["qbittorrent"],
                 recursive=True,
                 async_run=True,
             )
@@ -309,18 +316,22 @@ async def organize_torrents(request: Request, payload: OrganizeRequest) -> dict[
         except MediaAutomationError as exc:
             refresh["rclone"] = "failed"
             refresh["rcloneMessage"] = exc.public_message
-        try:
-            await request.app.state.media_automation.trigger_jellyfin_scan([])
-            refresh["jellyfin"] = "requested"
-        except MediaAutomationError as exc:
-            refresh["jellyfin"] = "failed"
-            refresh["jellyfinMessage"] = exc.public_message
+        if video_categories:
+            try:
+                await request.app.state.media_automation.trigger_jellyfin_scan([])
+                refresh["jellyfin"] = "requested"
+            except MediaAutomationError as exc:
+                refresh["jellyfin"] = "failed"
+                refresh["jellyfinMessage"] = exc.public_message
     return {"plan": plan, "result": result, "refresh": refresh}
 
 
 async def _library_plan(request: Request, hashes: list[str] | None) -> dict[str, Any]:
-    inventory = await request.app.state.library_inventory.get(MEDIA_MOUNT_PATH, QBIT_SAVE_PATH)
-    return await build_organization_plan(
+    inventory = (
+        await request.app.state.library_inventory.get(MEDIA_MOUNT_PATH, QBIT_SAVE_PATH)
+        if MEDIA_MOUNT_PATH else None
+    )
+    plan = await build_organization_plan(
         request.app.state.qbit,
         QBIT_SAVE_PATH,
         hashes=hashes,
@@ -328,6 +339,9 @@ async def _library_plan(request: Request, hashes: list[str] | None) -> dict[str,
         metadata_resolver=request.app.state.metadata_resolver,
         inventory=inventory,
     )
+    if inventory is not None:
+        plan["inventoryGeneration"] = inventory.generation
+    return plan
 
 
 @router.get("/torrents/organize-library-preview")
@@ -347,7 +361,8 @@ async def organize_library_preview(
     request.app.state.organization_runs.update(
         run["runId"],
         plan=plan,
-        inventoryGeneration=(await request.app.state.library_inventory.get(MEDIA_MOUNT_PATH, QBIT_SAVE_PATH)).generation,
+        sourceFingerprint=plan.get("sourceFingerprint", ""),
+        inventoryGeneration=plan.get("inventoryGeneration", ""),
         planCreatedAt=time.time(),
         warnings=plan.get("warnings", []),
     )
@@ -404,11 +419,39 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
                     status_code=409,
                     detail=error_detail("organization_in_progress", "Ce plan est déjà en cours d’application.", "Patienter puis actualiser"),
                 )
+            if payload.runId and run is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=error_detail("organization_run_not_found", "Exécution introuvable.", "Relancer une analyse"),
+                )
             stored_plan = run.get("plan") if isinstance(run, dict) else None
-            if isinstance(stored_plan, dict) and isinstance(run.get("planCreatedAt"), (int, float)) and time.time() - float(run["planCreatedAt"]) <= 900:
-                if run.get("inventoryGeneration"):
-                    current_inventory = await request.app.state.library_inventory.get(MEDIA_MOUNT_PATH, QBIT_SAVE_PATH)
-                    if current_inventory.generation != run["inventoryGeneration"]:
+            plan_is_fresh = (
+                isinstance(stored_plan, dict)
+                and isinstance(run.get("planCreatedAt"), (int, float))
+                and time.time() - float(run["planCreatedAt"]) <= 900
+            )
+            if run and not plan_is_fresh:
+                raise HTTPException(
+                    status_code=409,
+                    detail=error_detail("organization_plan_expired", "Ce plan a expiré ou n’est plus disponible.", "Relancer une analyse"),
+                )
+            if plan_is_fresh:
+                selected_hashes_for_validation = set(hashes) or {
+                    str(entry.get("hash") or "").lower()
+                    for entry in stored_plan.get("entries", [])
+                    if isinstance(entry, dict)
+                }
+                stale_reason = await organization_plan_revalidation_reason(
+                    request.app.state.qbit,
+                    stored_plan,
+                    selected_hashes_for_validation,
+                )
+                if stale_reason:
+                    raise HTTPException(status_code=409, detail=error_detail("organization_plan_stale", "Les torrents ont changé depuis l’analyse.", "Relancer une analyse"))
+                inventory_generation = stored_plan.get("inventoryGeneration") or run.get("inventoryGeneration")
+                if MEDIA_MOUNT_PATH and inventory_generation:
+                    current_inventory = await request.app.state.library_inventory.get(MEDIA_MOUNT_PATH, QBIT_SAVE_PATH, force=True)
+                    if current_inventory.generation != inventory_generation:
                         raise HTTPException(status_code=409, detail=error_detail("organization_plan_stale", "La bibliothèque a changé depuis l’analyse.", "Relancer une analyse"))
                 plan = stored_plan
                 selected_hashes = set(hashes)
@@ -518,32 +561,27 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
 
     refresh = {"rclone": "skipped", "jellyfin": "skipped"}
     if result.get("organized") or result.get("orphansOrganized"):
+        changed_categories = set(organization_categories(plan))
+        refresh_categories = set(changed_categories)
+        video_categories = sorted(refresh_categories & {"Films", "Series"})
+        if video_categories:
+            refresh_categories.update({"Films", "Series"})
         try:
-            changed_categories = {"Films" if entry.get("kind") == "film" else "Series" for entry in plan.get("entries", [])}
-            changed_categories.update(
-                str(item.get("path") or "").split("/", 1)[0]
-                for item in plan.get("orphanMedia", [])
-                if str(item.get("path") or "").split("/", 1)[0] in {"Films", "Series"}
-            )
-            changed_categories.update(
-                str(group.get("canonicalPath") or "").split("/", 1)[0]
-                for group in plan.get("duplicateGroups", [])
-                if str(group.get("canonicalPath") or "").split("/", 1)[0] in {"Films", "Series"}
-            )
             await request.app.state.media_automation.refresh_rclone(
-                dirs=[f"qbittorrent/{category}" for category in sorted(changed_categories)] or ["qbittorrent"], recursive=True, async_run=True
+                dirs=[f"qbittorrent/{category}" for category in sorted(refresh_categories)] or ["qbittorrent"], recursive=True, async_run=True
             )
             refresh["rclone"] = "requested"
         except MediaAutomationError as exc:
             refresh["rclone"] = "failed"
             refresh["rcloneMessage"] = exc.public_message
-        try:
-            library_ids = sorted({request.app.state.media_automation._library_for_category(category) for category in changed_categories if request.app.state.media_automation._library_for_category(category)})
-            await request.app.state.media_automation.trigger_jellyfin_scan(library_ids)
-            refresh["jellyfin"] = "requested"
-        except MediaAutomationError as exc:
-            refresh["jellyfin"] = "failed"
-            refresh["jellyfinMessage"] = exc.public_message
+        if video_categories:
+            try:
+                library_ids = sorted({request.app.state.media_automation._library_for_category(category) for category in video_categories if request.app.state.media_automation._library_for_category(category)})
+                await request.app.state.media_automation.trigger_jellyfin_scan(library_ids)
+                refresh["jellyfin"] = "requested"
+            except MediaAutomationError as exc:
+                refresh["jellyfin"] = "failed"
+                refresh["jellyfinMessage"] = exc.public_message
     return {"runId": stored["runId"] if stored else run["runId"], "plan": plan, "result": result, "refresh": refresh}
 
 

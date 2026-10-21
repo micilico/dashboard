@@ -13,6 +13,9 @@ const state = {
   healthPrefix: consoleConfig.healthPrefix || "/health",
   statsPrefix: consoleConfig.statsPrefix || "/stats-panel",
   csrfToken: "",
+  loadPromise: null,
+  loadQueued: false,
+  payloadSignatures: {},
 };
 
 const els = {
@@ -154,15 +157,63 @@ function configureLinks() {
 }
 
 function renderList(container, items, emptyText) {
-  container.replaceChildren(...(items.length ? items : [
+  const desired = items.length ? items : [
     systemState({ type: "empty", title: emptyText, compact: true }),
-  ]));
+  ];
+  const existing = [...(container.children || [])];
+  const existingSignatures = existing.map(nodeRenderSignature);
+  const desiredSignatures = desired.map(nodeRenderSignature);
+  if (existingSignatures.length === desiredSignatures.length
+      && existingSignatures.every((signature, index) => signature === desiredSignatures[index])) {
+    return;
+  }
+  const buckets = new Map();
+  existing.forEach((node) => {
+    const signature = nodeRenderSignature(node);
+    if (!buckets.has(signature)) buckets.set(signature, []);
+    buckets.get(signature).push(node);
+  });
+  const next = desired.map((node, index) => {
+    const reusable = buckets.get(desiredSignatures[index]);
+    return reusable?.shift() || node;
+  });
+  container.replaceChildren(...next);
 }
 
-async function postJson(path, payload, successMessage) {
-  await api(path, { method: "POST", body: JSON.stringify(payload) });
-  showToast(successMessage);
-  await load();
+function nodeRenderSignature(node) {
+  if (node?.outerHTML) return node.outerHTML;
+  return String(node?.className || "") + "|" + String(node?.textContent || "") + "|"
+    + (node?.children || []).map(nodeRenderSignature).join("|");
+}
+
+function payloadAlreadyRendered(section, payload) {
+  const signature = JSON.stringify(payload);
+  if (state.payloadSignatures[section] === signature) return true;
+  state.payloadSignatures[section] = signature;
+  return false;
+}
+
+async function postJson(path, payload, successMessage, trigger = null) {
+  const button = trigger?.tagName === "BUTTON" ? trigger : null;
+  const previousText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Traitement…";
+  }
+  try {
+    await api(path, { method: "POST", body: JSON.stringify(payload) });
+    showToast(successMessage);
+    delete state.payloadSignatures[state.section];
+    await load();
+  } catch (error) {
+    showToast(describeError(error));
+    setPageStatus(error.message || "Action impossible.", "error");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText || button.textContent;
+    }
+  }
 }
 
 async function renderActivity() {
@@ -175,6 +226,7 @@ async function renderActivity() {
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = load;
   const payload = await api(`${state.apiPrefix}/activity`, { cache: "no-store" });
+  if (payloadAlreadyRendered("activity", payload)) return;
   const summary = payload.summary || {};
   els.summaryGrid.replaceChildren(
     card("Téléchargements actifs", String(summary.downloadsActive || 0)),
@@ -208,10 +260,11 @@ async function renderActivity() {
     toggle.type = "button";
     toggle.className = "button";
     toggle.textContent = item.status === "acknowledged" ? "Rouvrir" : "Acquitter";
-    toggle.onclick = () => postJson(
+    toggle.onclick = (event) => postJson(
       `${state.apiPrefix}/notifications/${item.status === "acknowledged" ? "reopen" : "ack"}`,
       { code: item.code },
       item.status === "acknowledged" ? "Alerte rouverte." : "Alerte acquittée.",
+      event.currentTarget,
     );
     actions.append(toggle);
     article.append(
@@ -255,10 +308,11 @@ async function renderStorage() {
   if (els.pageEyebrow) els.pageEyebrow.textContent = "Système";
   els.primaryButton.textContent = "Actualiser rclone";
   els.primaryButton.hidden = false;
-  els.primaryButton.onclick = async () => {
-    await postJson(`${state.apiPrefix}/media-actions/rclone-refresh`, {}, "Actualisation rclone lancée.");
+  els.primaryButton.onclick = async (event) => {
+    await postJson(`${state.apiPrefix}/media-actions/rclone-refresh`, {}, "Actualisation rclone lancée.", event.currentTarget);
   };
   const payload = await api(`${state.apiPrefix}/storage`, { cache: "no-store" });
+  if (payloadAlreadyRendered("storage", payload)) return;
   const disk = payload.disk || {};
   const rclone = payload.rclone || {};
   if (Number(disk.usedBytes) > 0) {
@@ -319,10 +373,11 @@ async function renderMedia() {
   if (els.pageEyebrow) els.pageEyebrow.textContent = "Bibliothèque";
   els.primaryButton.textContent = "Scanner Jellyfin";
   els.primaryButton.hidden = false;
-  els.primaryButton.onclick = async () => {
-    await postJson(`${state.apiPrefix}/media-actions/jellyfin-refresh`, {}, "Scan Jellyfin lancé.");
+  els.primaryButton.onclick = async (event) => {
+    await postJson(`${state.apiPrefix}/media-actions/jellyfin-refresh`, {}, "Scan Jellyfin lancé.", event.currentTarget);
   };
   const payload = await api(`${state.apiPrefix}/media`, { cache: "no-store" });
+  if (payloadAlreadyRendered("media", payload)) return;
   els.summaryGrid.replaceChildren(
     card("Serveur", text(payload.serverName), text(payload.version)),
     card("Lectures en cours", String((payload.sessions || []).length)),
@@ -378,6 +433,7 @@ async function renderHealth() {
   els.primaryButton.onclick = load;
   const payload = await api(`${state.apiPrefix}/health/overview`, { cache: "no-store" });
   const summary = payload.summary || {};
+  if (payloadAlreadyRendered("health", payload)) return;
   els.summaryGrid.replaceChildren(
     card("État global", text(payload.globalStatus)),
     card("Opérationnels", String(summary.operational || 0)),
@@ -717,6 +773,7 @@ async function renderStats() {
   const threshold = ratioThreshold.threshold ?? 10;
   const lastDay = daily.length ? daily[daily.length - 1] : {};
 
+  if (payloadAlreadyRendered("stats", payload)) return;
   els.summaryGrid.replaceChildren(
     card("Volume téléchargé", formatBytes(totals.downloaded || 0), `${totals.observedDays || 0} jour(s) observé(s)`),
     card("Volume envoyé", formatBytes(totals.uploaded || 0), totals.ratio ? `Ratio global ${totals.ratio}` : "Aucun volume observé"),
@@ -764,12 +821,17 @@ async function renderStats() {
       showToast("Valeur de seuil invalide.");
       return;
     }
+    saveThreshold.disabled = true;
+    saveThreshold.textContent = "Enregistrement…";
     try {
       await api(`${state.apiPrefix}/stats/ratio-threshold`, { method: "POST", body: JSON.stringify({ threshold: value }) });
       showToast("Seuil enregistré.");
       await load();
     } catch (error) {
       showToast(error.message || "Enregistrement impossible.");
+    } finally {
+      saveThreshold.disabled = false;
+      saveThreshold.textContent = "Enregistrer";
     }
   };
 
@@ -834,21 +896,47 @@ async function renderStats() {
   els.cardsGrid.replaceChildren();
 }
 
-async function load() {
-  setSidebarStatus("Actualisation en cours", "Synchronisation de la vue.", "checking");
-  try {
-    if (!state.csrfToken) await refreshSession();
-    if (state.section === "activity") await renderActivity();
-    if (state.section === "storage") await renderStorage();
-    if (state.section === "media") await renderMedia();
-    if (state.section === "health") await renderHealth();
-    if (state.section === "stats") await renderStats();
-    setRefreshStamp();
-  } catch (error) {
-    setSidebarStatus("Erreur de synchronisation", error.message || "Erreur", "unavailable");
-    setPageStatus(error.message || "Erreur de chargement.", "error");
-    showToast(error.message || "Erreur");
+function setPageBusy(busy) {
+  if (els.refreshButton) els.refreshButton.disabled = busy;
+  if (els.primaryButton && ["activity", "health", "stats"].includes(state.section)) {
+    els.primaryButton.disabled = busy;
   }
+  ["contentA", "contentB", "summaryGrid", "cardsGrid"].forEach((key) => {
+    els[key]?.setAttribute?.("aria-busy", String(busy));
+  });
+}
+
+async function load() {
+  if (state.loadPromise) {
+    state.loadQueued = true;
+    return state.loadPromise;
+  }
+  setPageBusy(true);
+  setSidebarStatus("Actualisation en cours", "Synchronisation de la vue.", "checking");
+  const request = (async () => {
+    try {
+      if (!state.csrfToken) await refreshSession();
+      if (state.section === "activity") await renderActivity();
+      if (state.section === "storage") await renderStorage();
+      if (state.section === "media") await renderMedia();
+      if (state.section === "health") await renderHealth();
+      if (state.section === "stats") await renderStats();
+      setRefreshStamp();
+    } catch (error) {
+      setSidebarStatus("Erreur de synchronisation", error.message || "Erreur", "unavailable");
+      setPageStatus(error.message || "Erreur de chargement.", "error");
+      showToast(error.message || "Erreur");
+    }
+  })();
+  state.loadPromise = request.finally(() => {
+    state.loadPromise = null;
+    setPageBusy(false);
+    if (state.loadQueued) {
+      state.loadQueued = false;
+      window.setTimeout(load, 0);
+    }
+  });
+  return state.loadPromise;
 }
 
 configureLinks();

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Prowlarr · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260803-refonte">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20261021-audit-fixes">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -129,7 +129,7 @@
               <h2 id="indexers-title">Indexeurs</h2>
               <p id="indexersSummary">Chargement des indexeurs...</p>
             </div>
-            <button id="testAllButton" type="button" class="button secondary">Tester tous</button>
+            <button id="testAllButton" type="button" class="button secondary" data-busy-key="test-all" data-label="Tester tous">Tester tous</button>
           </div>
           <div id="indexersError" class="alert section-alert" hidden>
             <span></span>
@@ -193,7 +193,7 @@
               </div>
               <select id="releaseIndexers" multiple size="6"></select>
             </fieldset>
-            <button id="searchButton" type="submit" class="button primary">Rechercher</button>
+            <button id="searchButton" type="submit" class="button primary" data-busy-key="search" data-label="Rechercher">Rechercher</button>
           </form>
           <div class="filters" aria-label="Filtres résultats">
             <label>Dans les résultats <input id="resultSearch" type="search" autocomplete="off"></label>
@@ -222,6 +222,13 @@
               </thead>
               <tbody id="resultRows"></tbody>
             </table>
+          </div>
+          <div id="resultPagination" class="result-pagination" hidden>
+            <span id="resultRange" class="muted" aria-live="polite"></span>
+            <div class="result-page-actions">
+              <button id="resultPrevious" type="button" class="button secondary">Precedent</button>
+              <button id="resultNext" type="button" class="button secondary">Suivant</button>
+            </div>
           </div>
         </section>
 
@@ -276,7 +283,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=20260803-refonte"></script>
-    <script src="./static/dist/app.min.js?v=20260803-refonte" defer></script>
+    <script src="./config.js?v=20261021-audit-fixes"></script>
+    <script src="./static/dist/app.min.js?v=20261021-audit-fixes" defer></script>
   </body>
 </html>

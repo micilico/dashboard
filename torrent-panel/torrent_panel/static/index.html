@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard · Centre de contrôle</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20260815-organizer">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=20261021-audit-fixes">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -159,7 +159,7 @@
           </div>
           <div class="page-header-actions">
             <button id="clearActiveFilters" type="button" class="button secondary" hidden>Effacer les filtres</button>
-            <button id="organizeMediaButton" type="button" class="button secondary">Ranger pour Jellyfin</button>
+            <button id="organizeMediaButton" type="button" class="button secondary">Ranger la bibliothèque</button>
             <button id="relinkMissingButton" type="button" class="button secondary" hidden>Réparer les fichiers manquants</button>
             <button id="densityToggle" type="button" class="button secondary" aria-pressed="false">Vue compacte</button>
             <button id="addTorrentButton" type="button" class="button primary">Ajouter un torrent</button>
@@ -327,6 +327,14 @@
             <tbody id="torrentRows"></tbody>
           </table>
         </div>
+        <div class="torrent-table-more">
+          <button id="showPreviousRows" type="button" class="button secondary" aria-controls="torrentRows" hidden>
+            Afficher les torrents précédents
+          </button>
+          <button id="loadMoreRows" type="button" class="button secondary" aria-controls="torrentRows" hidden>
+            Afficher les torrents suivants
+          </button>
+        </div>
       </section>
     </main>
 
@@ -398,7 +406,7 @@
 
     <dialog id="organizeMediaDialog" class="dialog">
       <form method="dialog" id="organizeMediaForm">
-        <h2>Ranger les médias sans perdre le seeding</h2>
+        <h2>Ranger la bibliothèque sans perdre le seeding</h2>
         <p id="organizeMediaSummary" class="dialog-name">Analyse des torrents terminés…</p>
         <div class="selection-toolbar" aria-label="Sélection des opérations">
           <label><input id="organizeSelectAll" type="checkbox" checked> Tout sélectionner</label>
@@ -408,6 +416,8 @@
             <option value="all">Tout</option>
             <option value="film">Films</option>
             <option value="series">Séries</option>
+            <option value="game">Jeux vidéo</option>
+            <option value="book">Livres</option>
             <option value="orphan">Orphelins</option>
             <option value="duplicate">Doublons</option>
             <option value="warning">Avertissements</option>
@@ -415,7 +425,7 @@
           </select>
         </div>
         <div id="organizeMediaPlan" class="relink-plan" aria-live="polite"></div>
-        <p class="field-message">Les torrents seront mis en pause, déplacés via qBittorrent, puis revérifiés. Ils resteront toujours en pause : toute reprise devra être manuelle après confirmation d’une vérification à 100 %.</p>
+        <p class="field-message">Films, séries, jeux vidéo et livres seront mis en pause, déplacés via qBittorrent, puis revérifiés. Ils resteront toujours en pause : toute reprise devra être manuelle après confirmation d’une vérification à 100 %.</p>
         <p class="field-message" id="organizeMediaMessage" aria-live="polite"></p>
         <div class="dialog-actions">
           <button id="cancelOrganizeMediaButton" value="cancel" class="button secondary" type="button">Annuler</button>
@@ -425,7 +435,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=20260815-organizer"></script>
-    <script src="./static/dist/app.min.js?v=20260815-organizer" defer></script>
+    <script src="./config.js?v=20261021-audit-fixes"></script>
+    <script src="./static/dist/app.min.js?v=20261021-audit-fixes" defer></script>
   </body>
 </html>

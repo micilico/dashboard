@@ -32,6 +32,7 @@ button:disabled, input:disabled, select:disabled {
   transform: translateY(-160%);
   background: var(--focus); color: var(--bg);
   padding: 10px 14px; border-radius: 6px; font-weight: 700;
+  transition: transform var(--motion-transition) var(--ease-standard), opacity var(--motion-transition) var(--ease-standard);
 }
 .skip-link:focus { transform: translateY(0); }
 

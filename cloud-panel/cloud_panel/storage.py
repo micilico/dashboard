@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
 _folder_size_cache: dict[tuple[str, float], tuple[float, int]] = {}
+_folder_size_cache_generation = 0
 _path_locks: dict[str, threading.Lock] = {}
 _search_cache: dict[tuple[str, str, int, int, int], tuple[float, dict]] = {}
 _path_locks_guard = threading.Lock()
@@ -79,6 +80,8 @@ def clear_scandir_cache() -> None:
 
 
 def clear_folder_size_cache() -> None:
+    global _folder_size_cache_generation
+    _folder_size_cache_generation += 1
     _folder_size_cache.clear()
 
 
@@ -132,6 +135,7 @@ def _trash_root() -> str:
 
 def _folder_size_cached(abs_path: str, ttl: float = SCANDIR_CACHE_TTL) -> int:
     """Recursively sum file sizes under abs_path, cached by (path, mtime)."""
+    generation = _folder_size_cache_generation
     try:
         mtime = os.path.getmtime(abs_path)
     except OSError:
@@ -152,8 +156,11 @@ def _folder_size_cached(abs_path: str, ttl: float = SCANDIR_CACHE_TTL) -> int:
     except OSError:
         logger.warning('folder size walk error for %s', abs_path, exc_info=True)
         return 0
-    _folder_size_cache[cache_key] = (time.time(), total)
-    _purge_cache(_folder_size_cache, FOLDER_SIZE_CACHE_MAX_ENTRIES)
+    # A mutation may invalidate the cache while this recursive walk is still
+    # running. Never let that older walk repopulate the new cache generation.
+    if generation == _folder_size_cache_generation:
+        _folder_size_cache[cache_key] = (time.time(), total)
+        _purge_cache(_folder_size_cache, FOLDER_SIZE_CACHE_MAX_ENTRIES)
     return total
 
 
@@ -660,6 +667,7 @@ def create_text_file(relative_path: str, filename: str) -> dict:
     with _target_lock(target):
         open(target, 'w', encoding='utf-8', newline='').close()
     clear_scandir_cache()
+    clear_folder_size_cache()
     _record_history(filename, 0, _rel(target, _mount_real()), action="create")
     return {'success': True, 'name': filename, 'path': _rel(target, _mount_real())}
 
@@ -692,6 +700,7 @@ def write_text_file(relative_path: str, content: str) -> dict:
             f.write(content)
         os.replace(tmp_path, file_path)
     clear_scandir_cache()
+    clear_folder_size_cache()
     size = os.path.getsize(file_path)
     _record_history(os.path.basename(file_path), size, relative_path, action="edit")
     return {'success': True, 'name': os.path.basename(file_path), 'path': relative_path, 'size': size}

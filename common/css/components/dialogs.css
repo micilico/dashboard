@@ -1,3 +1,9 @@
+dialog {
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+  transition: opacity var(--motion-transition) var(--ease-standard), transform var(--motion-transition) var(--ease-standard);
+}
+dialog[open] { opacity: 1; transform: none; }
 .dialog { width: min(480px, calc(100% - 32px)); color: var(--text); padding: 0; border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-panel); border: 1px solid var(--border); }
 .dialog::backdrop { background: var(--overlay-scrim); backdrop-filter: blur(8px); }
 .dialog form { display: grid; gap: 16px; padding: 28px; }
@@ -8,5 +14,15 @@
   border: 1px solid var(--border); border-radius: var(--radius-control);
   background: var(--surface-2); color: var(--text); padding: 12px 14px;
   box-shadow: var(--shadow-dialog);
+  transition: opacity var(--motion-feedback) var(--ease-standard), transform var(--motion-feedback) var(--ease-standard);
+}
+
+@starting-style {
+  dialog[open] { opacity: 0; transform: translateY(8px) scale(0.985); }
+  .toast:not([hidden]) { opacity: 0; transform: translateY(6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog, dialog[open], .toast { transition: none; }
 }
 [hidden] { display: none !important; }

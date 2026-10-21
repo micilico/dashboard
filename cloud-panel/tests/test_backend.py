@@ -229,6 +229,26 @@ class TestFolderSize:
         (tmp_path / "docs" / "b.txt").write_bytes(b"b" * 5)
         assert get_folder_size_fn("", "docs")["size_bytes"] == 15
 
+    def test_inflight_folder_size_does_not_repopulate_cache_after_clear(self, tmp_path, monkeypatch):
+        get_folder_size_fn = self._reload(monkeypatch, tmp_path)
+        import cloud_panel.storage as storage
+
+        (tmp_path / "docs").mkdir()
+        note = tmp_path / "docs" / "a.txt"
+        note.write_bytes(b"a" * 10)
+        original_walk = storage.os.walk
+
+        def walk_with_invalidation(path, *args, **kwargs):
+            for entry in original_walk(path, *args, **kwargs):
+                clear_folder_size_cache()
+                yield entry
+
+        monkeypatch.setattr(storage.os, "walk", walk_with_invalidation)
+        assert get_folder_size_fn("", "docs")["size_bytes"] == 10
+
+        note.write_bytes(b"a" * 30)
+        assert get_folder_size_fn("", "docs")["size_bytes"] == 30
+
 
 class TestFolderSizes:
     def _reload(self, monkeypatch, tmp_path):
@@ -1271,6 +1291,126 @@ class TestMediaOrganizer:
         assert extract_movie("Breaking.Bad.S01") is None
         assert extract_movie("recap.txt") is None
 
+    def test_explicit_game_detection_precedes_books_and_video(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import detect_explicit_entry
+
+        game = tmp_path / "Game.2024.[Nintendo Switch]"
+        game.mkdir()
+        (game / "Game.nsp").write_bytes(b"rom")
+        (game / "cinematic.mkv").write_bytes(b"video")
+        (game / "readme.pdf").write_bytes(b"manual")
+        book = tmp_path / "Dune.1965.epub"
+        book.write_bytes(b"book")
+        codex_book = tmp_path / "The.Codex.1965.epub"
+        codex_book.write_bytes(b"book")
+        codex_movie = tmp_path / "The.Codex.2024.1080p"
+        codex_movie.mkdir()
+        (codex_movie / "The.Codex.2024.1080p.mkv").write_bytes(b"video")
+        ambiguous_iso = tmp_path / "Game.2024.iso"
+        ambiguous_iso.write_bytes(b"iso")
+        ambiguous_folder = tmp_path / "Unmarked Game"
+        ambiguous_folder.mkdir()
+        (ambiguous_folder / "Game.2024.iso").write_bytes(b"iso")
+        (ambiguous_folder / "readme.pdf").write_bytes(b"manual")
+        movie_with_booklet = tmp_path / "Movie.2024.1080p"
+        movie_with_booklet.mkdir()
+        (movie_with_booklet / "Movie.mkv").write_bytes(b"video")
+        (movie_with_booklet / "booklet.pdf").write_bytes(b"booklet")
+        book_union_names = [f"Book{suffix}" for suffix in (".kfx", ".cbt", ".m4b")]
+        for name in book_union_names:
+            (tmp_path / name).write_bytes(b"book")
+
+        with os.scandir(tmp_path) as entries:
+            detected = {entry.name: detect_explicit_entry(entry) for entry in entries}
+        assert detected["Game.2024.[Nintendo Switch]"] == "game"
+        assert detected["Dune.1965.epub"] == "book"
+        assert detected["The.Codex.1965.epub"] == "book"
+        assert detected["The.Codex.2024.1080p"] is None
+        assert detected["Game.2024.iso"] is None
+        assert detected["Unmarked Game"] is None
+        assert detected["Movie.2024.1080p"] is None
+        assert all(detected[name] == "book" for name in book_union_names)
+
+    def test_weak_game_marker_requires_no_video_but_strong_signatures_win(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import build_organization_plan, detect_explicit_entry
+
+        movie = tmp_path / "Movie.2024.PLAZA.1080p"
+        movie.mkdir()
+        (movie / "Movie.2024.PLAZA.1080p.mkv").write_bytes(b"video")
+        (movie / "release.rar").write_bytes(b"archive")
+
+        weak_game = tmp_path / "Game.2024.PLAZA"
+        weak_game.mkdir()
+        (weak_game / "setup.exe").write_bytes(b"installer")
+
+        rom_game = tmp_path / "Cinematic.Game.PLAZA"
+        rom_game.mkdir()
+        (rom_game / "game.nsp").write_bytes(b"rom")
+        (rom_game / "cinematic.mkv").write_bytes(b"video")
+
+        manifest_game = tmp_path / "Steam.Game"
+        manifest_game.mkdir()
+        (manifest_game / "steam_api64.dll").write_bytes(b"manifest")
+        (manifest_game / "cinematic.mkv").write_bytes(b"video")
+
+        with os.scandir(tmp_path) as entries:
+            detected = {entry.name: detect_explicit_entry(entry) for entry in entries}
+
+        assert detected["Movie.2024.PLAZA.1080p"] is None
+        assert detected["Game.2024.PLAZA"] == "game"
+        assert detected["Cinematic.Game.PLAZA"] == "game"
+        assert detected["Steam.Game"] == "game"
+        assert [item["name"] for item in build_organization_plan("")["movies"]] == [
+            "Movie.2024.PLAZA.1080p"
+        ]
+
+    def test_truncated_scan_skips_implicit_book_and_movie_fallback(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import (
+            _ENTRY_SCAN_FILE_LIMIT,
+            build_organization_plan,
+            classify_explicit_entry,
+        )
+
+        game = tmp_path / "Game.2024.1080p"
+        game.mkdir()
+        # Sorted names make the repro deterministic: the PDF is the 4096th
+        # evidence entry and the game payload is the first unread entry.
+        for index in range(_ENTRY_SCAN_FILE_LIMIT - 1):
+            (game / f"{index:04d}.txt").touch()
+        (game / "readme.pdf").write_bytes(b"manual")
+        (game / "zz-payload.bundle").write_bytes(b"payload")
+
+        with os.scandir(game.parent) as entries:
+            entry = next(candidate for candidate in entries if candidate.name == game.name)
+            kind, incomplete = classify_explicit_entry(entry)
+        assert kind is None
+        assert incomplete is True
+
+        plan = build_organization_plan("")
+        assert plan["games"] == []
+        assert plan["books"] == []
+        assert plan["movies"] == []
+        assert plan["series"] == []
+        assert plan["canApply"] is False
+
+    def test_truncated_scan_keeps_strong_rom_evidence(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import classify_explicit_entry
+
+        game = tmp_path / "Large.Game"
+        game.mkdir()
+        (game / "0000-ROM.nsp").write_bytes(b"rom")
+        (game / "zzzz-cinematic.mkv").write_bytes(b"video")
+
+        with os.scandir(tmp_path) as entries:
+            entry = next(candidate for candidate in entries if candidate.name == game.name)
+            kind, incomplete = classify_explicit_entry(entry, max_entries=1)
+        assert kind == "game"
+        assert incomplete is False
+
     def test_detect_parasite(self):
         from cloud_panel.services.media import detect_parasite
         assert detect_parasite("sample.mkv") == "sample"
@@ -1294,7 +1434,7 @@ class TestMediaOrganizer:
         (tmp_path / "readme.txt").write_text("x")
 
         plan = build_organization_plan("")
-        assert plan["totals"] == {"series": 2, "series_items": 3, "movies": 1, "parasites": 2, "duplicates": 0}
+        assert plan["totals"] == {"series": 2, "series_items": 3, "movies": 1, "games": 0, "books": 0, "parasites": 2, "duplicates": 0}
         by_name = {g["name"]: g for g in plan["series"]}
         assert set(by_name) == {"Breaking Bad", "The Office"}
         assert by_name["Breaking Bad"]["items"][0]["target"] == "séries/Breaking Bad/Saison 1"
@@ -1304,6 +1444,117 @@ class TestMediaOrganizer:
         parasite_paths = {p["path"] for p in plan["parasites"]}
         assert parasite_paths == {"Breaking.Bad.S01/sample.mkv", "readme.txt"}
         assert (tmp_path / "Breaking.Bad.S01" / "S01E01.mkv").exists(), "preview must not move anything"
+
+    def test_plan_routes_games_books_and_leaves_ambiguous_iso_alone(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import build_organization_plan
+
+        game = tmp_path / "Game.Collection.[Nintendo Switch]"
+        (game / "Disc 1").mkdir(parents=True)
+        (game / "Disc 1" / "Game.nsp").write_bytes(b"rom")
+        (game / "readme.pdf").write_bytes(b"manual")
+        (tmp_path / "Dune.1965.epub").write_bytes(b"book")
+        (tmp_path / "The.Codex.1965.epub").write_bytes(b"book")
+        (tmp_path / "Game.2024.iso").write_bytes(b"ambiguous")
+        (tmp_path / "Package.pkg").write_bytes(b"installer")
+
+        plan = build_organization_plan("")
+        assert [item["name"] for item in plan["games"]] == ["Game.Collection.[Nintendo Switch]"]
+        assert [item["name"] for item in plan["books"]] == ["Dune.1965.epub", "The.Codex.1965.epub"]
+        assert plan["movies"] == []
+        assert plan["games"][0]["target"] == "jeux/Game.Collection.[Nintendo Switch]"
+        assert plan["books"][0]["target"] == "livres/Dune.1965.epub"
+        assert plan["books"][1]["target"] == "livres/The.Codex.1965.epub"
+
+    def test_apply_preserves_game_tree_and_never_merges_existing_book_edition(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        game = tmp_path / "Game.[GOG]"
+        (game / "data" / "cinematics").mkdir(parents=True)
+        (game / "setup.exe").write_bytes(b"installer")
+        (game / "steam_appid.txt").write_bytes(b"123")
+        (game / "data" / "cinematics" / "intro.mkv").write_bytes(b"video")
+        (game / "readme.pdf").write_bytes(b"manual")
+        (tmp_path / "Existing.Edition.epub").write_bytes(b"new")
+        (tmp_path / "livres" / "Existing.Edition.epub").mkdir(parents=True)
+        (tmp_path / "livres" / "Existing.Edition.epub" / "Existing.Edition.epub").write_bytes(b"old")
+
+        result = apply_organization_plan("")
+        assert result["games_moved"] == 1
+        assert (tmp_path / "jeux" / "Game.[GOG]" / "data" / "cinematics" / "intro.mkv").exists()
+        assert (tmp_path / "jeux" / "Game.[GOG]" / "readme.pdf").exists()
+        assert result["books_moved"] == 0
+        assert (tmp_path / "Existing.Edition.epub").exists()
+        assert (tmp_path / "livres" / "Existing.Edition.epub" / "Existing.Edition.epub").read_bytes() == b"old"
+        assert any("fusion manuelle" in error for error in result["errors"])
+        assert result["success"] is True
+        assert result["completed_items"] == 1
+        assert result["failed_items"] == 1
+
+    def test_game_and_book_destination_collisions_are_visible_and_not_ready(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan, build_organization_plan
+
+        (tmp_path / "jeux" / "Game.[GOG]").mkdir(parents=True)
+        (tmp_path / "jeux" / "Game.[GOG]" / "keep.bin").write_bytes(b"existing")
+        (tmp_path / "Game.[GOG]").mkdir()
+        (tmp_path / "Game.[GOG]" / "setup.exe").write_bytes(b"source")
+
+        (tmp_path / "livres" / "Dune.epub").mkdir(parents=True)
+        (tmp_path / "livres" / "Dune.epub" / "keep.epub").write_bytes(b"existing")
+        (tmp_path / "Dune.epub").write_bytes(b"source")
+
+        plan = build_organization_plan("")
+        assert plan["status"] == "conflict"
+        assert plan["canApply"] is False
+        assert {item["status"] for item in [*plan["games"], *plan["books"]]} == {"conflict"}
+        assert {conflict["code"] for conflict in plan["conflicts"]} == {"destination_exists"}
+        assert all(item["conflict"]["message"] for item in [*plan["games"], *plan["books"]])
+        assert all(item["conflict"]["recovery"] for item in [*plan["games"], *plan["books"]])
+
+        result = apply_organization_plan("")
+        assert result["success"] is False
+        assert result["completed_items"] == 0
+        assert result["failed_items"] == 2
+        assert result["games_moved"] == 0
+        assert result["books_moved"] == 0
+        assert (tmp_path / "Game.[GOG]" / "setup.exe").exists()
+        assert (tmp_path / "Dune.epub").exists()
+
+    def test_organizer_ignores_top_level_and_nested_symlinks(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import _find_category_dir, build_organization_plan
+
+        with tempfile.TemporaryDirectory(prefix="cloud-organizer-outside-") as outside_dir:
+            outside = Path(outside_dir)
+            (outside / "Hidden.nsp").write_bytes(b"rom")
+            os.symlink(outside, tmp_path / "External.Game", target_is_directory=True)
+            os.symlink(outside, tmp_path / "jeux", target_is_directory=True)
+
+            book = tmp_path / "Book.with.links"
+            book.mkdir()
+            (book / "readme.pdf").write_bytes(b"manual")
+            os.symlink(outside / "Hidden.nsp", book / "linked.nsp")
+            os.symlink(outside, book / "linked-game", target_is_directory=True)
+
+            assert _find_category_dir(str(tmp_path), {"jeux"}) is None
+            plan = build_organization_plan("")
+            assert plan["games"] == []
+            assert [item["name"] for item in plan["books"]] == ["Book.with.links"]
+            assert (outside / "Hidden.nsp").read_bytes() == b"rom"
+
+    def test_in_place_game_category_does_not_report_game_readmes_as_parasites(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import build_organization_plan
+
+        (tmp_path / "jeux" / "Game").mkdir(parents=True)
+        (tmp_path / "jeux" / "Game" / "readme.txt").write_text("manual", encoding="utf-8")
+        (tmp_path / "jeux" / "readme.txt").write_text("manual", encoding="utf-8")
+
+        plan = build_organization_plan("jeux")
+        assert plan["games"] == []
+        assert plan["parasites"] == []
 
     def test_apply_groups_and_renames_seasons(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
@@ -1749,6 +2000,15 @@ class TestTextFiles:
         (tmp_path / "big.txt").write_text("x" * 100)
         with pytest.raises(ValueError):
             read_text_file("big.txt", max_bytes=8)
+
+    def test_write_invalidates_cached_parent_size(self, tmp_path, monkeypatch):
+        _, _, write_text_file = self._reload(tmp_path, monkeypatch)
+        from cloud_panel.storage import get_folder_size
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "note.txt").write_text("x" * 10)
+        assert get_folder_size("", "docs")["size_bytes"] == 10
+        write_text_file("docs/note.txt", "x" * 30)
+        assert get_folder_size("", "docs")["size_bytes"] == 30
 
 
 class TestUploadConflict:

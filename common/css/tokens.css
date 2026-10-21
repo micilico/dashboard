@@ -78,6 +78,8 @@
   --ease-standard: cubic-bezier(0.28, 0, 0.22, 1);
   --ease-fast: cubic-bezier(0.28, 0, 0.22, 1);
   --motion-fast: 160ms;
+  --motion-transition: 160ms;
+  --motion-feedback: 120ms;
   --motion-base: 220ms;
   --motion-open: 280ms;
   --motion-close: 200ms;

@@ -510,16 +510,16 @@ suite('Drag & drop (move) logic', () => {
   });
 
   test('rows use pointer drag sources and folders expose pointer drop targets', () => {
-    assert.ok(appSource.includes("wirePointerDragSource(tr, f)"));
-    assert.ok(appSource.includes("wirePointerDropTarget(tr, () => f.path)"));
+    assert.ok(appSource.includes("wirePointerDragSource(tr, () => tr._cloudItem || f)"));
+    assert.ok(appSource.includes("wirePointerDropTarget(tr, () => (tr._cloudItem || f).path)"));
     assert.ok(appSource.includes("moveItemsTo(dest, items)"));
     assert.ok(appSource.includes('au("/files/move")'));
     assert.ok(appSource.includes("pointer-drop-active"));
   });
 
   test('grid tiles use the same pointer drag and drop pipeline', () => {
-    assert.ok(appSource.includes("wirePointerDragSource(tile, f)"));
-    assert.ok(appSource.includes("wirePointerDropTarget(tile, () => f.path)"));
+    assert.ok(appSource.includes("wirePointerDragSource(tile, () => tile._cloudItem || f)"));
+    assert.ok(appSource.includes("wirePointerDropTarget(tile, () => (tile._cloudItem || f).path)"));
   });
 
   test('pointer drag waits for a movement threshold and suppresses the trailing click', () => {
@@ -559,7 +559,7 @@ suite('Drag & drop (move) logic', () => {
   });
 });
 
-suite('Ranger les médias feature', () => {
+suite('Ranger les contenus feature', () => {
   const html = fs.readFileSync(
     path.join(__dirname, "..", "cloud_panel", "static", "index.html"),
     "utf8",
@@ -569,9 +569,9 @@ suite('Ranger les médias feature', () => {
     "utf8",
   );
 
-  test('toolbar exposes a "Ranger les médias" button', () => {
+  test('toolbar exposes a "Ranger les contenus" button', () => {
     assert.ok(html.includes('id="btnOrganizeSeries"'));
-    assert.ok(html.includes("Ranger les médias"));
+    assert.ok(html.includes("Ranger les contenus"));
   });
 
   test('organize dialog is present with summary, sections and confirm/cancel', () => {
@@ -591,35 +591,48 @@ suite('Ranger les médias feature', () => {
   test('qBittorrent folders delegate media organization to Torrent Panel', () => {
     assert.ok(appSource.includes('qbitOwned = S.path.split("/")'));
     assert.ok(appSource.includes("organizeButton.disabled = qbitOwned"));
-    assert.ok(appSource.includes("Ranger pour Jellyfin"));
+    assert.ok(appSource.includes("Ranger les contenus"));
   });
 
-  test('preview renders series, movies and parasites sections safely', () => {
+  test('preview renders series, movies, games, books, conflicts and parasites safely', () => {
     assert.ok(appSource.includes("function renderOrganizePreview"));
     assert.ok(appSource.includes('organizeSection("Séries"'));
     assert.ok(appSource.includes('organizeSection("Films"'));
+    assert.ok(appSource.includes('organizeSection("Jeux"'));
+    assert.ok(appSource.includes('organizeSection("Livres"'));
     assert.ok(appSource.includes('organizeSection("Parasites signalés"'));
     assert.ok(appSource.includes('organizeSection("Doublons détectés"'));
+    assert.ok(appSource.includes('organizeSection("Conflits à résoudre"'));
     assert.ok(appSource.includes("const duplicates = d.duplicates || []"));
+    assert.ok(appSource.includes("const conflicts = d.conflicts || []"));
     assert.ok(appSource.includes("name.textContent = g.name"));
     assert.ok(appSource.includes("from.textContent = source"));
     assert.ok(appSource.includes("to.textContent = entry.target"));
     assert.ok(appSource.includes("to.textContent = m.target"));
+    assert.ok(appSource.includes("function organizeReadyMediaRow(item)"));
+    assert.ok(appSource.includes("to.textContent = item.target"));
+    assert.ok(appSource.includes("conflict.recovery"));
+    assert.ok(appSource.includes('games.filter((item) => item.status === "ready")'));
+    assert.ok(appSource.includes('books.filter((item) => item.status === "ready")'));
     assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{g\.name\}/.test(appSource));
     assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{entry\.name\}/.test(appSource));
     assert.ok(!/innerHTML\s*=\s*`[^`]*\$\{m\.name\}/.test(appSource));
   });
 
-  test('confirmation is disabled when nothing to organize', () => {
-    assert.ok(appSource.includes('confirmBtn.disabled = true'));
-    assert.ok(appSource.includes("Aucun média détecté dans ce dossier."));
+  test('confirmation is disabled when nothing is ready or conflicts block every item', () => {
+    assert.ok(appSource.includes('confirmBtn.disabled = !canApply'));
+    assert.ok(appSource.includes('typeof d.canApply === "boolean" ? d.canApply : inferredReady'));
+    assert.ok(appSource.includes('[...readyGames, ...readyBooks].length > 0'));
+    assert.ok(appSource.includes("Aucun contenu détecté dans ce dossier."));
   });
 
   test('apply result shows a summary toast and reloads the listing', () => {
     assert.ok(appSource.includes("r.series_count"));
     assert.ok(appSource.includes("r.series_moved"));
     assert.ok(appSource.includes("r.movies_moved"));
-    assert.ok(appSource.includes("loadFiles();"));
+    assert.ok(appSource.includes("r.games_moved"));
+    assert.ok(appSource.includes("r.books_moved"));
+    assert.ok(appSource.includes("refreshAfterMutation();"));
   });
 });
 
@@ -734,6 +747,91 @@ suite('Bulk folder sizes', () => {
     assert.ok(appSource.includes("function calcAllFolderSizes"));
     assert.ok(appSource.includes('$("btnCalcSizes").addEventListener("click", calcAllFolderSizes)'));
     assert.ok(appSource.includes("folderSizes: new Map()"));
+  });
+});
+
+suite('Fluidité des listes', () => {
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+
+  test('recherche debouncée à 250 ms et requête dépassée invalidée', () => {
+    assert.ok(appSource.includes("const SEARCH_DEBOUNCE_MS = 250"));
+    assert.ok(appSource.includes("setTimeout(() => loadFiles({ reason: \"search\" }), SEARCH_DEBOUNCE_MS)"));
+    assert.ok(appSource.includes("S.latestLoadId = ++S.loadSequence"));
+    assert.ok(appSource.includes("S.activeLoad?.controller?.abort()"));
+  });
+
+  test('un seul chargement actif, les doublons ne fusionnent que sans file ni annulation', () => {
+    assert.ok(appSource.includes("const active = S.activeLoad"));
+    assert.ok(appSource.includes("const matchesActive = active"));
+    assert.ok(appSource.includes("matchesActive && !S.queuedLoad && !active.controller?.signal.aborted"));
+    assert.ok(appSource.includes("return active.promise"));
+    assert.ok(appSource.includes("S.queuedLoad = request"));
+    assert.ok(appSource.includes("queued?.resolve?.()"));
+    assert.ok(appSource.includes("request.promise = new Promise"));
+    assert.ok(appSource.includes("request.id !== S.latestLoadId"));
+    assert.ok(appSource.includes("runFileLoad(queued)"));
+    assert.ok(appSource.includes("if (!active.controller?.signal.aborted) active.controller?.abort()"));
+    assert.ok(appSource.includes("signal: request.controller.signal"));
+  });
+
+  test('un menu ouvert ne survit ni à un déclencheur détaché ni à une cible absente', () => {
+    assert.ok(appSource.includes("const preserveMenu = options.preserveMenu"));
+    assert.ok(appSource.includes("S.actionMenuInvoker?.isConnected"));
+    assert.ok(appSource.includes("all.some((item) => item.path === S.actionMenuTarget.path)"));
+    assert.ok(appSource.indexOf("if (!preserveMenu) closeFileActionMenu()") < appSource.indexOf("if (all.length === 0)"));
+  });
+
+  test('le contenu existant reste affiché pendant un refresh', () => {
+    assert.ok(appSource.includes("if (!S.files.length) renderFileSkeleton()"));
+    assert.ok(!appSource.includes("if (!append) { el.classList.remove(\"loading\"); S.files = [];"));
+  });
+
+  test('les lignes sont réconciliées par chemin sans remplacer toute la liste', () => {
+    assert.ok(appSource.includes("function reconcileList"));
+    assert.ok(appSource.includes("remaining.get(item.path)"));
+    assert.ok(!appSource.includes("replaceChildren(...all.map((f, i) => makeRow(f, i))"));
+  });
+
+  test('pagination bornée mais accès conservé à toutes les pages', () => {
+    assert.ok(appSource.includes("pageSize: 50"));
+    assert.ok(appSource.includes("if (S.totalItems > S.pageSize)"));
+    assert.ok(appSource.includes('loadFiles({ reason: "page" })'));
+    assert.ok(appSource.includes("request.page > totalPages"));
+    assert.ok(appSource.includes('reason: "page-correction"'));
+    assert.ok(!appSource.includes("S.files.concat(items)"));
+  });
+
+  test('polling suspendu en arrière-plan et sans chevauchement', () => {
+    assert.ok(appSource.includes("if (document.hidden) stopAutoRefresh()"));
+    assert.ok(appSource.includes("S.loading || S.activeLoad || S.queuedLoad"));
+    assert.ok(appSource.includes('loadFiles({ reason: "poll" })'));
+    assert.ok(appSource.includes('renderFiles({ preserveMenu: request.reason === "poll" })'));
+  });
+
+  test('quitter la vue fichiers annule aussi le travail en cours', () => {
+    assert.ok(appSource.includes('if (v !== "files") {'));
+    assert.ok(appSource.includes("S.latestLoadId = ++S.loadSequence"));
+    assert.ok(appSource.includes("S.activeLoad?.controller?.abort()"));
+  });
+
+  test('les objets sélectionnés suivent le rendu réconcilié', () => {
+    assert.ok(appSource.includes("S.selectedItems.set(item.path, item)"));
+    assert.ok(appSource.includes("toggleSelect(tr._cloudItem || f)"));
+  });
+
+  test('un calcul de taille commencé avant mutation ne réinjecte pas son cache', () => {
+    assert.ok(appSource.includes("folderSizeEpoch: 0"));
+    assert.ok(appSource.includes("S.folderSizeEpoch += 1"));
+    assert.ok(appSource.includes("expectedEpoch !== S.folderSizeEpoch"));
+    assert.ok(appSource.includes("const sizeEpoch = S.folderSizeEpoch"));
+  });
+
+  test('les mutations terminées invalident les tailles mémorisées', () => {
+    assert.ok(appSource.includes("function refreshAfterMutation"));
+    assert.ok(appSource.includes("invalidateFolderSizes();\n  loadFiles({ reason: \"mutation\" })"));
   });
 });
 
