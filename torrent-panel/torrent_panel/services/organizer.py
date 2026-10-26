@@ -1545,12 +1545,17 @@ async def apply_organization_plan(
     plan: dict[str, Any],
     resume_manager: "VerifiedResumeManager | None" = None,
     progress: Callable[[dict[str, Any]], Any] | None = None,
+    recheck: bool = False,
 ) -> dict[str, Any]:
     """Apply a plan while keeping every torrent paused.
 
     ``resume_manager`` remains an optional compatibility argument for callers
     from older versions.  It is intentionally ignored: organizing media must
     never trigger a download or a resume automatically.
+
+    ``recheck`` defaults to False: the renames and the location change are
+    performed by qBittorrent itself, so its file database is already
+    consistent.  Re-reading every torrent on the (slow) FUSE mount is opt-in.
     """
     results: list[dict[str, Any]] = []
     organized = 0
@@ -1599,29 +1604,41 @@ async def apply_organization_plan(
             if entry["currentPath"] != entry["targetPath"]:
                 await qbit.set_location_many([torrent_hash], entry["targetPath"])
                 location_changed = True
-            current_stage = "rechecking"
-            await report({
-                "stage": "rechecking",
-                "index": index,
-                "total": total,
-                "processed": organized,
-                "hash": torrent_hash,
-                "name": torrent_name,
-                "message": "Déplacement effectué — revérification demandée.",
-            })
-            await qbit.recheck_many([torrent_hash])
+            if recheck:
+                current_stage = "rechecking"
+                await report({
+                    "stage": "rechecking",
+                    "index": index,
+                    "total": total,
+                    "processed": organized,
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "message": "Déplacement effectué — revérification demandée.",
+                })
+                await qbit.recheck_many([torrent_hash])
+                current_stage = "verification"
+                await report({
+                    "stage": "verification",
+                    "index": index,
+                    "total": total,
+                    "processed": organized,
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "message": "Vérification qBittorrent demandée.",
+                })
+            else:
+                current_stage = "verification"
+                await report({
+                    "stage": "verification",
+                    "index": index,
+                    "total": total,
+                    "processed": organized,
+                    "hash": torrent_hash,
+                    "name": torrent_name,
+                    "message": "Déplacement effectué — vérification ignorée (métadonnées qBittorrent à jour).",
+                })
             organized += 1
             results.append({"hash": torrent_hash, "name": entry["name"], "success": True, "status": "verification"})
-            current_stage = "verification"
-            await report({
-                "stage": "verification",
-                "index": index,
-                "total": total,
-                "processed": organized,
-                "hash": torrent_hash,
-                "name": torrent_name,
-                "message": "Vérification qBittorrent demandée.",
-            })
         except QbitError as exc:
             rollback_errors = await _rollback(qbit, entry, renamed, location_changed)
             results.append(

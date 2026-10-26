@@ -156,6 +156,10 @@ ORGANIZER_RESUME_STATE_PATH = Path(
     )
 )
 ORGANIZER_RESUME_POLL_SECONDS = float(os.getenv("TORRENT_PANEL_ORGANIZER_RESUME_POLL_SECONDS", "10"))
+# Le rangement renomme/déplace via l'API qBittorrent : sa base de données de
+# fichiers est déjà à jour, une revérification ne sert qu'à relire tous les
+# fichiers sur le montage FUSE. Désactivée par défaut pour éviter cette I/O.
+ORGANIZER_RECHECK_ENABLED = os.getenv("TORRENT_PANEL_ORGANIZER_RECHECK_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 LIBRARY_ORGANIZER_RUNS_PATH = Path(
     os.getenv(
         "TORRENT_PANEL_LIBRARY_ORGANIZER_RUNS_PATH",

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from common import error_detail
 from common.performance import JobNotFound, JobQueueFull
 
-from ..config import HASH_RE, MEDIA_MOUNT_PATH, QBIT_SAVE_PATH
+from ..config import HASH_RE, MEDIA_MOUNT_PATH, ORGANIZER_RECHECK_ENABLED, QBIT_SAVE_PATH
 from ..services.organizer import apply_organization_plan, build_organization_plan
 from ..services.relink import relink_missing
 from .csrf_guard import require_action_guard
@@ -114,6 +114,7 @@ def _runner(request: Request, payload: JobRequest):
                     request.app.state.qbit,
                     plan,
                     progress=progress,
+                    recheck=ORGANIZER_RECHECK_ENABLED,
                 )
                 result = {"plan": plan, "result": applied}
         elif payload.type == "library-refresh":

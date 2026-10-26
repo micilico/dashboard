@@ -1734,6 +1734,23 @@ class OrganizerTests(BackendTests):
         self.assertNotIn("JELLYFIN_API_KEY", str(stored))
         self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
 
+    def test_library_apply_skips_recheck_when_disabled(self):
+        self._movie_payload()
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT):
+            preview = self.client.get("/torrent-panel/api/torrents/organize-library-preview")
+        self.assertEqual(preview.status_code, 200)
+        run_id = preview.json()["runId"]
+        with (
+            mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", self.QBIT_ROOT),
+            mock.patch.object(torrent_routes, "MEDIA_MOUNT_PATH", "/path/that/does/not/exist"),
+            mock.patch.object(torrent_routes, "ORGANIZER_RECHECK_ENABLED", False),
+            mock.patch.object(app.state.media_automation, "refresh_rclone", new=mock.AsyncMock()),
+            mock.patch.object(app.state.media_automation, "trigger_jellyfin_scan", new=mock.AsyncMock(return_value={"scope": "global"})),
+        ):
+            response = self.post_action("/torrent-panel/api/torrents/organize-library", {"runId": run_id, "hashes": [VALID_HASH]})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("recheck", [call[0] for call in app.state.qbit.calls])
+
     def test_stored_plan_rejects_new_qbittorrent_owner_before_any_mutation(self):
         mount = Path(tempfile.mkdtemp())
         library = mount / "qbittorrent"
@@ -1988,7 +2005,9 @@ class OrganizerTests(BackendTests):
     def test_apply_uses_qbittorrent_then_rechecks_and_never_resumes(self):
         self._movie_payload()
         plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
-        result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume))
+        result = asyncio.run(
+            organizer_service.apply_organization_plan(app.state.qbit, plan, app.state.verified_resume, recheck=True)
+        )
         self.assertEqual(result["organized"], 1)
         calls = app.state.qbit.calls
         pause_index = calls.index(("pause", [VALID_HASH]))
@@ -2000,6 +2019,16 @@ class OrganizerTests(BackendTests):
         self.assertLess(location_index, recheck_index)
         self.assertEqual(app.state.verified_resume.snapshot()["pending"], 0)
         self.assertNotIn("resume", [call[0] for call in calls])
+
+    def test_apply_skips_recheck_by_default_to_spare_disk_io(self):
+        self._movie_payload()
+        plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
+        result = asyncio.run(
+            organizer_service.apply_organization_plan(app.state.qbit, plan, None)
+        )
+        self.assertEqual(result["organized"], 1)
+        self.assertNotIn("recheck", [call[0] for call in app.state.qbit.calls])
+        self.assertNotIn("resume", [call[0] for call in app.state.qbit.calls])
 
     def test_failed_rename_rolls_back_and_never_rechecks_or_resumes(self):
         self._movie_payload()

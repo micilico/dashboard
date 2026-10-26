@@ -16,6 +16,7 @@ from ..config import (
     ALLOWED_SAVE_PATHS,
     HASH_RE,
     MEDIA_MOUNT_PATH,
+    ORGANIZER_RECHECK_ENABLED,
     QBIT_SAVE_PATH,
     TRACKER_INDEX_CACHE_TTL_SECONDS,
     TR4KER_ANNOUNCE_URL,
@@ -278,7 +279,11 @@ async def organize_torrents(request: Request, payload: OrganizeRequest) -> dict[
                 hashes=hashes,
                 mount_root=MEDIA_MOUNT_PATH,
             )
-            result = await apply_organization_plan(request.app.state.qbit, plan)
+            result = await apply_organization_plan(
+                request.app.state.qbit,
+                plan,
+                recheck=ORGANIZER_RECHECK_ENABLED,
+            )
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
 
@@ -530,7 +535,13 @@ async def organize_library(request: Request, payload: LibraryOrganizeRequest) ->
                     "items": {},
                 },
             ) or run
-            result = await apply_organization_plan(request.app.state.qbit, plan, None, progress=report_progress)
+            result = await apply_organization_plan(
+                request.app.state.qbit,
+                plan,
+                None,
+                progress=report_progress,
+                recheck=ORGANIZER_RECHECK_ENABLED,
+            )
         except QbitError as exc:
             if run:
                 request.app.state.organization_runs.update(run["runId"], status="preview", stage="failed")

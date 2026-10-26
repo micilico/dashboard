@@ -261,7 +261,7 @@ curl -I http://127.0.0.1:3130/healthz
 | GET | `/api/torrents/relink-status` | Compteur léger (sans scan disque) des torrents à réparer : `missingFiles`/`error` + états pause (`pausedDL`/`stoppedDL`) + `savePath == racine de catégorie` |
 | POST | `/api/torrents/relink` | Réorganiser les torrents manquants (dossier + fichiers au nom du torrent via cloud-panel), `setLocation(parent)` + layout `Subfolder`, recheck, pause (corps : `{hashes?: [], preview?: bool}`) |
 | GET | `/api/torrents/organize-preview` | Prévisualiser le rangement Jellyfin coordonné à partir des fichiers connus par qBittorrent |
-| POST | `/api/torrents/organize` | Ranger via qBittorrent (`renameFile` + `setLocation`), revérifier et ne reprendre qu’après 100 % |
+| POST | `/api/torrents/organize` | Ranger via qBittorrent (`renameFile` + `setLocation`), sans revérification par défaut (`TORRENT_PANEL_ORGANIZER_RECHECK_ENABLED`), pause conservée |
 | GET | `/api/torrents/organize-status` | État des torrents en attente de reprise sécurisée après revérification |
 | GET | `/api/dashboard` | Snapshot vue d'ensemble |
 | GET | `/api/health` | État de santé complet |
@@ -354,6 +354,7 @@ curl -I http://127.0.0.1:3130/healthz
 | `TORRENT_PANEL_RATIO_ALERT_THRESHOLD` | Seuil initial du moniteur de ratio (défaut 10 ; réglable dans l'interface) |
 | `TORRENT_PANEL_AUTO_RELINK_ENABLED` | Auto-réparation planifiée des torrents en fichiers manquants (défaut `false`) |
 | `TORRENT_PANEL_AUTO_RELINK_INTERVAL_SECONDS` | Intervalle de l'auto-réparation en secondes (défaut 3600) |
+| `TORRENT_PANEL_ORGANIZER_RECHECK_ENABLED` | Revérification qBittorrent après « ranger la bibliothèque » (défaut `false` ; `true` pour la réactiver) |
 
 ### Relink des torrents (réparation sans re-téléchargement)
 
