@@ -690,6 +690,14 @@ suite('Folder size on demand', () => {
     assert.ok(appSource.includes('btn.type = "button"'));
     assert.ok(appSource.includes('setAttribute("aria-label"'));
   });
+
+  test('computed folder sizes survive a reload', () => {
+    assert.ok(appSource.includes("FOLDER_SIZES_STORAGE_KEY"));
+    assert.ok(appSource.includes("FOLDER_SIZES_TTL_MS"));
+    assert.ok(appSource.includes("readPersistedFolderSizes();"));
+    assert.ok(appSource.includes("persistFolderSizes();"));
+    assert.ok(appSource.includes("clearPersistedFolderSizes();"));
+  });
 });
 
 suite('Bulk folder sizes', () => {
@@ -875,6 +883,29 @@ suite('Background jobs and live progress', () => {
     assert.ok(appSource.includes("job.total"));
     assert.ok(appSource.includes("job.progress"));
     assert.ok(appSource.includes("ensureJobPolling"));
+  });
+
+  test('a fast job settles even when its terminal frame arrived first', () => {
+    const trackStart = appSource.indexOf("function trackJob");
+    const waiterAt = appSource.indexOf("waiters.add({ resolve, reject })", trackStart);
+    const updateAt = appSource.indexOf("updateJob(job);", trackStart);
+    assert.ok(trackStart >= 0);
+    assert.ok(waiterAt > trackStart);
+    assert.ok(updateAt > waiterAt);
+    assert.ok(appSource.includes("const current = S.jobs.get(job.id) || job"));
+  });
+
+  test('job polling is a safety net even while the SSE stream is active', () => {
+    assert.ok(!appSource.includes("if (!S.liveSubscription?.isStarted() && !document.hidden)"));
+    assert.ok(appSource.includes("JOB_POLL_FAST_MS"));
+    assert.ok(appSource.includes("JOB_POLL_SSE_MS"));
+    assert.ok(appSource.includes("JOB_POLL_MAX_MS"));
+  });
+
+  test('tracked jobs are reconciled after a stream reconnect', () => {
+    assert.ok(appSource.includes("async function reconcileJobs"));
+    assert.ok(appSource.includes('api(au("/jobs")'));
+    assert.ok(appSource.includes("reconcileJobs();"));
   });
 
   test('production bundle includes shared live runtime and content token', () => {

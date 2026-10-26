@@ -88,6 +88,13 @@ def _build_factory(kind: str, params: Mapping) -> Callable[[JobContext], object]
         paths = [_validate_path(value, "paths") for value in raw_paths]
 
         def factory(context: JobContext) -> dict:
+            def on_entries(index: int, total: int, seen: int) -> None:
+                context.report(
+                    message=f"{index}/{total} dossiers · {seen} fichiers",
+                    progress=max(0, index - 1),
+                    total=total,
+                )
+
             return get_folder_sizes(
                 paths,
                 progress=lambda current, total: context.report(
@@ -95,6 +102,7 @@ def _build_factory(kind: str, params: Mapping) -> Callable[[JobContext], object]
                     progress=current,
                     total=total,
                 ),
+                entries_progress=on_entries,
             )
 
         return factory

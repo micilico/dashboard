@@ -301,24 +301,34 @@ def get_folder_size(
 def get_folder_sizes(
     paths: list[str],
     progress: Callable[[int, int], None] | None = None,
+    entries_progress: Callable[[int, int, int], None] | None = None,
 ) -> dict:
     """Compute the recursive size of several folders in one batch.
 
     Invalid or non-directory paths are counted in ``failed`` instead of
     raising, so a single request can compute all visible folders safely.
+    ``entries_progress`` receives ``(folder_index, folder_total, entries_seen)``
+    so a long walk stays observable while a single folder is scanned.
     """
     items: list[dict] = []
     failed = 0
+    total = len(paths)
     for index, raw_rel in enumerate(paths, start=1):
         rel = raw_rel.strip() if isinstance(raw_rel, str) else raw_rel
         if not rel:
             continue
+        entries_callback = None
+        if entries_progress is not None:
+            entries_callback = lambda seen, idx=index: entries_progress(idx, total, seen)
         try:
             target = _resolve(rel)
             if not os.path.isdir(target):
                 failed += 1
                 continue
-            size_bytes = _folder_size_cached(os.path.realpath(target))
+            size_bytes = _folder_size_cached(
+                os.path.realpath(target),
+                progress=entries_callback,
+            )
             items.append({
                 'path': _rel(target, _mount_real()),
                 'name': rel.replace("/", os.sep).rsplit(os.sep, 1)[-1],
@@ -329,8 +339,8 @@ def get_folder_sizes(
             failed += 1
         finally:
             if progress is not None:
-                progress(index, len(paths))
-    return {'items': items, 'total': len(paths), 'failed': failed}
+                progress(index, total)
+    return {'items': items, 'total': total, 'failed': failed}
 
 
 def format_size(size_bytes: int) -> str:

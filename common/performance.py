@@ -27,6 +27,10 @@ from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
+# Jobs exceeding this duration emit an explicit warning so a stuck filesystem
+# walk is visible in the container logs instead of only in the job tray.
+JOB_SLOW_THRESHOLD_SECONDS = float(os.getenv("DASHBOARD_JOB_SLOW_SECONDS", "60"))
+
 T = TypeVar("T")
 ErrorFactory = Callable[[BaseException], dict[str, str]]
 JobFactory = Callable[["JobContext"], Awaitable[T] | T]
@@ -524,8 +528,11 @@ class JobManager:
         record = self._records.get(queued.id)
         if record is None or record.status in TERMINAL_JOB_STATUSES:
             return
+        started = time.monotonic()
+        kind = str(record.metadata.get("kind") or "job")[:40]
         record.status = JobStatus.RUNNING
         record.started_at = _utc_now()
+        logger.info("job_started kind=%s job=%s", kind, record.id[:8])
         await self._publish(record.public())
         self._signal_persist()
 
@@ -586,6 +593,24 @@ class JobManager:
                 record.finished_at = _utc_now()
                 self._active_by_key.pop(record.key, None)
                 self._trim_terminal_records()
+            duration_ms = int((time.monotonic() - started) * 1000)
+            log = logger.warning if record.status != JobStatus.COMPLETED else logger.info
+            log(
+                "job_finished kind=%s job=%s status=%s duration_ms=%d progress=%s error=%s",
+                kind,
+                record.id[:8],
+                record.status.value,
+                duration_ms,
+                record.progress,
+                (record.error or {}).get("code", ""),
+            )
+            if duration_ms >= JOB_SLOW_THRESHOLD_SECONDS * 1000:
+                logger.warning(
+                    "job_slow kind=%s job=%s duration_ms=%d",
+                    kind,
+                    record.id[:8],
+                    duration_ms,
+                )
             await self._publish(
                 self._records.get(record.id, record).public()
             )

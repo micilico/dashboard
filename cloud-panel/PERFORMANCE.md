@@ -30,9 +30,26 @@ Relevant settings:
 - `CLOUD_PANEL_JOB_MAX_QUEUED` (default `32`)
 - `CLOUD_PANEL_JOB_MAX_ENTRIES` (default `256`)
 - `CLOUD_PANEL_JOB_STATE_PATH` (default `data/jobs-state.json`)
+- `DASHBOARD_JOB_SLOW_SECONDS` (default `60`)
+
+Each job logs `job_started`, `job_finished` (`kind`, short id, status,
+duration, progress, error code) and a `job_slow` warning once it exceeds the
+slow threshold, so a stuck filesystem walk is visible in the container logs
+instead of only in the job tray. `folder_sizes` also reports the number of
+entries scanned while a single folder is being walked.
 
 Jobs interrupted by a restart are retained as `interrupted`; mutations are not
 replayed automatically.
+
+## Folder sizes in the browser
+
+Computed folder sizes are kept in memory for the current session and persisted
+in `localStorage` (`cloud-panel:folder-sizes:v1`, 24-hour TTL, 500 entries) so
+they survive a reload. Any mutation clears the persisted cache. Tracked jobs
+are polled as a safety net even while the SSE stream is active (5 s in SSE mode,
+1 s otherwise, 30-minute cap) and reconciled through `GET /api/jobs` after a
+stream reconnect, because a terminal job frame may be missed while the stream
+is reopening.
 
 ## Targeted rclone refresh
 

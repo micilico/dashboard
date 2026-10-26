@@ -342,6 +342,23 @@ class TestFolderSizes:
         assert result["failed"] == 0
         assert [item["path"] for item in result["items"]] == ["docs"]
 
+    def test_batch_reports_entries_progress(self, tmp_path, monkeypatch):
+        get_folder_sizes_fn = self._reload(monkeypatch, tmp_path)
+        (tmp_path / "docs").mkdir()
+        for index in range(120):
+            (tmp_path / "docs" / f"f{index}.txt").write_bytes(b"x")
+        seen: list[tuple[int, int, int]] = []
+        result = get_folder_sizes_fn(
+            ["docs"],
+            entries_progress=lambda index, total, entries: seen.append(
+                (index, total, entries)
+            ),
+        )
+        assert result["items"][0]["size_bytes"] == 120
+        assert seen
+        assert seen[-1] == (1, 1, 120)
+        assert all(index == 1 and total == 1 for index, total, _ in seen)
+
 
 class TestListDirectory:
     def test_list_root(self, tmp_path, monkeypatch):
