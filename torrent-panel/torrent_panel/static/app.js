@@ -2544,6 +2544,8 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
   els.organizeMediaSummary.textContent = "Analyse des torrents terminés…";
   els.organizeMediaPlan.replaceChildren();
   els.confirmOrganizeMediaButton.disabled = true;
+  if (typeof trapFocus === "function") trapFocus(els.organizeMediaDialog);
+  if (!els.organizeMediaDialog.open) els.organizeMediaDialog.showModal();
   try {
     const refreshJob = await submitJob("library-refresh");
     await waitForJob(refreshJob.id, (job) => {
@@ -2684,10 +2686,8 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
     renderOrganizeSelection();
     els.confirmOrganizeMediaButton.disabled = entries.length + orphanMedia.length + duplicateGroups.filter((group) => group.status !== "conflict").length === 0;
     applyOrganizeFilter();
-    if (typeof trapFocus === "function") trapFocus(els.organizeMediaDialog);
   } catch (error) {
     els.organizeMediaSummary.textContent = describeError(error);
-    els.organizeMediaDialog.showModal();
   }
 }
 

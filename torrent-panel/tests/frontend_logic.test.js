@@ -524,6 +524,51 @@ console.log("chart svg ok");
 console.log("frontend logic ok");
 
 (async () => {
+  for (const failPreview of [false, true]) {
+    const dialog = createElement("organizeMediaDialog");
+    const localElements = new Proxy({ organizeMediaDialog: dialog }, {
+      get(target, key) { return target[key] ||= createElement(String(key)); },
+    });
+    let finishRefresh;
+    const refresh = new Promise((resolve) => { finishRefresh = resolve; });
+    const calls = [];
+    const organizeContext = {
+      state: {}, els: localElements, document: context.document,
+      resetOrganizeWorkflow() {}, trapFocus() {}, showToast() {},
+      renderOrganizeSelection() {}, applyOrganizeFilter() {},
+      describeError: (error) => error.message,
+      jobProgressLabel: () => "Analyse en cours…",
+      async submitJob(type) {
+        calls.push(type);
+        assert.equal(dialog.open, true, "the dialog opens before any background request");
+        return { id: type };
+      },
+      async waitForJob(id, update) {
+        update({});
+        if (id === "library-refresh") return refresh;
+        if (failPreview) throw new Error("Analyse indisponible");
+        return { result: { runId: "preview", plan: {} } };
+      },
+    };
+    const openSource = source.slice(source.indexOf("async function openOrganizeMediaDialog("), source.indexOf("function applyOrganizeFilter("));
+    vm.runInNewContext(`${openSource}\nglobalThis.open = openOrganizeMediaDialog;`, organizeContext);
+    const pending = organizeContext.open();
+    assert.equal(dialog.open, true, "loading is visible immediately after clicking");
+    assert.equal(localElements.confirmOrganizeMediaButton.disabled, true);
+    finishRefresh({});
+    await pending;
+    assert.deepEqual(calls, ["library-refresh", "library-preview"]);
+    assert.equal(dialog.open, true, "the preview remains visible after completion");
+    assert.equal(localElements.organizeMediaSummary.textContent, failPreview
+      ? "Analyse indisponible" : "0 torrent à ranger · 0 avertissement.");
+  }
+  console.log("organize dialog loading, success and failure ok");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+
+(async () => {
   let pendingFrame = null;
   api.state.renderFrame = null;
   api.state.renderPromise = null;
