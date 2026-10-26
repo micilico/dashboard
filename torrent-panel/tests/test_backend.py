@@ -1899,6 +1899,86 @@ class OrganizerTests(BackendTests):
             "non associé au torrent" in warning["reason"]
             for warning in plan["warnings"]
         ))
+
+    def _sidecar_collision_plan(self, mount: Path):
+        library = mount / "qbittorrent"
+        source = library / "Tiny.Bookshop.v1.1.6-TENOKE"
+        source.mkdir(parents=True, exist_ok=True)
+        (source / "TinyBookshop.exe").write_bytes(b"x" * 10)
+        (source / "tenoke-tiny.bookshop.v1.1.6.nfo").write_bytes(b"info")
+        app.state.qbit.torrents_payload = [{
+            "hash": VALID_HASH,
+            "name": "Tiny.Bookshop.v1.1.6-TENOKE",
+            "state": "uploading",
+            "progress": 1,
+            "size": 14,
+            "remaining": 0,
+            "category": "",
+            "savePath": self.QBIT_ROOT,
+        }]
+        app.state.qbit.files_payload = {VALID_HASH: [
+            {"name": "Tiny.Bookshop.v1.1.6-TENOKE/TinyBookshop.exe", "size": 10},
+            {"name": "Tiny.Bookshop.v1.1.6-TENOKE/tenoke-tiny.bookshop.v1.1.6.nfo", "size": 4},
+        ]}
+        inventory = organizer_service.build_library_inventory(str(mount), self.QBIT_ROOT)
+        return asyncio.run(organizer_service.build_organization_plan(
+            app.state.qbit,
+            self.QBIT_ROOT,
+            mount_root=str(mount),
+            inventory=inventory,
+        ))
+
+    def test_sidecar_collision_is_trashed_instead_of_blocking_the_torrent(self):
+        mount = Path(tempfile.mkdtemp())
+        destination = mount / "qbittorrent" / "Jeux" / "Tiny.Bookshop.v1.1.6-TENOKE"
+        destination.mkdir(parents=True)
+        (destination / "tenoke-tiny.bookshop.v1.1.6.nfo").write_bytes(b"old!")
+
+        plan = self._sidecar_collision_plan(mount)
+
+        self.assertEqual(len(plan["entries"]), 1)
+        entry = plan["entries"][0]
+        self.assertEqual(entry["kind"], "game")
+        self.assertEqual(entry["targetPath"], f"{self.QBIT_ROOT}/Jeux")
+        self.assertIn(
+            {
+                "op": "delete",
+                "path": "qbittorrent/Jeux/Tiny.Bookshop.v1.1.6-TENOKE",
+                "old_name": "tenoke-tiny.bookshop.v1.1.6.nfo",
+            },
+            entry["cleanup"],
+        )
+        self.assertTrue(any("Conflit de métadonnées" in warning["reason"] for warning in plan["warnings"]))
+
+        from torrent_panel.services import cloud_panel as cloud_panel_service
+
+        cleanup_calls: list[list[dict[str, str]]] = []
+
+        async def fake_arrange_batch(items):
+            cleanup_calls.append(list(items))
+            return {"results": [{"success": True} for _ in items], "failed": 0}
+
+        with mock.patch.object(cloud_panel_service, "arrange_batch", side_effect=fake_arrange_batch):
+            result = asyncio.run(organizer_service.apply_organization_plan(app.state.qbit, plan, recheck=False))
+
+        self.assertEqual(result["organized"], 1)
+        self.assertEqual(cleanup_calls, [entry["cleanup"]])
+        self.assertIn(("set_location", [VALID_HASH], f"{self.QBIT_ROOT}/Jeux"), app.state.qbit.calls)
+
+    def test_payload_collision_still_blocks_the_torrent(self):
+        mount = Path(tempfile.mkdtemp())
+        destination = mount / "qbittorrent" / "Jeux" / "Tiny.Bookshop.v1.1.6-TENOKE"
+        destination.mkdir(parents=True)
+        (destination / "TinyBookshop.exe").write_bytes(b"other")
+
+        plan = self._sidecar_collision_plan(mount)
+
+        self.assertEqual(plan["entries"], [])
+        self.assertTrue(any(
+            "Collision de destination" in warning["reason"]
+            for warning in plan["warnings"]
+        ))
+
     def test_preview_can_be_scoped_to_one_torrent(self):
         self._movie_payload()
         other_hash = "b" * 40

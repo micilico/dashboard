@@ -66,6 +66,9 @@ _GAME_INSTALLER_EXTENSIONS = {".bin", ".cab", ".dat", ".dll", ".pak"}
 _GAME_DATA_DIRECTORIES = {"binaries", "content", "data", "engine"}
 _GAME_VERSION_RE = re.compile(r"(?i)(?:^|[\s._-])v\d+(?:\.\d+){1,3}(?:$|[\s._-])")
 _DANGEROUS_EXTENSIONS = {".rar", ".zip", ".7z", ".part", ".exe", ".msi", ".bat", ".cmd", ".scr", ".com"}
+# Metadata files that may be left at an organization destination by a previous
+# attempt. They can be moved to the trash instead of blocking a whole torrent.
+_ORGANIZER_SIDECAR_EXTENSIONS = {".md5", ".nfo", ".sfv", ".sha1", ".txt", ".url"}
 _BOOK_IMPLICIT_BLOCKED_EXTENSIONS = _DANGEROUS_EXTENSIONS | {".dll", ".dat"}
 _ACTIVE_SEED_STATES = {"uploading", "stalledUP", "forcedUP", "queuedUP", "checkingUP"}
 _COMPLETE_STATES = _ACTIVE_SEED_STATES | {"pausedUP", "stoppedUP"}
@@ -108,11 +111,16 @@ class LibraryInventory:
         generation: str,
         *,
         available: bool = True,
+        anchor_prefix: str = "",
     ) -> None:
         self.mount_root = mount_root
         self.qbit_root = qbit_root
         self.files = files
         self.generation = generation
+        # Mount-relative name of the qBittorrent root folder (usually
+        # ``qbittorrent``). Used to translate inventory paths into cloud-panel
+        # paths for housekeeping operations.
+        self.anchor_prefix = anchor_prefix
         # An absent or unreadable mount is not the same as a confirmed empty
         # library.  Missing-file checks must not reject every torrent merely
         # because the rclone mount is temporarily unavailable.
@@ -149,6 +157,9 @@ def build_library_inventory(mount_root: str, qbit_root: str, *, max_entries: int
             anchor = direct
     except OSError:
         return LibraryInventory(mount, qbit_root, [], _inventory_generation(False, []), available=False)
+    anchor_prefix = ""
+    if os.path.realpath(anchor) != mount:
+        anchor_prefix = os.path.relpath(anchor, mount).replace(os.sep, "/")
     files: list[dict[str, Any]] = []
     try:
         for directory, _dirs, names in os.walk(anchor):
@@ -180,7 +191,7 @@ def build_library_inventory(mount_root: str, qbit_root: str, *, max_entries: int
                 break
     except OSError:
         return LibraryInventory(mount, qbit_root, files, _inventory_generation(False, files), available=False)
-    inventory = LibraryInventory(mount, qbit_root, files, _inventory_generation(True, files))
+    inventory = LibraryInventory(mount, qbit_root, files, _inventory_generation(True, files), anchor_prefix=anchor_prefix)
     inventory._built_at = time.monotonic()
     return inventory
 
@@ -1320,26 +1331,71 @@ async def build_organization_plan(
         for torrent, files in zip(torrents, file_payloads)
     }
     owners: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    disk_collisions: set[str] = set()
+    blocked_hashes: set[str] = set()
+    # Ownership must cover every torrent, not only the selected subset: a
+    # sidecar at the destination may belong to an unselected torrent.
+    all_manifest_keys = {
+        _path_key(physical_path)
+        for torrent, files in zip(all_torrents, all_file_payloads)
+        for _item, physical_path in _torrent_manifest_items(torrent, files, root)
+        if physical_path is not None
+    }
     for entry in candidates:
+        entry_manifest = manifest_paths_by_hash.get(entry["hash"], set())
+        collisions: list[tuple[str, str]] = []
         for target_file in entry["targetFiles"]:
             physical_target = _relative_to_qbit_root(entry["targetPath"], target_file, root)
             target_key = _path_key(physical_target or "")
+            owners.setdefault((entry["targetPath"], target_file.casefold()), []).append(entry)
             if (
                 inventory
                 and physical_target is not None
                 and target_key in inventory.path_keys
-                and target_key not in manifest_paths_by_hash.get(entry["hash"], set())
-                and entry["hash"] not in disk_collisions
+                and target_key not in entry_manifest
             ):
-                disk_collisions.add(entry["hash"])
-                warnings.append({
-                    "hash": entry["hash"],
-                    "name": entry["name"],
-                    "reason": f"Collision de destination ({target_file}) — fichier existant non associé au torrent",
-                })
-            owners.setdefault((entry["targetPath"], target_file.casefold()), []).append(entry)
-    colliding_hashes: set[str] = set(disk_collisions)
+                collisions.append((target_file, physical_target))
+        if not collisions:
+            continue
+        # Metadata leftovers (NFO, checksums…) from a previous attempt can be
+        # moved to the trash instead of blocking the whole torrent. Payload
+        # files and files owned by another torrent still block the plan.
+        sidecars = [
+            (target_file, physical_target)
+            for target_file, physical_target in collisions
+            if posixpath.splitext(target_file)[1].lower() in _ORGANIZER_SIDECAR_EXTENSIONS
+            and _path_key(physical_target) not in all_manifest_keys
+        ]
+        blockers = [
+            (target_file, physical_target)
+            for target_file, physical_target in collisions
+            if (target_file, physical_target) not in sidecars
+        ]
+        if blockers:
+            blocked_hashes.add(entry["hash"])
+            warnings.append({
+                "hash": entry["hash"],
+                "name": entry["name"],
+                "reason": f"Collision de destination ({blockers[0][0]}) — fichier existant non associé au torrent",
+            })
+            continue
+        anchor = (getattr(inventory, "anchor_prefix", "") or "").rstrip("/")
+        cleanup_ops: list[dict[str, str]] = []
+        for _target_file, physical_target in sidecars:
+            mount_relative = posixpath.join(anchor, physical_target) if anchor else physical_target
+            cleanup_ops.append({
+                "op": "delete",
+                "path": posixpath.dirname(mount_relative),
+                "old_name": posixpath.basename(mount_relative),
+            })
+        if cleanup_ops:
+            entry["cleanup"] = cleanup_ops
+            warnings.append({
+                "hash": entry["hash"],
+                "name": entry["name"],
+                "reason": f"Conflit de métadonnées ({', '.join(target_file for target_file, _ in sidecars[:3])}) — l'ancien fichier sera déplacé dans la corbeille",
+                "files": ", ".join(target_file for target_file, _ in sidecars[:5]),
+            })
+    colliding_hashes: set[str] = set(blocked_hashes)
     for (_location, target_file), target_owners in owners.items():
         distinct = {entry["hash"] for entry in target_owners}
         if len(distinct) <= 1:
@@ -1637,6 +1693,8 @@ async def apply_organization_plan(
     performed by qBittorrent itself, so its file database is already
     consistent.  Re-reading every torrent on the (slow) FUSE mount is opt-in.
     """
+    from .cloud_panel import CloudPanelError, arrange_batch
+
     results: list[dict[str, Any]] = []
     organized = 0
     entries = plan.get("entries", [])
@@ -1670,6 +1728,25 @@ async def apply_organization_plan(
             })
             await qbit.pause_many([torrent_hash])
             await _wait_until_paused(qbit, torrent_hash)
+            cleanup_ops = entry.get("cleanup") or []
+            if cleanup_ops:
+                try:
+                    cleanup_result = await arrange_batch(cleanup_ops)
+                except CloudPanelError as exc:
+                    raise QbitError(
+                        502,
+                        "Nettoyage des fichiers en conflit impossible.",
+                        code="organizer_cleanup_failed",
+                        recovery="Vérifier le cloud-panel",
+                    ) from exc
+                if int(cleanup_result.get("failed", 0)):
+                    raise QbitError(
+                        502,
+                        "Nettoyage des fichiers en conflit refusé.",
+                        code="organizer_cleanup_failed",
+                        recovery="Vérifier la corbeille",
+                    )
+                logger.info("organize: %d fichier(s) en conflit déplacé(s) dans la corbeille", len(cleanup_ops))
             current_stage = "moving"
             await report({
                 "stage": "moving",
