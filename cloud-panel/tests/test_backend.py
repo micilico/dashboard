@@ -1517,6 +1517,80 @@ class TestMediaOrganizer:
         assert result["completed_items"] == 1
         assert result["failed_items"] == 1
 
+    def test_apply_reports_public_progress(self, tmp_path, monkeypatch):
+        self._reload(monkeypatch, tmp_path)
+        from cloud_panel.services.media import apply_organization_plan
+
+        (tmp_path / "Dune.2021.1080p.mkv").write_bytes(b"movie")
+        (tmp_path / "Dune.epub").write_bytes(b"book")
+        events: list[dict] = []
+
+        result = apply_organization_plan("", on_progress=events.append)
+
+        assert result["completed_items"] == 2
+        assert result["failed_items"] == 0
+        assert events
+        assert events[0]["phase"] == "scanning"
+        moving = [event for event in events if event["phase"] == "moving"]
+        assert any(event["name"] == "Dune.2021.1080p.mkv" and event["category"] == "films" for event in moving)
+        assert any(event["name"] == "Dune.epub" and event["category"] == "livres" for event in moving)
+        assert all(event["total"] == 2 for event in moving)
+        completed = [event["completed"] for event in moving]
+        assert completed == sorted(completed)
+        assert completed[-1] == 2
+        assert events[-1]["phase"] == "done"
+        assert events[-1]["failed"] == 0
+        assert all(not str(event.get("name", "")).startswith("/") for event in events)
+
+    def test_organize_job_factory_wires_public_progress(self, monkeypatch):
+        import cloud_panel.routes.jobs as jobs_module
+
+        def fake_apply(path, *, on_progress=None):
+            assert path == ""
+            on_progress({
+                "phase": "moving",
+                "category": "films",
+                "name": "Movie.2024.mkv",
+                "status": "moving",
+                "completed": 1,
+                "position": 2,
+                "processed": 1,
+                "failed": 0,
+                "total": 2,
+                "message": "Déplacement de Movie.2024.mkv (2/2)",
+            })
+            on_progress({
+                "phase": "done",
+                "completed": 2,
+                "processed": 2,
+                "failed": 0,
+                "total": 2,
+                "message": "Rangement terminé.",
+            })
+            return {"success": True}
+
+        monkeypatch.setattr(jobs_module, "is_qbittorrent_tree", lambda _path: False)
+        monkeypatch.setattr(jobs_module, "apply_organization_plan", fake_apply)
+
+        class Context:
+            def __init__(self):
+                self.reports = []
+
+            def report(self, **payload):
+                self.reports.append(payload)
+
+        context = Context()
+        factory = jobs_module._build_factory("organize_apply", {"path": ""})
+        assert factory(context) == {"success": True}
+        assert context.reports[0]["message"] == "Préparation du rangement"
+        moving = context.reports[1]
+        assert moving["progress"] == 1
+        assert moving["total"] == 2
+        assert moving["data"]["name"] == "Movie.2024.mkv"
+        assert moving["data"]["category"] == "films"
+        assert "/" not in moving["data"]["name"]
+        assert context.reports[-1]["data"]["phase"] == "done"
+
     def test_game_and_book_destination_collisions_are_visible_and_not_ready(self, tmp_path, monkeypatch):
         self._reload(monkeypatch, tmp_path)
         from cloud_panel.services.media import apply_organization_plan, build_organization_plan

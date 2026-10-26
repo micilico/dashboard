@@ -543,6 +543,37 @@
 /* ── Ranger les contenus ── */
 .organize-dialog { width: min(900px, calc(100% - 32px)); }
 .organize-summary { color: var(--text); font-weight: 600; }
+.organize-progress {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+.organize-progress[hidden] { display: none; }
+.organize-progress-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); min-width: 0; }
+.organize-progress-label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.organize-progress-count { flex: none; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.organize-progress-bar {
+  inline-size: 100%;
+  block-size: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--accent);
+  appearance: none;
+}
+.organize-progress-bar::-webkit-progress-bar { border-radius: 999px; background: var(--surface-3); }
+.organize-progress-bar::-webkit-progress-value { border-radius: 999px; background: var(--accent); transition: inline-size var(--motion-base) var(--ease-standard); }
+.organize-progress-bar::-moz-progress-bar { border-radius: 999px; background: var(--accent); transition: inline-size var(--motion-base) var(--ease-standard); }
+.organize-progress[data-state="done"] .organize-progress-bar::-webkit-progress-value { background: var(--success); }
+.organize-progress[data-state="done"] .organize-progress-bar::-moz-progress-bar { background: var(--success); }
+.organize-progress[data-state="error"] { border-color: var(--danger-border); }
+.organize-progress[data-state="error"] .organize-progress-bar::-webkit-progress-value { background: var(--danger); }
+.organize-progress[data-state="error"] .organize-progress-bar::-moz-progress-bar { background: var(--danger); }
+.organize-progress-detail { min-height: 1.2em; color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
 .organize-sections {
   display: grid;
   gap: var(--space-12);

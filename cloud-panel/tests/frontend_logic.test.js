@@ -580,6 +580,18 @@ suite('Ranger les contenus feature', () => {
     assert.ok(html.includes('id="organizeSections"'));
     assert.ok(html.includes('id="confirmOrganizeBtn"'));
     assert.ok(html.includes('id="cancelOrganizeBtn"'));
+    assert.ok(html.includes('id="organizeProgress"'));
+    assert.ok(html.includes('id="organizeProgressBar"'));
+    assert.ok(html.includes('id="organizeProgressCount"'));
+  });
+
+  test('a global job status bar exposes determinate progress', () => {
+    assert.ok(html.includes('id="jobStatusBar"'));
+    assert.ok(html.includes('id="jobStatusBarProgress"'));
+    assert.ok(html.includes('id="jobStatusBarCount"'));
+    assert.ok(appSource.includes("function renderJobStatusBar"));
+    assert.ok(appSource.includes("function renderOrganizeProgress"));
+    assert.ok(appSource.includes("runBackgroundJob(\"organize_apply\", { path: S.path }, renderOrganizeProgress)"));
   });
 
   test('preview and apply use cloud background jobs', () => {

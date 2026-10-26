@@ -109,12 +109,34 @@ def _build_factory(kind: str, params: Mapping) -> Callable[[JobContext], object]
         operation = build_organization_plan if kind == "organize_preview" else apply_organization_plan
 
         def factory(context: JobContext) -> dict:
+            def progress_event(event: dict) -> None:
+                raw_total = event.get("total")
+                total = int(raw_total) if isinstance(raw_total, int) and raw_total > 0 else None
+                raw_completed = event.get("completed")
+                completed = int(raw_completed) if isinstance(raw_completed, int) else 0
+                name = str(event.get("name") or "")[:200]
+                category = str(event.get("category") or "")[:40]
+                status = str(event.get("status") or "")[:20]
+                context.report(
+                    message=str(event.get("message") or "Rangement en cours")[:500],
+                    progress=max(0, completed),
+                    total=total,
+                    data={
+                        "phase": str(event.get("phase") or "")[:20],
+                        "category": category,
+                        "name": name,
+                        "status": status,
+                        "processed": int(event.get("processed") or 0),
+                        "failed": int(event.get("failed") or 0),
+                    },
+                )
+
             context.report(
-                message="Analyse du dossier" if kind == "organize_preview" else "Rangement en cours",
+                message="Analyse du dossier" if kind == "organize_preview" else "Préparation du rangement",
                 progress=0,
                 total=None,
             )
-            return operation(path)
+            return operation(path, on_progress=progress_event)
 
         return factory
 

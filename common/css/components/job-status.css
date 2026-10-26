@@ -1,0 +1,138 @@
+/* Barre d'état globale des tâches de fond (cloud-panel, torrent-panel). */
+.job-status-bar {
+  position: fixed;
+  bottom: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  z-index: var(--z-sticky);
+  display: grid;
+  gap: var(--space-8);
+  inline-size: min(560px, calc(100% - 32px));
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-dialog);
+  transform: translateX(-50%);
+}
+
+.job-status-bar[hidden] {
+  display: none;
+}
+
+.job-status-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.job-status-bar-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-status-bar-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job-status-bar-progress {
+  inline-size: 100%;
+  block-size: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--accent);
+  appearance: none;
+}
+
+.job-status-bar-progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.job-status-bar-progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+  transition: inline-size var(--motion-base) var(--ease-standard);
+}
+
+.job-status-bar-progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--accent);
+  transition: inline-size var(--motion-base) var(--ease-standard);
+}
+
+.job-status-bar[data-state="done"] .job-status-bar-progress {
+  color: var(--success);
+}
+
+.job-status-bar[data-state="done"] .job-status-bar-progress::-webkit-progress-value {
+  background: var(--success);
+}
+
+.job-status-bar[data-state="done"] .job-status-bar-progress::-moz-progress-bar {
+  background: var(--success);
+}
+
+.job-status-bar[data-state="error"] {
+  border-color: var(--danger-border);
+}
+
+.job-status-bar[data-state="error"] .job-status-bar-progress {
+  color: var(--danger);
+}
+
+.job-status-bar[data-state="error"] .job-status-bar-progress::-webkit-progress-value {
+  background: var(--danger);
+}
+
+.job-status-bar[data-state="error"] .job-status-bar-progress::-moz-progress-bar {
+  background: var(--danger);
+}
+
+body.has-job-status .shell {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+body.has-job-status .toast {
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 767px) {
+  .job-status-bar {
+    bottom: 0;
+    inline-size: 100%;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+    transform: none;
+    left: 0;
+  }
+
+  body.has-job-status .shell {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.has-job-status .toast {
+    bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-status-bar-progress::-webkit-progress-value,
+  .job-status-bar-progress::-moz-progress-bar {
+    transition: none;
+  }
+}

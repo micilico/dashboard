@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import posixpath
 import re
+from collections.abc import Callable
 
 from ..config import MOUNT_PATH
 from ..security import resolve_path_within
 from ..storage import clear_scandir_cache, create_directory, delete_item, move_item, rename_item
+
+logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[dict[str, object]], None]
+
+
+def _report_progress(on_progress: ProgressCallback | None, event: dict[str, object]) -> None:
+    """Publish a public progress event without ever breaking the operation."""
+    if on_progress is None:
+        return
+    try:
+        on_progress(event)
+    except Exception:
+        logger.exception("organization progress callback failed")
+
 
 _SEASON_RE = re.compile(
     r"(?i)\bS(\d{1,2})(?:E\d{1,3}){0,2}\b"
@@ -420,7 +437,11 @@ def _find_parasites(directory: str, prefix: str) -> list[dict]:
     return found
 
 
-def build_organization_plan(relative_path: str) -> dict:
+def build_organization_plan(
+    relative_path: str,
+    *,
+    on_progress: ProgressCallback | None = None,
+) -> dict:
     target_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
     if not os.path.isdir(target_dir):
         raise ValueError("Dossier introuvable")
@@ -436,7 +457,30 @@ def build_organization_plan(relative_path: str) -> dict:
     duplicates: list[dict] = []
     conflicts: list[dict] = []
 
-    for entry in os.scandir(target_dir):
+    with os.scandir(target_dir) as iterator:
+        entries = list(iterator)
+    total_entries = len(entries)
+    _report_progress(
+        on_progress,
+        {
+            "phase": "scanning",
+            "completed": 0,
+            "total": total_entries,
+            "message": "Analyse du dossier…",
+        },
+    )
+
+    for index, entry in enumerate(entries, start=1):
+        _report_progress(
+            on_progress,
+            {
+                "phase": "scanning",
+                "completed": index - 1,
+                "total": total_entries,
+                "name": entry.name,
+                "message": f"Analyse : {entry.name}",
+            },
+        )
         if entry.is_symlink():
             continue
         if _is_category_directory(entry):
@@ -541,6 +585,15 @@ def build_organization_plan(relative_path: str) -> dict:
         or bool(movies)
     )
     plan_status = "conflict" if conflicts else ("ready" if has_ready_action else "empty")
+    _report_progress(
+        on_progress,
+        {
+            "phase": "scanned",
+            "completed": total_entries,
+            "total": total_entries,
+            "message": f"Analyse terminée : {total_entries} entrée{'s' if total_entries > 1 else ''}.",
+        },
+    )
     return {
         "status": plan_status,
         "canApply": has_ready_action,
@@ -730,8 +783,12 @@ def _relocate_preserving_tree(src_parent_rel: str, name: str, destination_rel: s
     return 1, 0
 
 
-def apply_organization_plan(relative_path: str) -> dict:
-    plan = build_organization_plan(relative_path)
+def apply_organization_plan(
+    relative_path: str,
+    *,
+    on_progress: ProgressCallback | None = None,
+) -> dict:
+    plan = build_organization_plan(relative_path, on_progress=on_progress)
     target_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
     categories = plan["categories"]
     errors: list[str] = []
@@ -753,6 +810,31 @@ def apply_organization_plan(relative_path: str) -> dict:
         else:
             failed_items += 1
 
+    def report_item(name: str, category: str, status: str = "moving") -> None:
+        processed = completed_items + failed_items
+        position = min(requested_items, processed + (1 if status == "moving" else 0))
+        if status == "failed":
+            message = f"Échec : {name}"
+        elif status == "done":
+            message = f"Traité : {name} ({position}/{requested_items})"
+        else:
+            message = f"Déplacement de {name} ({position}/{requested_items})"
+        _report_progress(
+            on_progress,
+            {
+                "phase": "moving",
+                "category": category,
+                "name": name,
+                "status": status,
+                "completed": processed,
+                "position": position,
+                "processed": processed,
+                "failed": failed_items,
+                "total": requested_items,
+                "message": message if requested_items else "Aucun élément à ranger.",
+            },
+        )
+
     if not categories["in_place_series"] and plan["series"]:
         _ensure_nested_dir(categories["series"])
     if not categories["in_place_films"] and plan["movies"]:
@@ -763,26 +845,32 @@ def apply_organization_plan(relative_path: str) -> dict:
         _ensure_nested_dir(categories["books"])
 
     for game in plan["games"]:
+        report_item(game["name"], "jeux")
         errors_before = len(errors)
         try:
             moved, skipped = _relocate_preserving_tree(relative_path, game["name"], game["target"], errors)
             games_moved += moved
             duplicates_skipped += skipped
             record_result(errors_before, moved, skipped)
+            report_item(game["name"], "jeux", "done")
         except (ValueError, OSError) as exc:
             errors.append(f"{game['name']} : {exc}")
             failed_items += 1
+            report_item(game["name"], "jeux", "failed")
 
     for book in plan["books"]:
+        report_item(book["name"], "livres")
         errors_before = len(errors)
         try:
             moved, skipped = _relocate_preserving_tree(relative_path, book["name"], book["target"], errors)
             books_moved += moved
             duplicates_skipped += skipped
             record_result(errors_before, moved, skipped)
+            report_item(book["name"], "livres", "done")
         except (ValueError, OSError) as exc:
             errors.append(f"{book['name']} : {exc}")
             failed_items += 1
+            report_item(book["name"], "livres", "failed")
 
     series_parent = None
     if plan["series"]:
@@ -804,6 +892,8 @@ def apply_organization_plan(relative_path: str) -> dict:
         series_rel = posixpath.join(categories["series"], existing)
         series_abs = resolve_path_within(MOUNT_PATH, series_rel, must_exist=True)
         for item in group["items"]:
+            item_label = f"{normalized} — {item['name']}"
+            report_item(item_label, "series")
             existing_season = _find_existing_season_dir(series_abs, item["season"])
             season_rel = posixpath.join(series_rel, existing_season or season_folder_label(item["season"]))
             errors_before = len(errors)
@@ -815,22 +905,45 @@ def apply_organization_plan(relative_path: str) -> dict:
                 series_moved += moved
                 duplicates_skipped += skipped
                 record_result(errors_before, moved, skipped)
+                report_item(item_label, "series", "done")
             except (ValueError, OSError) as exc:
                 errors.append(f"{item['name']} : {exc}")
                 failed_items += 1
+                report_item(item_label, "series", "failed")
 
     for movie in plan["movies"]:
+        report_item(movie["name"], "films")
         errors_before = len(errors)
         try:
             moved, skipped = _merge_movie(relative_path, movie["name"], movie["target"], movie["is_dir"], errors)
             movies_moved += moved
             duplicates_skipped += skipped
             record_result(errors_before, moved, skipped)
+            report_item(movie["name"], "films", "done")
         except (ValueError, OSError) as exc:
             errors.append(f"{movie['name']} : {exc}")
             failed_items += 1
+            report_item(movie["name"], "films", "failed")
 
     clear_scandir_cache()
+    _report_progress(
+        on_progress,
+        {
+            "phase": "done",
+            "category": "",
+            "name": "",
+            "status": "done" if failed_items == 0 else "failed",
+            "completed": requested_items,
+            "processed": completed_items,
+            "failed": failed_items,
+            "total": requested_items,
+            "message": (
+                f"Rangement terminé : {completed_items} traité{'s' if completed_items > 1 else ''}"
+                + (f", {failed_items} échec{'s' if failed_items > 1 else ''}" if failed_items else "")
+                + "."
+            ),
+        },
+    )
     return {
         "success": requested_items == 0 or completed_items > 0,
         "created_series": created_series,

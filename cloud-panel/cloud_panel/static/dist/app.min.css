@@ -1,6 +1,6 @@
 @font-face {
   font-family: 'Inter Variable';
-  src: url('../fonts/Inter-Variable.woff2?v=76de6636ff46') format('woff2');
+  src: url('../fonts/Inter-Variable.woff2?v=08f29ccff4fd') format('woff2');
   font-weight: 100 900;
   font-display: swap;
   font-style: normal;
@@ -1233,6 +1233,145 @@ dialog[open] { opacity: 1; transform: none; }
   text-align: center;
 }
 
+/* Barre d'état globale des tâches de fond (cloud-panel, torrent-panel). */
+.job-status-bar {
+  position: fixed;
+  bottom: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  z-index: var(--z-sticky);
+  display: grid;
+  gap: var(--space-8);
+  inline-size: min(560px, calc(100% - 32px));
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-dialog);
+  transform: translateX(-50%);
+}
+
+.job-status-bar[hidden] {
+  display: none;
+}
+
+.job-status-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.job-status-bar-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-status-bar-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job-status-bar-progress {
+  inline-size: 100%;
+  block-size: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--accent);
+  appearance: none;
+}
+
+.job-status-bar-progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+
+.job-status-bar-progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+  transition: inline-size var(--motion-base) var(--ease-standard);
+}
+
+.job-status-bar-progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--accent);
+  transition: inline-size var(--motion-base) var(--ease-standard);
+}
+
+.job-status-bar[data-state="done"] .job-status-bar-progress {
+  color: var(--success);
+}
+
+.job-status-bar[data-state="done"] .job-status-bar-progress::-webkit-progress-value {
+  background: var(--success);
+}
+
+.job-status-bar[data-state="done"] .job-status-bar-progress::-moz-progress-bar {
+  background: var(--success);
+}
+
+.job-status-bar[data-state="error"] {
+  border-color: var(--danger-border);
+}
+
+.job-status-bar[data-state="error"] .job-status-bar-progress {
+  color: var(--danger);
+}
+
+.job-status-bar[data-state="error"] .job-status-bar-progress::-webkit-progress-value {
+  background: var(--danger);
+}
+
+.job-status-bar[data-state="error"] .job-status-bar-progress::-moz-progress-bar {
+  background: var(--danger);
+}
+
+body.has-job-status .shell {
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+body.has-job-status .toast {
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 767px) {
+  .job-status-bar {
+    bottom: 0;
+    inline-size: 100%;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+    transform: none;
+    left: 0;
+  }
+
+  body.has-job-status .shell {
+    padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.has-job-status .toast {
+    bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-status-bar-progress::-webkit-progress-value,
+  .job-status-bar-progress::-moz-progress-bar {
+    transition: none;
+  }
+}
+
 .panel-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 24px 24px 8px; border-bottom: 1px solid var(--border);
@@ -1876,6 +2015,37 @@ dialog[open] { opacity: 1; transform: none; }
 /* ── Ranger les contenus ── */
 .organize-dialog { width: min(900px, calc(100% - 32px)); }
 .organize-summary { color: var(--text); font-weight: 600; }
+.organize-progress {
+  display: grid;
+  gap: var(--space-8);
+  padding: var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+.organize-progress[hidden] { display: none; }
+.organize-progress-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); min-width: 0; }
+.organize-progress-label { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.organize-progress-count { flex: none; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.organize-progress-bar {
+  inline-size: 100%;
+  block-size: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--accent);
+  appearance: none;
+}
+.organize-progress-bar::-webkit-progress-bar { border-radius: 999px; background: var(--surface-3); }
+.organize-progress-bar::-webkit-progress-value { border-radius: 999px; background: var(--accent); transition: inline-size var(--motion-base) var(--ease-standard); }
+.organize-progress-bar::-moz-progress-bar { border-radius: 999px; background: var(--accent); transition: inline-size var(--motion-base) var(--ease-standard); }
+.organize-progress[data-state="done"] .organize-progress-bar::-webkit-progress-value { background: var(--success); }
+.organize-progress[data-state="done"] .organize-progress-bar::-moz-progress-bar { background: var(--success); }
+.organize-progress[data-state="error"] { border-color: var(--danger-border); }
+.organize-progress[data-state="error"] .organize-progress-bar::-webkit-progress-value { background: var(--danger); }
+.organize-progress[data-state="error"] .organize-progress-bar::-moz-progress-bar { background: var(--danger); }
+.organize-progress-detail { min-height: 1.2em; color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
 .organize-sections {
   display: grid;
   gap: var(--space-12);

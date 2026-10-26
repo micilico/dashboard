@@ -113,7 +113,14 @@ def _runner(request: Request, payload: JobRequest):
                         message=str(event.get("message") or "Rangement en cours."),
                         progress=int(event.get("index") or 0),
                         total=int(event.get("total") or total),
-                        data={"stage": event.get("stage"), "hash": event.get("hash")},
+                        data={
+                            "stage": event.get("stage"),
+                            "hash": event.get("hash"),
+                            "name": str(event.get("name") or "")[:200],
+                            "index": int(event.get("index") or 0),
+                            "processed": int(event.get("processed") or 0),
+                            "total": int(event.get("total") or total),
+                        },
                     )
 
                 applied = await apply_organization_plan(
