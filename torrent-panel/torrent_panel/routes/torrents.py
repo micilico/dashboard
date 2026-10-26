@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import posixpath
 import re
 import time
 from typing import Any
@@ -173,10 +174,14 @@ async def reannounce_torrents(request: Request, payload: TorrentHashesAction) ->
 async def set_torrent_category(request: Request, payload: TorrentCategoryUpdate) -> dict[str, object]:
     try:
         hashes = validate_hashes(payload.hashes)
-        await request.app.state.qbit.set_category_many(hashes, payload.category.strip())
+        category = payload.category.strip()
+        if category:
+            category_path = posixpath.join(QBIT_SAVE_PATH, category) if QBIT_SAVE_PATH else ""
+            await request.app.state.qbit.ensure_category(category, category_path)
+        await request.app.state.qbit.set_category_many(hashes, category)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-    return {"status": "category_updated", "count": len(hashes), "category": payload.category.strip()}
+    return {"status": "category_updated", "count": len(hashes), "category": category}
 
 
 @router.post("/torrents/add-tags", dependencies=[Depends(require_action_guard)])

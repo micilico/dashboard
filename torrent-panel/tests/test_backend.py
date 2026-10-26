@@ -116,6 +116,14 @@ class FakeQbit:
                 recovery="Réessayer",
             )
 
+    async def ensure_category(self, category, save_path=""):
+        self.calls.append(("ensure_category", category, save_path))
+        if category and category not in self.categories_payload:
+            self.categories_payload[category] = {"name": category, "savePath": save_path}
+
+    async def set_category_many(self, hashes, category):
+        self.calls.append(("set_category", list(hashes), category))
+
     async def rename_file(self, torrent_hash, old_path, new_path):
         self.calls.append(("rename_file", torrent_hash, old_path, new_path))
         if old_path in self.fail_rename_old_paths:
@@ -254,6 +262,19 @@ class BackendTests(unittest.TestCase):
         response = self.client.post("/torrent-panel/api/torrents/pause", json={"hashes": [VALID_HASH]})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"]["code"], "csrf_expired")
+
+    def test_set_category_creates_missing_library_category(self):
+        with mock.patch.object(torrent_routes, "QBIT_SAVE_PATH", "/home/micilico/downloads/qbittorrent"):
+            response = self.post_action(
+                "/torrent-panel/api/torrents/set-category",
+                {"hashes": [VALID_HASH], "category": "Jeux"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            ("ensure_category", "Jeux", "/home/micilico/downloads/qbittorrent/Jeux"),
+            app.state.qbit.calls,
+        )
+        self.assertIn(("set_category", [VALID_HASH], "Jeux"), app.state.qbit.calls)
 
     def test_live_fingerprint_ignores_collection_timestamps_only(self):
         first = {
@@ -1749,6 +1770,61 @@ class OrganizerTests(BackendTests):
             ["Movie.2021.mkv", "game.json"],
         ))
 
+    def test_game_installer_with_executable_and_payload_is_detected(self):
+        paths = [
+            "House Flipper 2/HouseFlipper2.exe",
+            "House Flipper 2/HouseFlipper2_Data/level0",
+            "House Flipper 2/HouseFlipper2_Data/sharedassets0.assets",
+            "House Flipper 2/data.bin",
+            "House Flipper 2/UnityPlayer.dll",
+        ]
+        self.assertTrue(organizer_service._has_game_signature("House Flipper 2 - v1.12.0", paths))
+        self.assertEqual(
+            organizer_service._classify_torrent(
+                {"name": "House Flipper 2 - v1.12.0", "category": ""},
+                paths,
+            ),
+            ("game", "game_signature"),
+        )
+        # A plain Windows installer with game data is enough even without a
+        # release group marker.
+        self.assertTrue(organizer_service._has_game_signature(
+            "Some Game",
+            ["setup.exe", "setup-1.bin", "setup.dll"],
+        ))
+        # An executable plus a version token is accepted, but never an archive
+        # alone (that stays ambiguous and needs the manual override).
+        self.assertTrue(organizer_service._has_game_signature(
+            "House Flipper 2 - v1.12.0",
+            ["HouseFlipper2.exe"],
+        ))
+        self.assertFalse(organizer_service._has_game_signature(
+            "House Flipper 2 - v1.12.0",
+            ["House.Flipper.2.rar"],
+        ))
+
+    def test_game_installer_never_overrides_a_video_payload(self):
+        self.assertFalse(organizer_service._has_game_signature(
+            "Movie.2021.v2.1080p",
+            ["Movie.2021.mkv", "setup.exe", "data.bin"],
+        ))
+        self.assertEqual(
+            organizer_service._classify_torrent(
+                {"name": "Movie.2021.v2.1080p", "category": "prowlarr"},
+                ["Movie.2021.mkv", "setup.exe", "data.bin"],
+            ),
+            ("film", "heuristic"),
+        )
+
+    def test_explicit_game_category_allows_an_archive_only_release(self):
+        self.assertEqual(
+            organizer_service._classify_torrent(
+                {"name": "House Flipper 2 - v1.12.0", "category": "Jeux"},
+                ["House.Flipper.2.rar"],
+            ),
+            ("game", "explicit_category"),
+        )
+
     def test_game_and_book_manifests_must_exist_without_shared_sidecar_false_positive(self):
         mount = Path(tempfile.mkdtemp())
         library = mount / "qbittorrent"
@@ -2514,6 +2590,25 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.client._request = fake_request
         categories = await self.client.categories()
         self.assertEqual(categories["Films"]["savePath"], "/Qbittorrent/Films")
+
+    async def test_ensure_category_creates_only_missing_categories(self):
+        self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))
+        calls = []
+
+        async def fake_request(method, path, *, data=None, **kwargs):
+            calls.append((method, path, data))
+            if path.endswith("/categories"):
+                return FakeResponse({"Films": {"savePath": "/Qbittorrent/Films"}})
+            return FakeResponse()
+
+        self.client._request = fake_request
+        await self.client.ensure_category("Films", "/Qbittorrent/Films")
+        self.assertFalse(any("createCategory" in call[1] for call in calls))
+        await self.client.ensure_category("Jeux", "/Qbittorrent/Jeux")
+        self.assertIn(
+            ("POST", "/api/v2/torrents/createCategory", {"category": "Jeux", "savePath": "/Qbittorrent/Jeux"}),
+            calls,
+        )
 
     async def test_set_location_sends_pipe_joined_hashes(self):
         self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))

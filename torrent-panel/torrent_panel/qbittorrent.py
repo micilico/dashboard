@@ -540,6 +540,29 @@ class QBittorrentClient:
             data={"hashes": "|".join(torrent_hashes), "category": category},
         )
 
+    async def ensure_category(self, category: str, save_path: str = "") -> None:
+        """Create a qBittorrent category when it does not exist yet.
+
+        ``setCategory`` answers 409 for an unknown category, so the panel
+        creates library categories (Jeux, Films, …) before assigning them.
+        """
+        name = str(category or "").strip()
+        if not name:
+            return
+        existing = await self.categories()
+        if any(str(key).casefold() == name.casefold() for key in existing):
+            return
+        data: dict[str, str] = {"category": name}
+        if save_path:
+            data["savePath"] = save_path
+        try:
+            await self._request("POST", "/api/v2/torrents/createCategory", data=data)
+        except QbitError as exc:
+            # A concurrent request may have created it between the check and
+            # the write; 409 is harmless in that case.
+            if exc.status_code != 409:
+                raise
+
     async def add_tags_many(self, torrent_hashes: list[str], tags: str) -> None:
         await self._request(
             "POST",

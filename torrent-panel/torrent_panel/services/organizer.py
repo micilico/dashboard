@@ -56,11 +56,15 @@ _GAME_ROM_EXTENSIONS = {
     ".nsp", ".rvz", ".sfc", ".snes", ".wad", ".wbfs", ".wia", ".xci", ".z64",
 }
 _GAME_SIGNATURE_EXTENSIONS = {
-    ".ucas", ".utoc", ".unity3d", ".vpk", ".xp3",
+    ".assets", ".bundle", ".ucas", ".unity3d", ".utoc", ".vpk", ".xp3",
 }
 _GAME_MANIFEST_NAMES = {
-    "game.json", "steam_appid.txt", "steam_api.dll", "steam_api64.dll", "unityplayer.dll",
+    "game.json", "gameassembly.dll", "steam_appid.txt", "steam_api.dll",
+    "steam_api64.dll", "ue4game.exe", "ue5game.exe", "unityplayer.dll",
 }
+_GAME_INSTALLER_EXTENSIONS = {".bin", ".cab", ".dat", ".dll", ".pak"}
+_GAME_DATA_DIRECTORIES = {"binaries", "content", "data", "engine"}
+_GAME_VERSION_RE = re.compile(r"(?i)(?:^|[\s._-])v\d+(?:\.\d+){1,3}(?:$|[\s._-])")
 _DANGEROUS_EXTENSIONS = {".rar", ".zip", ".7z", ".part", ".exe", ".msi", ".bat", ".cmd", ".scr", ".com"}
 _BOOK_IMPLICIT_BLOCKED_EXTENSIONS = _DANGEROUS_EXTENSIONS | {".dll", ".dat"}
 _ACTIVE_SEED_STATES = {"uploading", "stalledUP", "forcedUP", "queuedUP", "checkingUP"}
@@ -561,12 +565,44 @@ def _has_extension(paths: list[str], extensions: set[str]) -> bool:
     return any(posixpath.splitext(path)[1].lower() in extensions for path in paths)
 
 
+def _has_game_installer_signature(torrent_name: str, paths: list[str]) -> bool:
+    """Detect an installed game or a Windows game installer.
+
+    A Windows executable next to game data is a strong cue; a video or book
+    payload always keeps priority.  A version token alone is accepted only
+    beside an executable, never for an archive-only release.
+    """
+    if not paths or _has_extension(paths, _VIDEO_EXTENSIONS) or _has_extension(paths, _BOOK_EXTENSIONS):
+        return False
+    normalized = [path.replace("\\", "/") for path in paths]
+    has_executable = any(posixpath.splitext(path)[1].lower() == ".exe" for path in normalized)
+    if not has_executable:
+        return False
+    has_payload = any(
+        posixpath.splitext(path)[1].lower() in _GAME_INSTALLER_EXTENSIONS
+        for path in normalized
+    )
+    has_data_directory = any(
+        part.casefold().endswith("_data") or part.casefold() in _GAME_DATA_DIRECTORIES
+        for path in normalized
+        for part in path.split("/")[:-1]
+    )
+    has_setup_name = any(
+        posixpath.basename(path).casefold().startswith(("setup", "install", "unins"))
+        for path in normalized
+    )
+    has_version = bool(_GAME_VERSION_RE.search(torrent_name))
+    return has_payload or has_data_directory or has_setup_name or has_version
+
+
 def _has_game_signature(torrent_name: str, paths: list[str]) -> bool:
     """Require a strong game cue; a generic ISO, ZIP or EXE is never enough."""
     if _has_extension(paths, _GAME_ROM_EXTENSIONS) or _has_extension(paths, _GAME_SIGNATURE_EXTENSIONS):
         return True
     normalized_paths = {path.replace("\\", "/").casefold() for path in paths}
     if any(posixpath.basename(path) in _GAME_MANIFEST_NAMES for path in normalized_paths):
+        return True
+    if _has_game_installer_signature(torrent_name, paths):
         return True
     # Some packs expose game.exe together with a data directory. An EXE by
     # itself remains insufficient, even when the torrent title contains a year.

@@ -2669,6 +2669,9 @@ tr:hover { background: var(--row-hover); }
   border-color: var(--warning-border);
   color: var(--warning-text);
 }
+.relink-plan .organize-warning-list .organize-classify-game {
+  margin-top: 8px;
+}
 
 .torrent-table-more {
   display: flex;
