@@ -237,6 +237,7 @@ async def relink_torrents(request: Request, payload: RelinkRequest) -> dict[str,
             hashes=hashes,
             preview=payload.preview,
             recheck=payload.recheck,
+            mode=payload.mode,
         )
     except QbitError as exc:
         raise qbit_error_response(exc) from exc

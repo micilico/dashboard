@@ -61,8 +61,13 @@ def _runner(request: Request, payload: JobRequest):
         recheck = payload.params.get("recheck", False)
         if not isinstance(recheck, bool):
             raise ValueError("Le paramètre recheck doit être un booléen.")
-    elif "recheck" in payload.params:
-        raise ValueError("Le paramètre recheck n'est pas accepté pour cette tâche.")
+        mode = str(payload.params.get("mode") or "in_place")
+        if mode not in {"in_place", "category"}:
+            raise ValueError("Le mode de réparation doit être in_place ou category.")
+    else:
+        mode = "in_place"
+        if "recheck" in payload.params:
+            raise ValueError("Le paramètre recheck n'est pas accepté pour cette tâche.")
 
     async def run(context):
         if payload.type == "relink-preview":
@@ -75,6 +80,7 @@ def _runner(request: Request, payload: JobRequest):
                 hashes=hashes,
                 preview=False,
                 recheck=bool(recheck),
+                mode=mode,
             )
         elif payload.type == "organize-preview":
             context.report(message="Analyse du rangement.", progress=0, total=1)

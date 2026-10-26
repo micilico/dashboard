@@ -259,7 +259,7 @@ curl -I http://127.0.0.1:3130/healthz
 | POST | `/api/torrents/delete` | Supprimer |
 | GET | `/api/torrents/relink-preview` | Plan de réparation des torrents en fichiers manquants (lecture seule) |
 | GET | `/api/torrents/relink-status` | Compteur léger (sans scan disque) des torrents à réparer : `missingFiles`/`error` + états pause (`pausedDL`/`stoppedDL`) + `savePath == racine de catégorie` |
-| POST | `/api/torrents/relink` | Réorganiser les torrents manquants (dossier + fichiers au nom du torrent via cloud-panel), `setLocation(parent)` + layout `Subfolder`, recheck, pause (corps : `{hashes?: [], preview?: bool}`) |
+| POST | `/api/torrents/relink` | Réparer les torrents manquants. `mode=category` (défaut UI) déplace le dossier vers sa catégorie (`Jeux`/`Films`/`Series`/`Livres`) en une opération puis `setLocation` + `Subfolder` ; `mode=in_place` réaligne qBittorrent sans déplacement. Recheck et pause (corps : `{hashes?: [], preview?: bool, recheck?: bool, mode?: "in_place"|"category"}`) |
 | GET | `/api/torrents/organize-preview` | Prévisualiser le rangement Jellyfin coordonné à partir des fichiers connus par qBittorrent |
 | POST | `/api/torrents/organize` | Ranger via qBittorrent (`renameFile` + `setLocation`), sans revérification par défaut (`TORRENT_PANEL_ORGANIZER_RECHECK_ENABLED`), pause conservée |
 | GET | `/api/torrents/organize-status` | État des torrents en attente de reprise sécurisée après revérification |
@@ -372,6 +372,19 @@ qBittorrent** :
 - Localise le dossier réel de chaque torrent : basename exact → nom du dossier
   préservé (`contentPath`) → similarité floue de nom de dossier → matching par
   taille seule (les fichiers renommés gardent leur taille).
+- Réparation ciblée (un ou quelques hashes, bouton « Réparer l'emplacement ») :
+  un **fast path** vérifie `qbittorrent/<nom>` et `qbittorrent/<catégorie>/<nom>`
+  avec `scandir`, sans parcours récursif. Le scan complet n'est utilisé qu'en
+  repli. Le nom du dossier racine est déduit du manifeste qBittorrent
+  (`Blue Prince/…` → `Blue Prince`) pour ne pas le confondre avec le nom
+  d'affichage du torrent.
+- Deux modes :
+  - `category` (défaut UI) : déplace le dossier vers sa catégorie
+    (`qbittorrent/Jeux/Blue Prince`) en **une seule opération** cloud-panel,
+    puis `setLocation` + `setContentLayout("Subfolder")` + recheck. Si le
+    contenu est déjà dans la catégorie, aucun déplacement.
+  - `in_place` : pointe qBittorrent vers l'emplacement réel sans déplacer de
+    fichier (le dossier est seulement renommé si nécessaire).
 - **Réorganise** (via l'API interne cloud-panel `internal-arrange-batch`, qui a
   l'accès écriture) pour que le contenu finisse dans `<catégorie>/<nom exact du
   torrent>/` avec les fichiers aux noms exacts attendus par qBittorrent :

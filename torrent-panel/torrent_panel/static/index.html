@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard · Centre de contrôle</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=1ba2b5c33cec">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=dc5557a8a87a">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -393,8 +393,20 @@
 
     <dialog id="relinkDialog" class="dialog">
       <form method="dialog" id="relinkForm">
-        <h2 id="relinkTitle">Réparer les fichiers manquants</h2>
+        <h2 id="relinkTitle">Réparer les torrents</h2>
         <p id="relinkSummary" class="dialog-name"></p>
+        <fieldset id="relinkModeGroup">
+          <legend>Mode de réparation</legend>
+          <label class="radio-line">
+            <input type="radio" name="relinkMode" value="category" checked>
+            <span>Réparer et classer dans la catégorie</span>
+          </label>
+          <label class="radio-line">
+            <input type="radio" name="relinkMode" value="in_place">
+            <span>Réaligner qBittorrent sans déplacement</span>
+          </label>
+        </fieldset>
+        <p class="field-message" id="relinkModeNote">Le contenu est déplacé vers Jeux, Films, Séries ou Livres en une seule opération, puis revérifié.</p>
         <div id="relinkPlan" class="relink-plan" aria-live="polite"></div>
         <p class="field-message" id="relinkMessage" aria-live="polite"></p>
         <div class="dialog-actions">
@@ -453,7 +465,7 @@
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script src="./config.js?v=1ba2b5c33cec"></script>
-    <script src="./static/dist/app.min.js?v=1ba2b5c33cec" defer></script>
+    <script src="./config.js?v=dc5557a8a87a"></script>
+    <script src="./static/dist/app.min.js?v=dc5557a8a87a" defer></script>
   </body>
 </html>

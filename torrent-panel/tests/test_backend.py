@@ -1408,6 +1408,175 @@ class RelinkTests(BackendTests):
         self.assertFalse(any(op.get("op") == "rename" and op.get("old_name") == "Films" for op in ops))
 
 
+    def _blue_prince_payload(self):
+        """Real-world case: content at qbittorrent/Blue Prince, savePath points at Jeux."""
+        release_dir = self.mount / "Qbittorrent" / "Blue Prince"
+        release_dir.mkdir(parents=True, exist_ok=True)
+        (release_dir / "BluePrince.exe").write_bytes(b"x" * 100)
+        (release_dir / "data.bin").write_bytes(b"y" * 200)
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Blue Prince (v1.0.2.519)-ElAmigos",
+                "state": "pausedDL",
+                "category": "Jeux",
+                "savePath": f"{self.QBIT_ROOT}/Jeux",
+                "contentPath": f"{self.QBIT_ROOT}/Blue Prince",
+            },
+        ]
+        app.state.qbit.files_payload = {
+            VALID_HASH: [
+                {"name": "BluePrince.exe", "size": 100},
+                {"name": "data.bin", "size": 200},
+            ]
+        }
+        relink_service._SCAN_CACHE["data"] = None
+        relink_service._SCAN_CACHE["ts"] = 0.0
+        return release_dir
+
+    def test_blue_prince_plans_both_in_place_and_category_targets(self):
+        self._blue_prince_payload()
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relinkCount"], 1)
+        self.assertEqual(plan["categoryRelinkCount"], 1)
+
+        in_place_group = plan["relink"][0]
+        self.assertEqual(in_place_group["location"], self.QBIT_ROOT)
+        in_place_ops = in_place_group["entries"][0]["renames"]
+        self.assertFalse(any(op.get("dest") == "Qbittorrent/Blue Prince/Blue Prince" for op in in_place_ops))
+        self.assertIn(
+            {"op": "rename", "path": "Qbittorrent", "old_name": "Blue Prince", "new_name": "Blue Prince (v1.0.2.519)-ElAmigos"},
+            in_place_ops,
+        )
+
+        category_group = plan["relinkCategory"][0]
+        self.assertEqual(category_group["location"], f"{self.QBIT_ROOT}/Jeux")
+        category_entry = category_group["entries"][0]
+        self.assertTrue(category_entry["categoryApplied"])
+        self.assertIn(
+            {"op": "mkdir", "path": "Qbittorrent", "name": "Jeux"},
+            category_entry["renames"],
+        )
+        self.assertIn(
+            {"op": "move", "path": "Qbittorrent", "old_name": "Blue Prince", "new_name": "Blue Prince (v1.0.2.519)-ElAmigos", "dest": "Qbittorrent/Jeux"},
+            category_entry["renames"],
+        )
+        self.assertEqual(sum(op["op"] == "move" for op in category_entry["renames"]), 1)
+
+    def test_blue_prince_keeps_clean_root_folder_name_from_torrent_manifest(self):
+        self._blue_prince_payload()
+        app.state.qbit.files_payload = {
+            VALID_HASH: [
+                {"name": "Blue Prince/BluePrince.exe", "size": 100},
+                {"name": "Blue Prince/data.bin", "size": 200},
+            ]
+        }
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        category_entry = plan["relinkCategory"][0]["entries"][0]
+        self.assertIn(
+            {"op": "move", "path": "Qbittorrent", "old_name": "Blue Prince", "new_name": "", "dest": "Qbittorrent/Jeux"},
+            category_entry["renames"],
+        )
+        in_place_ops = plan["relink"][0]["entries"][0]["renames"]
+        self.assertFalse(any(op.get("op") == "rename" and op.get("old_name") == "Blue Prince" for op in in_place_ops))
+
+    def test_nested_game_content_is_located_at_its_content_root(self):
+        release_dir = self.mount / "Qbittorrent" / "Blue Prince"
+        data_dir = release_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "game.exe").write_bytes(b"x" * 100)
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Blue Prince (v1.0.2.519)-ElAmigos",
+                "state": "pausedDL",
+                "category": "Jeux",
+                "savePath": f"{self.QBIT_ROOT}/Jeux",
+                "contentPath": f"{self.QBIT_ROOT}/Blue Prince",
+            },
+        ]
+        app.state.qbit.files_payload = {
+            VALID_HASH: [{"name": "Blue Prince/data/game.exe", "size": 100}]
+        }
+        relink_service._SCAN_CACHE["data"] = None
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["relink"][0]["entries"][0]["located"], "Qbittorrent/Blue Prince")
+        self.assertFalse(any(
+            op.get("op") == "rename" and op.get("old_name") == "data"
+            for op in plan["relink"][0]["entries"][0]["renames"]
+        ))
+        category_entry = plan["relinkCategory"][0]["entries"][0]
+        self.assertIn(
+            {"op": "move", "path": "Qbittorrent", "old_name": "Blue Prince", "new_name": "", "dest": "Qbittorrent/Jeux"},
+            category_entry["renames"],
+        )
+
+    def test_relink_job_accepts_category_mode_and_rejects_unknown_mode(self):
+        request = mock.Mock(app=app)
+        key, run = _runner(
+            request,
+            JobRequest(type="relink", params={"hashes": [VALID_HASH], "mode": "category", "recheck": True}),
+        )
+        self.assertTrue(key.startswith("relink:"))
+        self.assertTrue(callable(run))
+        with self.assertRaises(ValueError):
+            _runner(
+                request,
+                JobRequest(type="relink", params={"hashes": [VALID_HASH], "mode": "move_everything"}),
+            )
+
+    def test_targeted_category_repair_uses_fast_locator_and_moves_folder_once(self):
+        self._blue_prince_payload()
+        recorded: list[dict[str, str]] = []
+
+        async def fake_arrange_batch(items):
+            recorded.extend(items)
+            return {"results": [{"success": True} for _ in items], "failed": 0}
+
+        with (
+            mock.patch.object(relink_service, "_scan_index_async", new=mock.AsyncMock(side_effect=AssertionError("full scan"))),
+            mock.patch("torrent_panel.services.cloud_panel.arrange_batch", side_effect=fake_arrange_batch),
+        ):
+            response = self.post_action(
+                "/torrent-panel/api/torrents/relink",
+                {"hashes": [VALID_HASH], "mode": "category", "recheck": True},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["result"]["relinked"], 1)
+        self.assertEqual(body["result"]["mode"], "category")
+        self.assertIn({"op": "mkdir", "path": "Qbittorrent", "name": "Jeux"}, recorded)
+        self.assertIn(
+            {"op": "move", "path": "Qbittorrent", "old_name": "Blue Prince", "new_name": "Blue Prince (v1.0.2.519)-ElAmigos", "dest": "Qbittorrent/Jeux"},
+            recorded,
+        )
+        self.assertEqual(sum(op["op"] == "move" for op in recorded), 1)
+        self.assertIn(("set_location", [VALID_HASH], f"{self.QBIT_ROOT}/Jeux"), app.state.qbit.calls)
+        self.assertIn(("set_content_layout", [VALID_HASH], "Subfolder"), app.state.qbit.calls)
+        self.assertIn(("recheck", [VALID_HASH]), app.state.qbit.calls)
+
+    def test_category_repair_falls_back_to_in_place_on_destination_collision(self):
+        self._blue_prince_payload()
+        (self.mount / "Qbittorrent" / "Jeux" / "Blue Prince (v1.0.2.519)-ElAmigos").mkdir(parents=True)
+        response = self.client.get("/torrent-panel/api/torrents/relink-preview")
+        self.assertEqual(response.status_code, 200)
+        plan = response.json()["plan"]
+        self.assertEqual(plan["categoryFallbackCount"], 1)
+        group = plan["relinkCategory"][0]
+        self.assertEqual(group["location"], self.QBIT_ROOT)
+        entry = group["entries"][0]
+        self.assertFalse(entry["categoryApplied"])
+        self.assertEqual(entry["categoryReason"], "Collision de destination")
+
+
 class OrganizerTests(BackendTests):
     QBIT_ROOT = "/home/micilico/downloads/qbittorrent"
 
@@ -1986,6 +2155,33 @@ class OrganizerTests(BackendTests):
         plan = asyncio.run(organizer_service.build_organization_plan(app.state.qbit, self.QBIT_ROOT))
         self.assertEqual(plan["entries"], [])
         self.assertIn("incomplet", plan["warnings"][0]["reason"])
+        self.assertIn("50,00 %", plan["warnings"][0]["reason"])
+        self.assertIn("état uploading", plan["warnings"][0]["reason"])
+
+    def test_complete_state_accepts_float_progress_rounding_noise(self):
+        self.assertTrue(organizer_service._is_complete({
+            "state": "pausedUP",
+            "progress": 0.9999,
+            "remaining": 12,
+            "size": 1000,
+        }))
+        self.assertFalse(organizer_service._is_complete({
+            "state": "pausedDL",
+            "progress": 0.999,
+            "remaining": 12,
+            "size": 1000,
+        }))
+
+    def test_incomplete_warning_reports_precise_progress_and_remaining(self):
+        detail = organizer_service._completion_detail({
+            "state": "pausedDL",
+            "progress": 0.9996,
+            "remaining": 12 * 1024 * 1024,
+            "size": 100,
+        })
+        self.assertIn("99,96 %", detail)
+        self.assertIn("12,0 Mo restants", detail)
+        self.assertIn("pausedDL", detail)
 
     def test_category_path_configuration_is_normalized_to_qbittorrent_root(self):
         self._movie_payload()

@@ -64,6 +64,7 @@ _GAME_MANIFEST_NAMES = {
 _DANGEROUS_EXTENSIONS = {".rar", ".zip", ".7z", ".part", ".exe", ".msi", ".bat", ".cmd", ".scr", ".com"}
 _BOOK_IMPLICIT_BLOCKED_EXTENSIONS = _DANGEROUS_EXTENSIONS | {".dll", ".dat"}
 _ACTIVE_SEED_STATES = {"uploading", "stalledUP", "forcedUP", "queuedUP", "checkingUP"}
+_COMPLETE_STATES = _ACTIVE_SEED_STATES | {"pausedUP", "stoppedUP"}
 _CHECKING_STATES = {"checkingUP", "checkingDL", "queuedForChecking", "checkingResumeData"}
 _PAUSED_STATES = {"pausedUP", "pausedDL", "stoppedUP", "stoppedDL", "missingFiles", "error"}
 _CATEGORY_BY_KIND = {"film": "Films", "series": "Series", "game": "Jeux", "book": "Livres"}
@@ -625,13 +626,52 @@ def _library_folder_name(torrent_name: str) -> str:
 
 
 def _is_complete(torrent: dict[str, Any]) -> bool:
+    # qBittorrent reports a completed torrent as pausedUP/stoppedUP even when
+    # its floating-point progress is 0.99999 (large game releases often end on
+    # a tiny remainder).  Keep a tight tolerance so an inconsistent UP state
+    # can never mask a genuinely incomplete download.
     try:
-        return float(torrent.get("progress", 0)) >= 1 or (
+        progress = float(torrent.get("progress", 0))
+    except (TypeError, ValueError):
+        progress = 0.0
+    if str(torrent.get("state") or "") in _COMPLETE_STATES and progress >= 0.999:
+        return True
+    try:
+        return progress >= 1 or (
             int(torrent.get("remaining", torrent.get("amount_left", 1)) or 0) == 0
             and int(torrent.get("size", 0) or 0) > 0
         )
     except (TypeError, ValueError):
         return False
+
+
+def _format_short_bytes(value: int) -> str:
+    size = float(max(0, int(value or 0)))
+    for unit in ("o", "Ko", "Mo", "Go", "To"):
+        if size < 1024 or unit == "To":
+            text = f"{size:.1f}" if unit != "o" else f"{int(size)}"
+            return f"{text.replace('.', ',')} {unit}"
+        size /= 1024
+    return f"{int(size)} o"
+
+
+def _completion_detail(torrent: dict[str, Any]) -> str:
+    """Human-readable reason for refusing an incomplete torrent."""
+    try:
+        progress = float(torrent.get("progress", 0) or 0)
+    except (TypeError, ValueError):
+        progress = 0.0
+    try:
+        remaining = int(torrent.get("remaining", torrent.get("amount_left", 0)) or 0)
+    except (TypeError, ValueError):
+        remaining = 0
+    parts = [f"{progress * 100:.2f}".replace(".", ",") + " %"]
+    if remaining > 0:
+        parts.append(f"{_format_short_bytes(remaining)} restants")
+    state = str(torrent.get("state") or "")
+    if state:
+        parts.append(f"état {state}")
+    return " · ".join(parts)
 
 
 def _torrent_plan(torrent: dict[str, Any], files: list[dict[str, Any]], qbit_root: str) -> dict[str, Any] | None:
@@ -1198,7 +1238,11 @@ async def build_organization_plan(
             })
             continue
         if not _is_complete(torrent):
-            warnings.append({"hash": torrent_hash, "name": str(torrent.get("name") or "Torrent"), "reason": "Torrent incomplet — rangement refusé"})
+            warnings.append({
+                "hash": torrent_hash,
+                "name": str(torrent.get("name") or "Torrent"),
+                "reason": f"Torrent incomplet ({_completion_detail(torrent)}) — rangement refusé",
+            })
             continue
         try:
             entry = _torrent_plan(torrent, files if isinstance(files, list) else [], root)

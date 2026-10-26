@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -88,6 +88,7 @@ class RelinkRequest(BaseModel):
     hashes: list[str] = Field(default_factory=list, max_length=500)
     preview: bool = False
     recheck: bool = False
+    mode: Literal["in_place", "category"] = "in_place"
 
 
 class OrganizeRequest(BaseModel):
