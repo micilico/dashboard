@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import hashlib
 import mimetypes
 import os
 import posixpath
@@ -8,41 +10,118 @@ import re
 import shutil
 import threading
 import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Callable
 
 import httpx
 from fastapi import UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from .config import FOLDER_SIZE_CACHE_MAX_ENTRIES, MOUNT_PATH, PATH_LOCK_MAX_ENTRIES, SCANDIR_CACHE_MAX_ENTRIES, SCANDIR_CACHE_TTL, SEARCH_CACHE_MAX_ENTRIES, SEARCH_CACHE_TTL, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, UPLOAD_CHUNK_SIZE
+from .rclone_refresh import schedule_targeted_refresh
 from .security import resolve_path_within
 
 logger = logging.getLogger(__name__)
 
 _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
 _folder_size_cache: dict[tuple[str, float], tuple[float, int]] = {}
-_folder_size_cache_generation = 0
 _path_locks: dict[str, threading.Lock] = {}
-_search_cache: dict[tuple[str, str, int, int, int], tuple[float, dict]] = {}
+_search_cache: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
 _path_locks_guard = threading.Lock()
+_cache_guard = threading.RLock()
+_cache_generation = 0
+_mount_real_guard = threading.Lock()
+_mount_real_source = MOUNT_PATH
+_mount_real_value = os.path.realpath(MOUNT_PATH)
+
+
+@dataclass
+class _InflightResult:
+    event: threading.Event = field(default_factory=threading.Event)
+    result: object | None = None
+    error: BaseException | None = None
+    completed_at: float = 0.0
+
+
+_scandir_inflight: dict[tuple[str, float, int], _InflightResult] = {}
+_search_inflight: dict[tuple, _InflightResult] = {}
+
+
+def _resolve(relative_path: str, *, must_exist: bool = True) -> str:
+    return resolve_path_within(
+        MOUNT_PATH,
+        relative_path,
+        must_exist=must_exist,
+        base_real=_mount_real(),
+    )
+
+
+def _canonical_from_target(target: str) -> str:
+    mount_real = _mount_real()
+    if os.path.realpath(target) == mount_real:
+        return ''
+    return _rel(os.path.realpath(target), mount_real)
+
+
+def _cache_epoch() -> int:
+    with _cache_guard:
+        return _cache_generation
+
 
 def get_disk_usage() -> dict[str, str | float | bool]:
     """Disk usage placeholder; remote quota monitoring is disabled."""
     return {"disk_used": "N/A", "disk_total": "N/A", "disk_percent": 0, "available": False}
 
 
-def get_cached_scandir(path: str, ttl: int = SCANDIR_CACHE_TTL) -> list[dict]:
-    """Cache scandir results for TTL seconds."""
-    now = time.time()
-    _purge_cache(_scandir_cache, SCANDIR_CACHE_MAX_ENTRIES)
+def get_cached_scandir(path: str, ttl: float = SCANDIR_CACHE_TTL) -> list[dict]:
+    """Return a directory snapshot while preserving the public list contract."""
+    items, _scanned_at = _get_cached_scandir_with_timestamp(path, ttl)
+    return items
+
+
+def _get_cached_scandir_with_timestamp(
+    path: str,
+    ttl: float = SCANDIR_CACHE_TTL,
+) -> tuple[list[dict], float]:
+    """Return one directory snapshot, coalescing concurrent scans.
+
+    A failed scan is never cached. If a mutation invalidates the cache while a
+    scan is running, its result is returned to the waiting callers but is not
+    written into the new cache generation.
+    """
+    now = time.monotonic()
+    epoch = _cache_epoch()
     try:
         mtime = os.path.getmtime(path)
     except OSError:
         mtime = 0
     cache_key = (path, mtime)
-    if cache_key in _scandir_cache:
-        cached_time, cached_result = _scandir_cache[cache_key]
+    with _cache_guard:
+        cached = _scandir_cache.get(cache_key)
+        if cached is not None:
+            cached_time, cached_result = cached
+        else:
+            cached_time = 0.0
+            cached_result = None
         if now - cached_time < ttl:
-            return cached_result
-    result = []
+            return list(cached_result or []), cached_time
+        inflight_key = (*cache_key, epoch)
+        inflight = _scandir_inflight.get(inflight_key)
+        if inflight is None:
+            inflight = _InflightResult()
+            _scandir_inflight[inflight_key] = inflight
+            leader = True
+        else:
+            leader = False
+
+    if not leader:
+        inflight.event.wait()
+        if inflight.error is not None:
+            raise inflight.error
+        return list(inflight.result or []), inflight.completed_at
+
+    result: list[dict] = []
     try:
         for entry in os.scandir(path):
             if entry.name == TRASH_DIR_NAME:
@@ -59,12 +138,23 @@ def get_cached_scandir(path: str, ttl: int = SCANDIR_CACHE_TTL) -> list[dict]:
                 'modified': int(stat.st_mtime),
                 'created': int(getattr(stat, 'st_ctime', 0)),
             })
-    except Exception:
-        logger.warning('scandir error for %s', cache_key, exc_info=True)
-    result.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
-    _scandir_cache[cache_key] = (now, result)
-    _purge_cache(_scandir_cache, SCANDIR_CACHE_MAX_ENTRIES)
-    return result
+        result.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        inflight.result = result
+        completed_at = time.monotonic()
+        inflight.completed_at = completed_at
+        with _cache_guard:
+            if epoch == _cache_generation:
+                _scandir_cache[cache_key] = (completed_at, result)
+                _purge_cache(_scandir_cache, SCANDIR_CACHE_MAX_ENTRIES)
+        return list(result), completed_at
+    except Exception as exc:
+        inflight.error = exc
+        logger.warning('scandir failed (%s)', exc.__class__.__name__)
+        raise
+    finally:
+        with _cache_guard:
+            _scandir_inflight.pop(inflight_key, None)
+        inflight.event.set()
 
 
 def _purge_cache(cache: dict, max_entries: int) -> None:
@@ -75,14 +165,25 @@ def _purge_cache(cache: dict, max_entries: int) -> None:
 
 
 def clear_scandir_cache() -> None:
-    _scandir_cache.clear()
-    _search_cache.clear()
+    global _cache_generation
+    with _cache_guard:
+        _cache_generation += 1
+        _scandir_cache.clear()
+        _search_cache.clear()
 
 
 def clear_folder_size_cache() -> None:
-    global _folder_size_cache_generation
-    _folder_size_cache_generation += 1
-    _folder_size_cache.clear()
+    global _cache_generation
+    with _cache_guard:
+        _cache_generation += 1
+        _folder_size_cache.clear()
+
+
+def invalidate_after_mutation(*relative_paths: str) -> None:
+    """Invalidate local caches and queue non-recursive remote refresh hints."""
+    clear_scandir_cache()
+    clear_folder_size_cache()
+    schedule_targeted_refresh([path for path in relative_paths if isinstance(path, str)])
 
 
 def _target_lock(path: str) -> threading.Lock:
@@ -133,18 +234,24 @@ def _trash_root() -> str:
     return os.path.join(MOUNT_PATH, TRASH_DIR_NAME)
 
 
-def _folder_size_cached(abs_path: str, ttl: float = SCANDIR_CACHE_TTL) -> int:
+def _folder_size_cached(
+    abs_path: str,
+    ttl: float = SCANDIR_CACHE_TTL,
+    progress: Callable[[int], None] | None = None,
+) -> int:
     """Recursively sum file sizes under abs_path, cached by (path, mtime)."""
-    generation = _folder_size_cache_generation
+    generation = _cache_epoch()
     try:
         mtime = os.path.getmtime(abs_path)
     except OSError:
         mtime = 0
     cache_key = (abs_path, mtime)
-    cached = _folder_size_cache.get(cache_key)
-    if cached is not None and time.time() - cached[0] < ttl:
+    with _cache_guard:
+        cached = _folder_size_cache.get(cache_key)
+    if cached is not None and time.monotonic() - cached[0] < ttl:
         return cached[1]
     total = 0
+    seen = 0
     try:
         for root, dirs, files in os.walk(abs_path, followlinks=False):
             dirs.sort(key=str.casefold)
@@ -152,27 +259,37 @@ def _folder_size_cached(abs_path: str, ttl: float = SCANDIR_CACHE_TTL) -> int:
                 try:
                     total += os.path.getsize(os.path.join(root, fname))
                 except OSError:
-                    continue
-    except OSError:
-        logger.warning('folder size walk error for %s', abs_path, exc_info=True)
-        return 0
+                    raise
+                seen += 1
+                if progress is not None and seen % 100 == 0:
+                    progress(seen)
+    except OSError as exc:
+        logger.warning('folder size walk failed (%s)', exc.__class__.__name__)
+        raise
+    if progress is not None:
+        progress(seen)
     # A mutation may invalidate the cache while this recursive walk is still
     # running. Never let that older walk repopulate the new cache generation.
-    if generation == _folder_size_cache_generation:
-        _folder_size_cache[cache_key] = (time.time(), total)
-        _purge_cache(_folder_size_cache, FOLDER_SIZE_CACHE_MAX_ENTRIES)
+    with _cache_guard:
+        if generation == _cache_generation:
+            _folder_size_cache[cache_key] = (time.monotonic(), total)
+            _purge_cache(_folder_size_cache, FOLDER_SIZE_CACHE_MAX_ENTRIES)
     return total
 
 
-def get_folder_size(relative_path: str, name: str) -> dict:
+def get_folder_size(
+    relative_path: str,
+    name: str,
+    progress: Callable[[int], None] | None = None,
+) -> dict:
     """Return the recursive size of a folder as display string + bytes."""
-    parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    parent_dir = _resolve(relative_path)
     if not os.path.isdir(parent_dir):
         raise ValueError('Dossier introuvable')
     target = os.path.join(parent_dir, name)
     if not os.path.isdir(target):
         raise ValueError('Dossier introuvable')
-    size_bytes = _folder_size_cached(os.path.realpath(target))
+    size_bytes = _folder_size_cached(os.path.realpath(target), progress=progress)
     return {
         'name': name,
         'size': format_size(size_bytes),
@@ -181,7 +298,10 @@ def get_folder_size(relative_path: str, name: str) -> dict:
     }
 
 
-def get_folder_sizes(paths: list[str]) -> dict:
+def get_folder_sizes(
+    paths: list[str],
+    progress: Callable[[int, int], None] | None = None,
+) -> dict:
     """Compute the recursive size of several folders in one batch.
 
     Invalid or non-directory paths are counted in ``failed`` instead of
@@ -189,12 +309,12 @@ def get_folder_sizes(paths: list[str]) -> dict:
     """
     items: list[dict] = []
     failed = 0
-    for raw_rel in paths:
+    for index, raw_rel in enumerate(paths, start=1):
         rel = raw_rel.strip() if isinstance(raw_rel, str) else raw_rel
         if not rel:
             continue
         try:
-            target = resolve_path_within(MOUNT_PATH, rel, must_exist=True)
+            target = _resolve(rel)
             if not os.path.isdir(target):
                 failed += 1
                 continue
@@ -205,8 +325,11 @@ def get_folder_sizes(paths: list[str]) -> dict:
                 'size': format_size(size_bytes),
                 'size_bytes': size_bytes,
             })
-        except ValueError:
+        except (ValueError, OSError):
             failed += 1
+        finally:
+            if progress is not None:
+                progress(index, len(paths))
     return {'items': items, 'total': len(paths), 'failed': failed}
 
 
@@ -220,10 +343,10 @@ def format_size(size_bytes: int) -> str:
 
 def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, search: str = '') -> dict:
     """List directory contents with metadata."""
-    target_dir = resolve_path_within(MOUNT_PATH, relative_path)
+    target_dir = _resolve(relative_path)
     if not os.path.isdir(target_dir):
         raise ValueError('Dossier introuvable')
-    all_items = get_cached_scandir(target_dir)
+    all_items, scanned_at = _get_cached_scandir_with_timestamp(target_dir)
     if search:
         query = search.casefold()
         all_items = [item for item in all_items if query in item['name'].casefold()]
@@ -233,6 +356,10 @@ def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, se
     disk_used = usage["disk_used"]
     disk_total = usage["disk_total"]
     disk_percent = usage["disk_percent"]
+    source_age_ms = max(0, int((time.monotonic() - scanned_at) * 1000))
+    source_scanned_at = (
+        datetime.now(UTC) - timedelta(milliseconds=source_age_ms)
+    ).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
     return {
         'items': items,
         'total': total,
@@ -242,6 +369,48 @@ def list_directory(relative_path: str = '', offset: int = 0, limit: int = 50, se
         'disk_total': disk_total,
         'disk_percent': disk_percent,
         'disk_available': usage.get("available", True),
+        'path': _canonical_from_target(target_dir),
+        'source_age_ms': source_age_ms,
+        'source_max_age_ms': max(0, int(SCANDIR_CACHE_TTL * 1000)),
+        'source_scanned_at': source_scanned_at,
+    }
+
+
+def canonical_directory(relative_path: str) -> str:
+    """Return the canonical mount-relative path for an existing directory."""
+    target = _resolve(relative_path)
+    if not os.path.isdir(target):
+        raise ValueError('Dossier introuvable')
+    return _canonical_from_target(target)
+
+
+def directory_summary(relative_path: str) -> dict:
+    """Return a live fingerprint covering every entry in a directory."""
+    target = _resolve(relative_path)
+    if not os.path.isdir(target):
+        raise ValueError('Dossier introuvable')
+    items, scanned_at = _get_cached_scandir_with_timestamp(target)
+    fingerprint = hashlib.sha256()
+    for item in items:
+        fingerprint.update(
+            f"{item.get('name', '')}\0{item.get('is_dir', False)}\0"
+            f"{item.get('size_bytes', 0)}\0{item.get('modified', 0)}\0"
+            f"{item.get('created', 0)}\n".encode('utf-8', errors='surrogatepass')
+        )
+    canonical_path = _canonical_from_target(target)
+    source_age_ms = max(0, int((time.monotonic() - scanned_at) * 1000))
+    source_scanned_at = (
+        datetime.now(UTC) - timedelta(milliseconds=source_age_ms)
+    ).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+    return {
+        'path': canonical_path,
+        'current_path': canonical_path,
+        'fingerprint': fingerprint.hexdigest(),
+        'total': len(items),
+        'source_age_ms': source_age_ms,
+        'source_max_age_ms': max(0, int(SCANDIR_CACHE_TTL * 1000)),
+        'source_scanned_at': source_scanned_at,
+        'observed_at': time.time(),
     }
 
 
@@ -278,35 +447,48 @@ async def upload_file_streaming(
         raise ValueError('Nom de fichier requis')
 
     filename = sanitize_filename(file.filename)
-    target_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
-    if not os.path.isdir(target_dir):
-        raise ValueError('Dossier destination introuvable')
+    def prepare_target() -> tuple[str, dict | None]:
+        target_dir = _resolve(relative_path)
+        if not os.path.isdir(target_dir):
+            raise ValueError('Dossier destination introuvable')
+        final_path = os.path.join(target_dir, filename)
+        if overwrite == "rename":
+            final_path = _unique_name(target_dir, filename)
+        elif overwrite == "skip" and os.path.exists(final_path):
+            return final_path, {
+                'success': False,
+                'skipped': True,
+                'filename': filename,
+                'path': _rel(final_path, _mount_real()),
+            }
+        return final_path, None
 
-    final_path = os.path.join(target_dir, filename)
-    if overwrite == "rename":
-        final_path = _unique_name(target_dir, filename)
-    elif overwrite == "skip" and os.path.exists(final_path):
-        return {
-            'success': False,
-            'skipped': True,
-            'filename': filename,
-            'path': _rel(final_path, _mount_real()),
-        }
+    final_path, skipped = await _await_thread_complete(prepare_target)
+    if skipped is not None:
+        return skipped
 
     tmp_path = final_path + '.tmp'
     try:
         total_size = 0
-        with open(tmp_path, 'wb') as f:
-            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
-                f.write(chunk)
+        upload_stream = await _await_thread_complete(open, tmp_path, 'wb')
+        try:
+            while chunk := await _await_complete_on_cancel(file.read(UPLOAD_CHUNK_SIZE)):
+                await _await_thread_complete(upload_stream.write, chunk)
                 total_size += len(chunk)
+        finally:
+            await _await_thread_complete(upload_stream.close)
 
-        with _target_lock(final_path):
-            os.replace(tmp_path, final_path)
-        clear_scandir_cache()
-        clear_folder_size_cache()
+        await _await_thread_complete(_replace_uploaded_file, final_path, tmp_path)
+        invalidate_after_mutation(relative_path)
 
-        _record_history(os.path.basename(final_path), total_size, _rel(final_path, _mount_real()), action="upload")
+        await _await_thread_complete(
+            _record_history,
+            os.path.basename(final_path),
+            total_size,
+            _rel(final_path, _mount_real()),
+            "upload",
+            None,
+        )
 
         return {
             'success': True,
@@ -314,16 +496,48 @@ async def upload_file_streaming(
             'size': format_size(total_size),
             'path': _rel(final_path, _mount_real()),
         }
+    except asyncio.CancelledError:
+        await _await_thread_complete(_remove_if_exists, tmp_path)
+        logger.info('Upload cancelled before commit')
+        raise
     except Exception:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        await _await_thread_complete(_remove_if_exists, tmp_path)
         logger.exception('Upload failed')
         raise
 
 
+async def _await_complete_on_cancel(awaitable):
+    """Wait for an in-flight upload operation before cleanup."""
+    task = asyncio.ensure_future(awaitable)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        try:
+            await task
+        except BaseException:
+            pass
+        raise
+
+
+async def _await_thread_complete(func, *args):
+    return await _await_complete_on_cancel(run_in_threadpool(func, *args))
+
+
+def _replace_uploaded_file(final_path: str, tmp_path: str) -> None:
+    with _target_lock(final_path):
+        os.replace(tmp_path, final_path)
+
+
+def _remove_if_exists(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def download_file(relative_path: str) -> str:
     """Return absolute path for file download."""
-    file_path = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    file_path = _resolve(relative_path)
     if not os.path.isfile(file_path):
         raise ValueError('Fichier introuvable')
     return file_path
@@ -331,7 +545,7 @@ def download_file(relative_path: str) -> str:
 
 def create_directory(relative_path: str, dirname: str) -> dict:
     """Create a new directory."""
-    parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    parent_dir = _resolve(relative_path)
     if not os.path.isdir(parent_dir):
         raise ValueError('Dossier parent introuvable')
 
@@ -341,8 +555,7 @@ def create_directory(relative_path: str, dirname: str) -> dict:
         raise ValueError('Ce dossier existe deja')
 
     os.makedirs(new_dir, exist_ok=True)
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(relative_path)
 
     return {
         'success': True,
@@ -353,7 +566,7 @@ def create_directory(relative_path: str, dirname: str) -> dict:
 
 def rename_item(relative_path: str, old_name: str, new_name: str) -> dict:
     """Rename a file or directory."""
-    parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    parent_dir = _resolve(relative_path)
     old_path = os.path.join(parent_dir, old_name)
     new_name = sanitize_filename(new_name)
     new_path = os.path.join(parent_dir, new_name)
@@ -365,8 +578,7 @@ def rename_item(relative_path: str, old_name: str, new_name: str) -> dict:
 
     with _target_lock(old_path):
         os.rename(old_path, new_path)
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(relative_path)
 
     try:
         size_bytes = os.path.getsize(new_path) if os.path.isfile(new_path) else 0
@@ -411,20 +623,28 @@ def _rel(path: str, base: str) -> str:
 
 
 def _mount_real() -> str:
-    return os.path.realpath(MOUNT_PATH)
+    """Memoize realpath per configured mount while noticing remount changes."""
+    global _mount_real_source, _mount_real_value
+    if _mount_real_source == MOUNT_PATH:
+        return _mount_real_value
+    with _mount_real_guard:
+        if _mount_real_source != MOUNT_PATH:
+            _mount_real_source = MOUNT_PATH
+            _mount_real_value = os.path.realpath(MOUNT_PATH)
+        return _mount_real_value
 
 
 def move_item(source_path: str, name: str, dest_path: str) -> dict:
     """Move a file or directory to another folder within the mount."""
-    source_dir = resolve_path_within(MOUNT_PATH, source_path, must_exist=True)
+    source_dir = _resolve(source_path)
     if not os.path.isdir(source_dir):
         raise ValueError('Dossier source introuvable')
-    dest_dir = resolve_path_within(MOUNT_PATH, dest_path, must_exist=True)
+    dest_dir = _resolve(dest_path)
     if not os.path.isdir(dest_dir):
         raise ValueError('Dossier destination introuvable')
 
-    src = resolve_path_within(MOUNT_PATH, posixpath.join(source_path, name), must_exist=True)
-    dest = resolve_path_within(MOUNT_PATH, posixpath.join(dest_path, name), must_exist=False)
+    src = _resolve(posixpath.join(source_path, name))
+    dest = _resolve(posixpath.join(dest_path, name), must_exist=False)
 
     src_real = os.path.realpath(src)
     src_parent_real = os.path.realpath(source_dir)
@@ -441,8 +661,7 @@ def move_item(source_path: str, name: str, dest_path: str) -> dict:
     old_rel = _rel(src_real, mount_real)
     with _target_lock(src):
         shutil.move(src, dest)
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(source_path, dest_path)
     new_rel = _rel(os.path.realpath(dest), mount_real)
     _rewrite_paths_after_move(old_rel, new_rel)
 
@@ -462,7 +681,7 @@ def move_item(source_path: str, name: str, dest_path: str) -> dict:
 
 def move_items(source_items: list[dict[str, str]], dest_path: str) -> dict:
     """Move several items after validating the complete operation."""
-    dest_dir = resolve_path_within(MOUNT_PATH, dest_path, must_exist=True)
+    dest_dir = _resolve(dest_path)
     if not os.path.isdir(dest_dir):
         raise ValueError('Dossier destination introuvable')
     prepared: list[tuple[str, str]] = []
@@ -472,11 +691,11 @@ def move_items(source_items: list[dict[str, str]], dest_path: str) -> dict:
         name = str(item.get('name', ''))
         if not name:
             raise ValueError('Nom d élément invalide')
-        source_dir = resolve_path_within(MOUNT_PATH, source_path, must_exist=True)
+        source_dir = _resolve(source_path)
         if not os.path.isdir(source_dir):
             raise ValueError('Dossier source introuvable')
-        src = resolve_path_within(MOUNT_PATH, posixpath.join(source_path, name), must_exist=True)
-        dest = resolve_path_within(MOUNT_PATH, posixpath.join(dest_path, name), must_exist=False)
+        src = _resolve(posixpath.join(source_path, name))
+        dest = _resolve(posixpath.join(dest_path, name), must_exist=False)
         src_real = os.path.realpath(src)
         if os.path.realpath(dest_dir) == os.path.realpath(source_dir):
             raise ValueError('Deja au meme emplacement')
@@ -511,7 +730,7 @@ def _trash_unique_target(trashed_rel: str) -> str:
 def delete_item(relative_path: str, name: str, permanent: bool = False) -> dict:
     """Delete a file or directory. By default it is moved to the trash and
     tracked so it can be restored; ``permanent=True`` removes it for good."""
-    parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    parent_dir = _resolve(relative_path)
     target = os.path.join(parent_dir, name)
 
     if not os.path.exists(target):
@@ -547,8 +766,7 @@ def delete_item(relative_path: str, name: str, permanent: bool = False) -> dict:
             except Exception:
                 logger.warning('Could not record trash entry', exc_info=True)
 
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(relative_path)
 
     _record_history(name, size_bytes, original_rel, action="delete")
 
@@ -577,7 +795,7 @@ def restore_item(trashed_rel: str) -> dict:
     if not os.path.exists(trash_target):
         raise ValueError('Fichier absent de la corbeille')
 
-    original_abs = resolve_path_within(MOUNT_PATH, entry["original_path"], must_exist=False)
+    original_abs = _resolve(entry["original_path"], must_exist=False)
     if os.path.exists(original_abs):
         original_abs = _unique_name(os.path.dirname(original_abs), os.path.basename(original_abs))
 
@@ -586,8 +804,7 @@ def restore_item(trashed_rel: str) -> dict:
         shutil.move(trash_target, original_abs)
 
     remove_trash_entry(entry["id"])
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(os.path.dirname(entry["original_path"]).replace(os.sep, "/"))
 
     new_rel = _rel(os.path.realpath(original_abs), _mount_real())
     _record_history(entry["name"], entry.get("size_bytes", 0), new_rel, action="restore")
@@ -610,8 +827,7 @@ def empty_trash() -> dict:
         except OSError:
             logger.warning('Could not purge trash item %s', entry["trashed_rel"], exc_info=True)
     clear_trash_entries()
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation("")
     try:
         os.rmdir(trash_root)
     except OSError:
@@ -621,14 +837,14 @@ def empty_trash() -> dict:
 
 def copy_item(relative_path: str, name: str, dest_path: str) -> dict:
     """Copy a file or directory to another folder within the mount."""
-    source_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    source_dir = _resolve(relative_path)
     if not os.path.isdir(source_dir):
         raise ValueError('Dossier source introuvable')
-    dest_dir = resolve_path_within(MOUNT_PATH, dest_path, must_exist=True)
+    dest_dir = _resolve(dest_path)
     if not os.path.isdir(dest_dir):
         raise ValueError('Dossier destination introuvable')
 
-    src = resolve_path_within(MOUNT_PATH, posixpath.join(relative_path, name), must_exist=True)
+    src = _resolve(posixpath.join(relative_path, name))
     dest_dir_real = os.path.realpath(dest_dir)
     src_real = os.path.realpath(src)
     if os.path.isdir(src) and (dest_dir_real == src_real or dest_dir_real.startswith(src_real + os.sep)):
@@ -641,8 +857,7 @@ def copy_item(relative_path: str, name: str, dest_path: str) -> dict:
         else:
             shutil.copy2(src, target_path)
 
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(relative_path, dest_path)
 
     copied_name = os.path.basename(target_path)
     size_bytes = os.path.getsize(target_path) if os.path.isfile(target_path) else 0
@@ -657,7 +872,7 @@ def copy_item(relative_path: str, name: str, dest_path: str) -> dict:
 
 def create_text_file(relative_path: str, filename: str) -> dict:
     """Create an empty text file."""
-    parent_dir = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    parent_dir = _resolve(relative_path)
     if not os.path.isdir(parent_dir):
         raise ValueError('Dossier parent introuvable')
     filename = sanitize_filename(filename)
@@ -666,8 +881,7 @@ def create_text_file(relative_path: str, filename: str) -> dict:
         raise ValueError('Ce fichier existe deja')
     with _target_lock(target):
         open(target, 'w', encoding='utf-8', newline='').close()
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(relative_path)
     _record_history(filename, 0, _rel(target, _mount_real()), action="create")
     return {'success': True, 'name': filename, 'path': _rel(target, _mount_real())}
 
@@ -675,7 +889,7 @@ def create_text_file(relative_path: str, filename: str) -> dict:
 def read_text_file(relative_path: str, max_bytes: int | None = None) -> dict:
     """Return the text content of a small file."""
     max_bytes = max_bytes or TEXT_EDITOR_MAX_BYTES
-    file_path = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    file_path = _resolve(relative_path)
     if not os.path.isfile(file_path):
         raise ValueError('Fichier introuvable')
     size = os.path.getsize(file_path)
@@ -689,7 +903,7 @@ def read_text_file(relative_path: str, max_bytes: int | None = None) -> dict:
 
 def write_text_file(relative_path: str, content: str) -> dict:
     """Atomically overwrite a text file's content."""
-    file_path = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    file_path = _resolve(relative_path)
     if not os.path.isfile(file_path):
         raise ValueError('Fichier introuvable')
     if not isinstance(content, str):
@@ -699,11 +913,24 @@ def write_text_file(relative_path: str, content: str) -> dict:
         with open(tmp_path, 'w', encoding='utf-8', newline='') as f:
             f.write(content)
         os.replace(tmp_path, file_path)
-    clear_scandir_cache()
-    clear_folder_size_cache()
+    invalidate_after_mutation(os.path.dirname(relative_path).replace(os.sep, "/"))
     size = os.path.getsize(file_path)
     _record_history(os.path.basename(file_path), size, relative_path, action="edit")
     return {'success': True, 'name': os.path.basename(file_path), 'path': relative_path, 'size': size}
+
+
+def _search_page(matches: list[dict], base_path: str, offset: int, limit: int, max_results: int) -> dict:
+    total = len(matches)
+    start = max(0, offset)
+    page_size = max(1, min(limit, 200))
+    items = matches[start:start + page_size]
+    return {
+        'items': items,
+        'total': total,
+        'has_more': start + len(items) < total,
+        'truncated': total >= max_results,
+        'current_path': base_path,
+    }
 
 
 def search_files(
@@ -712,6 +939,7 @@ def search_files(
     offset: int = 0,
     limit: int = 50,
     max_results: int | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> dict:
     """Recursively search file names under base_path (trash excluded).
 
@@ -720,63 +948,89 @@ def search_files(
     """
     max_results = max_results or SEARCH_MAX_RESULTS
     query = (query or '').casefold()
-    cache_key = (base_path, query, max(0, offset), max(1, min(limit, 200)), max_results)
-    cached = _search_cache.get(cache_key)
-    if cached is not None and time.time() - cached[0] < SEARCH_CACHE_TTL:
-        return cached[1]
-    base = resolve_path_within(MOUNT_PATH, base_path)
-    matches: list[dict] = []
+    cache_key = (base_path, query, max_results)
     if len(query) < SEARCH_MIN_LENGTH:
-        result = {'items': [], 'total': 0, 'has_more': False, 'current_path': base_path}
-        _search_cache[cache_key] = (time.time(), result)
-        return result
+        return {'items': [], 'total': 0, 'has_more': False, 'current_path': base_path}
 
-    for root, dirs, files in os.walk(base, followlinks=False):
-        dirs.sort(key=str.casefold)
-        root_rel = _rel(root, _mount_real())
-        if _is_trash_rel(root_rel):
-            dirs[:] = []
-            continue
-        candidates = dirs + files
-        for entry_name in candidates:
-            if query not in entry_name.casefold():
+    epoch = _cache_epoch()
+    with _cache_guard:
+        cached = _search_cache.get(cache_key)
+        if cached is not None and time.monotonic() - cached[0] < SEARCH_CACHE_TTL:
+            return _search_page(cached[1], base_path, offset, limit, max_results)
+        inflight_key = (*cache_key, epoch)
+        inflight = _search_inflight.get(inflight_key)
+        if inflight is None:
+            inflight = _InflightResult()
+            _search_inflight[inflight_key] = inflight
+            leader = True
+        else:
+            leader = False
+    if not leader:
+        inflight.event.wait()
+        if inflight.error is not None:
+            raise inflight.error
+        return _search_page(inflight.result or [], base_path, offset, limit, max_results)
+
+    try:
+        base = _resolve(base_path)
+        matches: list[dict] = []
+        scanned = 0
+
+        def raise_walk_error(error: OSError) -> None:
+            raise error
+
+        for root, dirs, files in os.walk(base, followlinks=False, onerror=raise_walk_error):
+            dirs.sort(key=str.casefold)
+            root_rel = _rel(root, _mount_real())
+            if _is_trash_rel(root_rel):
+                dirs[:] = []
                 continue
-            full = os.path.join(root, entry_name)
-            is_dir = os.path.isdir(full)
-            rel = _rel(os.path.realpath(full), _mount_real())
-            st = os.stat(full, follow_symlinks=False)
-            size_bytes = 0 if is_dir else st.st_size
-            matches.append({
-                'name': entry_name,
-                'is_dir': is_dir,
-                'path': rel,
-                'size': '' if is_dir else format_size(size_bytes),
-                'size_bytes': size_bytes,
-                'modified': int(st.st_mtime),
-                'created': int(getattr(st, 'st_ctime', 0)),
-            })
+            candidates = dirs + files
+            for entry_name in candidates:
+                scanned += 1
+                if progress is not None and scanned % 100 == 0:
+                    progress(scanned, len(matches))
+                if query not in entry_name.casefold():
+                    continue
+                full = os.path.join(root, entry_name)
+                is_dir = os.path.isdir(full)
+                rel = _rel(os.path.realpath(full), _mount_real())
+                st = os.stat(full, follow_symlinks=False)
+                size_bytes = 0 if is_dir else st.st_size
+                matches.append({
+                    'name': entry_name,
+                    'is_dir': is_dir,
+                    'path': rel,
+                    'size': '' if is_dir else format_size(size_bytes),
+                    'size_bytes': size_bytes,
+                    'modified': int(st.st_mtime),
+                    'created': int(getattr(st, 'st_ctime', 0)),
+                })
+                if len(matches) >= max_results:
+                    break
             if len(matches) >= max_results:
                 break
-        if len(matches) >= max_results:
-            break
 
-    total = len(matches)
-    items = matches[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
-    result = {
-        'items': items,
-        'total': total,
-        'has_more': max(0, offset) + len(items) < total,
-        'truncated': total >= max_results,
-        'current_path': base_path,
-    }
-    _search_cache[cache_key] = (time.time(), result)
-    _purge_cache(_search_cache, SEARCH_CACHE_MAX_ENTRIES)
-    return result
+        if progress is not None:
+            progress(scanned, len(matches))
+        inflight.result = matches
+        with _cache_guard:
+            if epoch == _cache_generation:
+                _search_cache[cache_key] = (time.monotonic(), matches)
+                _purge_cache(_search_cache, SEARCH_CACHE_MAX_ENTRIES)
+        return _search_page(matches, base_path, offset, limit, max_results)
+    except BaseException as exc:
+        inflight.error = exc
+        raise
+    finally:
+        with _cache_guard:
+            _search_inflight.pop(inflight_key, None)
+        inflight.event.set()
 
 
 def get_file_properties(relative_path: str) -> dict:
     """Return detailed metadata about a file or directory."""
-    target = resolve_path_within(MOUNT_PATH, relative_path, must_exist=True)
+    target = _resolve(relative_path)
     st = os.stat(target)
     is_dir = os.path.isdir(target)
     name = os.path.basename(target) or os.path.basename(os.path.normpath(target))

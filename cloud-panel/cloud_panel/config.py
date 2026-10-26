@@ -26,7 +26,7 @@ TRUSTED_PROXY_IPS = {
     if item.strip()
 }
 UPLOAD_CHUNK_SIZE = int(os.getenv("CLOUD_PANEL_UPLOAD_CHUNK_SIZE", str(1024 * 1024)))
-SCANDIR_CACHE_TTL = int(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_TTL", "10"))
+SCANDIR_CACHE_TTL = float(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_TTL", "0.5"))
 SCANDIR_CACHE_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_MAX_ENTRIES", "256"))
 FOLDER_SIZE_CACHE_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_FOLDER_SIZE_CACHE_MAX_ENTRIES", "128"))
 PATH_LOCK_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_PATH_LOCK_MAX_ENTRIES", "256"))
@@ -41,3 +41,23 @@ TEXT_EDITOR_MAX_BYTES = int(os.getenv("CLOUD_PANEL_TEXT_EDITOR_MAX_BYTES", str(1
 SHARE_TOKEN_BYTES = int(os.getenv("CLOUD_PANEL_SHARE_TOKEN_BYTES", "24"))
 SHARE_DEFAULT_EXPIRY_DAYS = int(os.getenv("CLOUD_PANEL_SHARE_DEFAULT_EXPIRY_DAYS", "7"))
 SHARE_MAX_EXPIRY_DAYS = int(os.getenv("CLOUD_PANEL_SHARE_MAX_EXPIRY_DAYS", "30"))
+
+# Background work uses a bounded heavy queue while blocking route work keeps
+# Starlette's independent interactive thread pool available.
+JOB_HEAVY_WORKERS = int(os.getenv("CLOUD_PANEL_JOB_HEAVY_WORKERS", "2"))
+JOB_MAX_QUEUED = int(os.getenv("CLOUD_PANEL_JOB_MAX_QUEUED", "32"))
+JOB_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_JOB_MAX_ENTRIES", "256"))
+JOB_STATE_PATH = Path(os.getenv("CLOUD_PANEL_JOB_STATE_PATH", str(DATA_DIR / "jobs-state.json")))
+
+EVENTS_INTERVAL_SECONDS = float(os.getenv("CLOUD_PANEL_EVENTS_INTERVAL_SECONDS", "0.5"))
+EVENTS_KEEPALIVE_SECONDS = float(os.getenv("CLOUD_PANEL_EVENTS_KEEPALIVE_SECONDS", "15"))
+LIVE_RATE_LIMIT_CALLS = int(os.getenv("CLOUD_PANEL_LIVE_RATE_LIMIT_CALLS", "180"))
+LIVE_RATE_LIMIT_SECONDS = int(os.getenv("CLOUD_PANEL_LIVE_RATE_LIMIT_SECONDS", "60"))
+LIVE_SECTION_MAX_IDLE = int(os.getenv("CLOUD_PANEL_LIVE_SECTION_MAX_IDLE", "64"))
+
+# Targeted rclone VFS refresh is opt-in. When enabled, the RC endpoint must be
+# loopback-only so credentials and refresh controls stay backend-local.
+RCLONE_REFRESH_MODE = os.getenv("CLOUD_PANEL_RCLONE_REFRESH_MODE", "off").strip().lower()
+RCLONE_RC_URL = os.getenv("CLOUD_PANEL_RCLONE_RC_URL", "http://127.0.0.1:5572").rstrip("/")
+RCLONE_RC_USER = os.getenv("CLOUD_PANEL_RCLONE_RC_USER", "").strip()
+RCLONE_RC_PASS = os.getenv("CLOUD_PANEL_RCLONE_RC_PASS", "").strip()

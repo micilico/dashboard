@@ -14,10 +14,12 @@ torrent's save path to that exact folder, switch content layout to
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import posixpath
 import re
+import threading
 import time
 from typing import Any
 
@@ -31,7 +33,8 @@ MISSING_STATES = {"missingFiles", "error"}
 PAUSED_DL_STATES = {"pausedDL", "stoppedDL"}
 
 _SCAN_CACHE_TTL = 60.0
-_SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None}
+_SCAN_CACHE: dict[str, Any] = {"ts": 0.0, "data": None, "key": None}
+_SCAN_LOCK = threading.Lock()
 
 _LAYOUT_SUBFOLDER = "Subfolder"
 _LAYOUT_NO_SUBFOLDER = "NoSubfolder"
@@ -133,18 +136,30 @@ def _skipped_entry(torrent: dict[str, Any], reason: str) -> dict[str, Any]:
 
 
 def _scan_index(mount_root: str, qbit_root: str) -> dict[str, Any]:
+    """Return the cached scan, serializing misses across worker threads."""
+    with _SCAN_LOCK:
+        return _scan_index_locked(mount_root, qbit_root)
+
+
+def _scan_index_locked(mount_root: str, qbit_root: str) -> dict[str, Any]:
     """Index every file under the qBittorrent download root on the mount.
 
     Returns ``{"anchor_prefix": str, "files": {basename.casefold(): {dir_rel: size}},
     "sizes": {size: [dir_rel, ...]}, "dir_basenames": {basename.casefold(): [dir_rel, ...]}}``
     where ``dir_rel`` paths are relative to ``mount_root``.
     """
+    mount_root = os.path.realpath(mount_root)
+    qbit_root = _normalize_path(qbit_root)
+    cache_key = (mount_root, qbit_root)
     now = time.monotonic()
     cache = _SCAN_CACHE
-    if cache["data"] is not None and now - cache["ts"] < _SCAN_CACHE_TTL:
+    if (
+        cache["data"] is not None
+        and cache.get("key") == cache_key
+        and now - cache["ts"] < _SCAN_CACHE_TTL
+    ):
         return cache["data"]
 
-    mount_root = os.path.realpath(mount_root)
     target_name = posixpath.basename(qbit_root.rstrip("/")).casefold() if qbit_root else ""
 
     anchor_prefix = ""
@@ -190,8 +205,14 @@ def _scan_index(mount_root: str, qbit_root: str) -> dict[str, Any]:
         "dir_files": dir_files,
     }
     cache["data"] = data
-    cache["ts"] = now
+    cache["ts"] = time.monotonic()
+    cache["key"] = cache_key
     return data
+
+
+async def _scan_index_async(mount_root: str, qbit_root: str) -> dict[str, Any]:
+    """Run the potentially slow FUSE traversal off the event loop."""
+    return await asyncio.to_thread(_scan_index, mount_root, qbit_root)
 
 
 def _name_tokens(value: str) -> set[str]:
@@ -344,7 +365,7 @@ async def build_relink_plan(
     selected_hashes = {str(item).lower() for item in (hashes or [])} if hashes else None
     qbit_root = _normalize_path(QBIT_SAVE_PATH)
 
-    index = _scan_index(mount_root, qbit_root)
+    index = await _scan_index_async(mount_root, qbit_root)
     logger.info(
         "relink: mount=%s qbit_root=%s anchor=%s fichiers=%d",
         mount_root,
@@ -658,3 +679,19 @@ async def relink_missing(
         return {"plan": plan, "result": None}
     result = await apply_relink_plan(qbit, plan, recheck=recheck)
     return {"plan": plan, "result": result}
+
+
+async def relink_status(qbit: Any) -> dict[str, int]:
+    """Return the cheap relink candidate count without scanning the mount."""
+    torrents = await qbit.torrents()
+    qbit_root = _normalize_path(QBIT_SAVE_PATH)
+    count = 0
+    for torrent in torrents:
+        state = str(torrent.get("state") or "")
+        if state in MISSING_STATES or state in PAUSED_DL_STATES:
+            count += 1
+            continue
+        current = _normalize_path(str(torrent.get("savePath") or ""))
+        if _is_shallow_save_path(qbit_root, current):
+            count += 1
+    return {"count": count}

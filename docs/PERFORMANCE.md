@@ -1,84 +1,120 @@
 # Performance defaults
 
-The panels use small in-process caches. They are intentionally local and bounded;
-they do not change the API response shapes or expose backend credentials.
+The dashboard favours fresh data while bounding work. Active data uses short
+TTL caches and in-flight request coalescing; expensive or stable data keeps
+longer caches. Caches remain local to each process and expose no backend
+credentials or internal service URLs.
 
-| Data | Default TTL |
-| --- | ---: |
-| qBittorrent `torrents/info` snapshot | 6 s |
-| Tracker index | 300 s |
-| Torrent dashboard | 8 s |
-| rclone storage snapshot | 20 s |
-| Activity, health and statistics | 30 s |
-| Prowlarr and Jellyfin monitoring | 45 s |
-| Media metadata lookup | 3600 s, max 256 entries |
+| Data | Default freshness strategy |
+| --- | --- |
+| qBittorrent torrent state | 0.5 s TTL; incremental `sync/maindata` with list fallback |
+| Torrent dashboard, health, activity and storage | 0.5 s snapshots |
+| Prowlarr per-section snapshots | 0.5 s, shared by HTTP and SSE consumers |
+| Cloud active-directory scan | 0.5 s TTL, concurrent scans coalesced |
+| Cloud recursive search | 5 s cache for an identical query |
+| Tracker index | 300 s, invalidated by tracker mutations |
+| Library inventory and media metadata | 180 s and 3600 s respectively |
 
-Mutating qBittorrent actions invalidate the torrent snapshot. Adding/removing
-torrents and tracker changes also invalidate the tracker index. Frontend manual
-refreshes use the existing force path. Cloud filesystem caches are bounded by
-`CLOUD_PANEL_SCANDIR_CACHE_MAX_ENTRIES` and
-`CLOUD_PANEL_FOLDER_SIZE_CACHE_MAX_ENTRIES`; recursive search remains capped by
-`CLOUD_PANEL_SEARCH_MAX_RESULTS` and requires three characters by default.
-Per-path mutation locks are also capped by `CLOUD_PANEL_PATH_LOCK_MAX_ENTRIES`;
-only unlocked entries are evicted.
-Statistics and tracker deltas stay in memory between flushes and are atomically
-flushed at most every 15 seconds by default and always at application shutdown.
+The default SSE collection interval is 0.5 s for the torrent, Prowlarr and
+cloud sections. Collections do not overlap. Failures back off progressively,
+and polling resumes when an event stream cannot stay connected. This interval
+is a collection cadence, not a promise that an upstream service or remote
+filesystem can answer within 0.5 s.
 
-For a quick VPS check, compare the upstream request counters in the test mocks
-or access logs with `docker stats --no-stream torrent-panel prowlarr-panel cloud-panel`.
-The chosen trade-off is a few seconds of freshness for substantially fewer
-duplicate network requests and filesystem walks.
+## Live protocol
 
-## Frontend request and rendering defaults
+All three panels expose `GET /api/events` under their configured public prefix.
+SSE uses the following event names and JSON frame types:
 
-The shared browser API client gives each request a 10 s timeout by default.
-Safe reads can retry up to three times with exponential backoff; mutations are
-not replayed after an ambiguous network failure. A caller can cancel requests,
-including a pending retry delay. CSRF expiry refreshes the session and retries
-the original mutation once. Long library organization actions override the
-timeout explicitly and disable mutation retries.
+- `snapshot`: the first complete state for a topic, including `topic`, `data`,
+  `sequence`, `collectedAt`, `changedAt` and `stale`;
+- `section`: a later changed state for one topic;
+- `freshness`: a lightweight `topic`/`collectedAt`/`stale` notice for an
+  unchanged payload; it never carries the large section body;
+- `job`: a bounded background-job update;
+- `heartbeat`: a transport keepalive, separate from data freshness.
 
-Torrent search and cloud filename search debounce keystrokes for 250 ms. Each
-panel coalesces overlapping refreshes, applies only the latest requested state,
-and suspends its periodic refresh while the document is hidden. Prowlarr polls
-every 30 s; torrent refresh uses the user's saved interval (9 s by default).
-Cloud file rows are requested/rendered 50 at a time, Prowlarr release results
-render 80 at a time, and torrent rows render in bounded windows of 300. These
-are UI limits: pagination still exposes the complete available result set.
-Refresh reconciliation updates existing rows where possible so focus,
-selection, open menus and scroll position survive unchanged data refreshes.
+Only sanitized panel data is serialized. Reconnecting clients receive the
+retained complete snapshot. Collector time is not treated as an upstream
+refresh time: Prowlarr retains its source timestamp, and Cloud recomputes the
+age of its last directory scan without reloading the listing. Hidden pages
+close their stream, and each panel retains a polling fallback. Every event
+response is `no-store`; Caddy disables
+compression and uses immediate flushing for all eight event proxy paths.
+
+## Backend and browser behaviour
+
+Independent monitoring services are collected concurrently. A slow secondary
+service therefore does not serialize the whole dashboard. qBittorrent uses its
+incremental synchronization endpoint and rebuilds state after reconnect;
+mutation paths invalidate the related caches.
+
+The browser applies only the sections that changed, avoids replacing matching
+rows, and batches repeated rendering work. Selection, focus, open menus and
+scroll position survive refreshes. Torrent input and cloud name search debounce
+for 250 ms. Lists remain bounded for rendering while pagination or controls
+continue to expose the complete result set.
+
+Cloud recursive searches, folder-size scans, copies and long organization tasks
+run in bounded background queues. Interactive file operations use a separate
+thread capacity. A restarted process marks unfinished work as interrupted and
+does not replay a mutation automatically.
+
+## rclone and static assets
+
+The rclone mount keeps `--dir-cache-time 72h`, full VFS cache mode and its
+loopback RC listener. The dashboard requests targeted non-recursive refreshes
+for directories it mutates and never restarts the mount on a schedule. Some
+backends cannot report external changes promptly; those paths remain limited
+by the mount cache until an external writer requests a targeted refresh or the
+cache is deliberately shortened after measurement.
+
+HTML and `config.js` remain revalidated. APIs are `no-store`. Built CSS/JS use a
+content-hash query, and each panel applies private immutable caching only when
+the requested version equals its current bundle hash. Caddy does not infer
+immutable caching from an arbitrary query string.
 
 ## Local verification
 
-Rebuild generated assets after frontend changes:
+The reproducible benchmark exercises real project runtime classes plus a
+baseline loaded from `git show HEAD:torrent-panel/torrent_panel/services/monitoring.py`.
+It runs the same synthetic upstream delays for both versions and performs a
+real-browser keyed-render comparison.
 
 ```sh
-python3 torrent-panel/build.py
-python3 prowlarr-panel/build.py
-python3 cloud-panel/build.py
+.venv/bin/python scripts/perf/dashboard_perf.py \
+  --iterations 5 \
+  --delay-ms 100 \
+  --caddy-bin /tmp/caddy \
+  --output /tmp/dashboard-perf.json
 ```
 
-Run the shared API/browser contracts and panel frontend suites:
+The report includes the project `SharedSectionHub`, `AsyncTTLCache`, Torrent
+monitoring aggregation, actual Caddy adaptation and static configuration
+checks. It is local evidence only; it never contacts configured services and
+does not claim production VPS latency.
+
+Run the real bundle-level SSE checks separately:
 
 ```sh
-node common/tests/api_client.test.js
-node common/tests/ui_patterns.test.js
-node torrent-panel/tests/frontend_logic.test.js
-node prowlarr-panel/tests/frontend_logic.test.js
-node cloud-panel/tests/frontend_logic.test.js
+node scripts/perf/live_integration.test.js
+```
+
+The test loads each generated panel bundle in Chrome, mocks its HTTP and SSE
+transport, emits real `snapshot`/`section`/`freshness` frames, and verifies
+Torrent row updates, independent Prowlarr health/history updates, and Cloud
+page-two preservation. Unchanged freshness frames must not redraw full section
+payloads. It uses the generated bundles, so rebuild them first after any
+frontend change.
+
+```sh
+.venv/bin/python torrent-panel/build.py
+.venv/bin/python prowlarr-panel/build.py
+.venv/bin/python cloud-panel/build.py
 node common/tests/browser_fluidity.test.js
-node common/tests/visual_breakpoints.test.js
-```
-
-The browser fixtures use synthetic API responses and do not contact configured
-services. To save screenshots at the five checked widths, run:
-
-```sh
 FLUIDITY_SCREENSHOTS=1 FLUIDITY_WIDTHS=1600,1440,1024,768,375 \
   node common/tests/browser_fluidity.test.js
 ```
 
-These checks cover behavior, geometry, and local render output. They do not
-measure production latency, VPS resource usage, or real-service load; use
-access logs and `docker stats --no-stream torrent-panel prowlarr-panel cloud-panel`
-for an on-host operational comparison.
+Production p50/p95, resource counters and source-to-render timing must be
+recorded on the VPS with [PERFORMANCE_DEPLOYMENT.md](PERFORMANCE_DEPLOYMENT.md).

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Build script: concatenate CSS and JS into dist/."""
+import hashlib
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -43,6 +45,7 @@ if css_module_dir.exists():
 js_files = [
     COMMON / "js" / "api.js",
     COMMON / "js" / "dom.js",
+    COMMON / "js" / "live.js",
     COMMON / "js" / "navigation.js",
     COMMON / "js" / "focus-trap.js",
     STATIC / "app.js",
@@ -52,4 +55,24 @@ js_content = "\n".join(
 )
 (DIST / "app.min.js").write_text(js_content, encoding="utf-8")
 
-print(f"Build complete: {DIST}/app.min.css + app.min.js")
+
+def content_version(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+
+
+versions = {
+    "app.min.css": content_version(DIST / "app.min.css"),
+    "app.min.js": content_version(DIST / "app.min.js"),
+}
+index_path = STATIC / "index.html"
+index_html = index_path.read_text(encoding="utf-8")
+for filename, version in versions.items():
+    index_html = re.sub(
+        rf'(\./static/dist/{re.escape(filename)})(?:\?v=[^"\']+)?',
+        rf'\1?v={version}',
+        index_html,
+    )
+index_html = re.sub(r'(\./config\.js)(?:\?v=[^"\']+)?', r'\1?v=' + versions["app.min.js"], index_html)
+index_path.write_text(index_html, encoding="utf-8")
+
+print(f"Build complete: {DIST}/app.min.css?v={versions['app.min.css']} + app.min.js?v={versions['app.min.js']}")

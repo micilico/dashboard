@@ -3,6 +3,7 @@ import logging
 import re
 import secrets
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -43,32 +44,54 @@ class AsyncSnapshotCache:
         self.value: Any = None
         self.stored_at = 0.0
         self.task: Any = None
+        self.task_generation = -1
         self.lock = asyncio.Lock()
+        self.generation = 0
 
     async def get(self, factory: Any, *, force: bool = False) -> Any:
-        now = time.monotonic()
-        async with self.lock:
-            if not force and self.value is not None and now - self.stored_at < self.ttl_seconds:
-                return self.value
-            if self.task is None:
-                self.task = asyncio.create_task(factory())
-            task = self.task
-        try:
-            value = await task
-        except Exception:
+        while True:
+            now = time.monotonic()
             async with self.lock:
-                if self.task is task:
+                if not force and self.value is not None and now - self.stored_at < self.ttl_seconds:
+                    return self.value
+                if self.task is None:
+                    self.task_generation = self.generation
+                    self.task = asyncio.create_task(factory())
+                task = self.task
+                generation = self.task_generation
+            try:
+                # Cancellation of one HTTP waiter must not cancel a collection
+                # shared by other endpoints or live subscribers.
+                value = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                async with self.lock:
+                    if self.task is task:
+                        self.task = None
+                        self.task_generation = -1
+                    invalidated = generation != self.generation
+                if invalidated:
+                    continue
+                raise
+            async with self.lock:
+                invalidated = generation != self.generation
+                if not invalidated and self.task is task:
+                    self.value = value
+                    self.stored_at = time.monotonic()
                     self.task = None
-            raise
-        async with self.lock:
-            if self.task is task:
-                self.value = value
-                self.stored_at = time.monotonic()
-                self.task = None
-        return value
+                    self.task_generation = -1
+            if invalidated:
+                continue
+            return value
 
     def invalidate(self) -> None:
+        self.generation += 1
         self.stored_at = 0.0
+        # A collection that started before a mutation may contain stale data.
+        # Current waiters discard that result and join a fresh collection.
+        self.task = None
+        self.task_generation = -1
 
 
 @dataclass(frozen=True)
@@ -77,7 +100,7 @@ class ProwlarrConfig:
     api_key: str
     timeout_seconds: float = 8.0
     release_cache_ttl_seconds: int = 900
-    snapshot_cache_ttl_seconds: float = 45.0
+    snapshot_cache_ttl_seconds: float = 0.5
 
 
 def clean_text(value: Any) -> str:
@@ -149,13 +172,44 @@ def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def overview_from_snapshot(snapshot: dict[str, Any], capabilities: dict[str, Any]) -> dict[str, Any]:
+    status = snapshot.get("status") if isinstance(snapshot.get("status"), dict) else {}
+    indexers = snapshot.get("indexers") if isinstance(snapshot.get("indexers"), list) else []
+    applications = snapshot.get("applications") if isinstance(snapshot.get("applications"), list) else []
+    health = snapshot.get("health") if isinstance(snapshot.get("health"), list) else []
+    active = [item for item in indexers if isinstance(item, dict) and item.get("enabled")]
+    errored = [item for item in indexers if isinstance(item, dict) and item.get("health") == "error"]
+    return {
+        "connection": "ready",
+        "version": status.get("version") or capabilities.get("version") or "inconnue",
+        "indexersTotal": len(indexers),
+        "indexersActive": len(active),
+        "indexersDisabled": len(indexers) - len(active),
+        "indexersError": len(errored),
+        "applicationsTotal": len(applications),
+        "systemWarnings": len(health),
+        "lastSuccessfulRefresh": snapshot.get("refreshedAt"),
+        "refreshedAt": snapshot.get("refreshedAt"),
+        "capabilities": capabilities,
+    }
+
+
 class ProwlarrClient:
     def __init__(self, config: ProwlarrConfig) -> None:
         self._config = config
         self._api_root = "/api/v1"
         self._client = self._build_client(config.url)
-        self._release_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        fallback_url = self._localhost_fallback_url()
+        self._fallback_client = self._build_client(fallback_url) if fallback_url else None
+        self._using_fallback = False
+        self._request_slots = asyncio.Semaphore(6)
+        self._release_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
         self._snapshot_cache = AsyncSnapshotCache(config.snapshot_cache_ttl_seconds)
+        self._section_caches = {
+            name: AsyncSnapshotCache(config.snapshot_cache_ttl_seconds)
+            for name in ("status", "indexers", "applications", "health", "history", "overview")
+        }
+        self._section_updated_at: dict[str, str | None] = {name: None for name in self._section_caches}
         self._capabilities: dict[str, Any] = {
             "detected": False,
             "version": None,
@@ -173,12 +227,16 @@ class ProwlarrClient:
         return httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(self._config.timeout_seconds),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=6, keepalive_expiry=30.0),
             headers={
                 "User-Agent": "prowlarr-panel/1.0",
                 "X-Api-Key": self._config.api_key,
                 "Accept": "application/json",
             },
         )
+
+    def section_updated_at(self, name: str) -> str | None:
+        return self._section_updated_at.get(name)
 
     def _localhost_fallback_url(self) -> str | None:
         parsed = urlparse(self._config.url)
@@ -190,7 +248,11 @@ class ProwlarrClient:
         return urlunparse(parsed._replace(netloc=netloc))
 
     async def close(self) -> None:
-        await self._client.aclose()
+        clients = [self._client]
+        if self._fallback_client is not None and self._fallback_client is not self._client:
+            clients.append(self._fallback_client)
+        for client in clients:
+            await client.aclose()
 
     def _request_error(self, exc: httpx.RequestError) -> ProwlarrError:
         host = urlparse(self._config.url).hostname or ""
@@ -222,8 +284,10 @@ class ProwlarrClient:
                 recovery="Vérifier la configuration",
             )
 
+        active_client = self._fallback_client if self._using_fallback and self._fallback_client is not None else self._client
         try:
-            response = await self._client.request(method, path, params=params, data=data, json=json)
+            async with self._request_slots:
+                response = await active_client.request(method, path, params=params, data=data, json=json)
         except httpx.TimeoutException as exc:
             logger.warning("Prowlarr request timed out on %s %s", method, path)
             raise ProwlarrError(
@@ -233,14 +297,20 @@ class ProwlarrClient:
                 recovery="Réessayer",
             ) from exc
         except httpx.RequestError as exc:
-            fallback_url = self._localhost_fallback_url()
-            if fallback_url:
+            alternate_client = None
+            # A failed write may already have reached Prowlarr. Replaying it
+            # through the second address could grab or modify twice, so only
+            # reads are safe to retry on the alternate client.
+            safe_to_replay = method.upper() in {"GET", "HEAD"} or isinstance(exc, httpx.ConnectError)
+            fallback_succeeded = False
+            if safe_to_replay and self._fallback_client is not None:
+                alternate_client = self._fallback_client if active_client is self._client else self._client
+            if alternate_client is not None:
                 logger.info("Prowlarr request failed through host.docker.internal, retrying via 127.0.0.1")
-                fallback_client = self._build_client(fallback_url)
                 try:
-                    response = await fallback_client.request(method, path, params=params, data=data, json=json)
+                    async with self._request_slots:
+                        response = await alternate_client.request(method, path, params=params, data=data, json=json)
                 except httpx.TimeoutException as fallback_exc:
-                    await fallback_client.aclose()
                     logger.warning("Prowlarr localhost fallback timed out on %s %s", method, path)
                     raise ProwlarrError(
                         504,
@@ -249,19 +319,12 @@ class ProwlarrClient:
                         recovery="Réessayer",
                     ) from fallback_exc
                 except httpx.RequestError:
-                    await fallback_client.aclose()
+                    pass
                 else:
-                    await self._client.aclose()
-                    self._client = fallback_client
-                    self._config = ProwlarrConfig(
-                        url=fallback_url,
-                        api_key=self._config.api_key,
-                        timeout_seconds=self._config.timeout_seconds,
-                        release_cache_ttl_seconds=self._config.release_cache_ttl_seconds,
-                        snapshot_cache_ttl_seconds=self._config.snapshot_cache_ttl_seconds,
-                    )
-                    return response
-            raise self._request_error(exc) from exc
+                    self._using_fallback = alternate_client is self._fallback_client
+                    fallback_succeeded = True
+            if not fallback_succeeded:
+                raise self._request_error(exc) from exc
 
         if acceptable and response.status_code in acceptable:
             return response
@@ -319,8 +382,7 @@ class ProwlarrClient:
 
     async def discover(self) -> dict[str, Any]:
         status = await self.system_status()
-        endpoints: dict[str, bool] = {}
-        for name, path in {
+        discovered = {
             "systemStatus": f"{self._api_root}/system/status",
             "indexer": f"{self._api_root}/indexer",
             "indexerTest": f"{self._api_root}/indexer/test",
@@ -331,8 +393,15 @@ class ProwlarrClient:
             "application": f"{self._api_root}/applications",
             "health": f"{self._api_root}/health",
             "history": f"{self._api_root}/history",
-        }.items():
-            endpoints[name] = await self._endpoint_exists(path)
+        }
+        semaphore = asyncio.Semaphore(4)
+
+        async def check(name: str, path: str) -> tuple[str, bool]:
+            async with semaphore:
+                return name, await self._endpoint_exists(path)
+
+        results = await asyncio.gather(*(check(name, path) for name, path in discovered.items()))
+        endpoints = dict(results)
         self._capabilities = {
             "detected": True,
             "version": status.get("version"),
@@ -353,6 +422,14 @@ class ProwlarrClient:
         payload = await self._json("GET", f"{self._api_root}/system/status")
         return scrub(payload) if isinstance(payload, dict) else {}
 
+    async def cached_status(self, *, force: bool = False) -> dict[str, Any]:
+        async def collect() -> dict[str, Any]:
+            value = await self.system_status()
+            self._section_updated_at["status"] = now_iso()
+            return value
+
+        return await self._section_caches["status"].get(collect, force=force)
+
     async def ready(self) -> bool:
         await self.system_status()
         return True
@@ -360,6 +437,14 @@ class ProwlarrClient:
     async def indexers(self) -> list[dict[str, Any]]:
         payload = await self._json("GET", f"{self._api_root}/indexer")
         return [self._map_indexer(item) for item in as_list(payload)]
+
+    async def cached_indexers(self, *, force: bool = False) -> list[dict[str, Any]]:
+        async def collect() -> list[dict[str, Any]]:
+            value = await self.indexers()
+            self._section_updated_at["indexers"] = now_iso()
+            return value
+
+        return await self._section_caches["indexers"].get(collect, force=force)
 
     async def applications(self) -> list[dict[str, Any]]:
         for path in (f"{self._api_root}/applications", f"{self._api_root}/application"):
@@ -371,9 +456,25 @@ class ProwlarrClient:
                     raise
         return []
 
+    async def cached_applications(self, *, force: bool = False) -> list[dict[str, Any]]:
+        async def collect() -> list[dict[str, Any]]:
+            value = await self.applications()
+            self._section_updated_at["applications"] = now_iso()
+            return value
+
+        return await self._section_caches["applications"].get(collect, force=force)
+
     async def health(self) -> list[dict[str, Any]]:
         payload = await self._json("GET", f"{self._api_root}/health")
         return [self._map_health(item) for item in as_list(payload)]
+
+    async def cached_health(self, *, force: bool = False) -> list[dict[str, Any]]:
+        async def collect() -> list[dict[str, Any]]:
+            value = await self.health()
+            self._section_updated_at["health"] = now_iso()
+            return value
+
+        return await self._section_caches["health"].get(collect, force=force)
 
     async def _snapshot_uncached(self) -> dict[str, Any]:
         status, indexers, applications, health = await asyncio.gather(
@@ -392,31 +493,43 @@ class ProwlarrClient:
 
     def invalidate_snapshot(self) -> None:
         self._snapshot_cache.invalidate()
+        for cache in self._section_caches.values():
+            cache.invalidate()
 
     async def history(self, page_size: int = 25) -> list[dict[str, Any]]:
         payload = await self._json("GET", f"{self._api_root}/history", params={"pageSize": page_size, "sortKey": "date", "sortDirection": "descending"})
         return [self._map_history(item) for item in as_list(payload)]
 
+    async def cached_history(self, *, force: bool = False) -> list[dict[str, Any]]:
+        async def collect() -> list[dict[str, Any]]:
+            value = await self.history()
+            self._section_updated_at["history"] = now_iso()
+            return value
+
+        return await self._section_caches["history"].get(collect, force=force)
+
     async def overview(self, *, force: bool = False) -> dict[str, Any]:
-        snapshot = await self.snapshot(force=force)
-        status = snapshot["status"]
-        indexers = snapshot["indexers"]
-        applications = snapshot["applications"]
-        health = snapshot["health"]
-        active = [item for item in indexers if item["enabled"]]
-        errored = [item for item in indexers if item["health"] == "error"]
-        return {
-            "connection": "ready",
-            "version": status.get("version") or self._capabilities.get("version") or "inconnue",
-            "indexersTotal": len(indexers),
-            "indexersActive": len(active),
-            "indexersDisabled": len(indexers) - len(active),
-            "indexersError": len(errored),
-            "applicationsTotal": len(applications),
-            "systemWarnings": len(health),
-            "lastSuccessfulRefresh": snapshot["refreshedAt"],
-            "capabilities": self.capabilities,
-        }
+        async def collect() -> dict[str, Any]:
+            status, indexers, applications, health = await asyncio.gather(
+                self.cached_status(force=force),
+                self.cached_indexers(force=force),
+                self.cached_applications(force=force),
+                self.cached_health(force=force),
+            )
+            refreshed_at = now_iso()
+            self._section_updated_at["overview"] = refreshed_at
+            return overview_from_snapshot(
+                {
+                    "status": status,
+                    "indexers": indexers,
+                    "applications": applications,
+                    "health": health,
+                    "refreshedAt": refreshed_at,
+                },
+                self.capabilities,
+            )
+
+        return await self._section_caches["overview"].get(collect, force=force)
 
     async def test_indexer(self, indexer_id: int | None = None) -> dict[str, Any]:
         if indexer_id is None:
@@ -459,7 +572,10 @@ class ProwlarrClient:
                 raise
             logger.info("Prowlarr POST search unavailable or rejected, trying GET search fallback")
             payload = await self._json("GET", f"{self._api_root}/search", params=self._search_get_params(query, categories, indexer_ids))
-        releases = [self._cache_and_map_release(item) for item in as_list(payload)]
+        mapped_items = as_list(payload)
+        self._cleanup_release_cache(reserve=len(mapped_items))
+        releases = [self._cache_and_map_release(item, cleanup=False) for item in mapped_items]
+        self._cleanup_release_cache()
         return {"results": releases, "partialFailures": []}
 
     def _search_get_params(self, query: str, categories: list[int], indexer_ids: list[int]) -> list[tuple[str, str]]:
@@ -477,22 +593,28 @@ class ProwlarrClient:
         payload = response.json() if response.content else {}
         return {"status": "sent", "release": {"title": title, "result": scrub(payload)}}
 
-    def _cache_and_map_release(self, item: dict[str, Any]) -> dict[str, Any]:
-        self._cleanup_release_cache()
+    def _cache_and_map_release(self, item: dict[str, Any], *, cleanup: bool = True) -> dict[str, Any]:
+        if cleanup:
+            self._cleanup_release_cache()
         release_id = secrets.token_urlsafe(24)
         self._release_cache[release_id] = (time.monotonic(), item)
+        self._release_cache.move_to_end(release_id)
         return self._map_release(item, release_id=release_id)
 
-    def _cleanup_release_cache(self) -> None:
+    def _cleanup_release_cache(self, *, reserve: int = 0) -> None:
         now = time.monotonic()
         ttl = max(60, self._config.release_cache_ttl_seconds)
-        for release_id, (created_at, _release) in list(self._release_cache.items()):
+        expired: list[str] = []
+        for release_id, (created_at, _release) in self._release_cache.items():
             if now - created_at > ttl:
-                del self._release_cache[release_id]
-        if len(self._release_cache) <= 500:
-            return
-        for release_id, _entry in sorted(self._release_cache.items(), key=lambda item: item[1][0])[: len(self._release_cache) - 500]:
+                expired.append(release_id)
+            else:
+                break
+        for release_id in expired:
             del self._release_cache[release_id]
+        max_entries = 500
+        while self._release_cache and len(self._release_cache) + max(0, reserve) > max_entries:
+            self._release_cache.popitem(last=False)
 
     def _release_from_cache(self, release_id: str) -> dict[str, Any]:
         self._cleanup_release_cache()
@@ -504,6 +626,8 @@ class ProwlarrClient:
                 code="release_expired",
                 recovery="Relancer la recherche",
             )
+        # Keep recently grabbed handles at the end of the bounded LRU queue.
+        self._release_cache.move_to_end(release_id)
         return entry[1]
 
     def _map_indexer(self, item: dict[str, Any]) -> dict[str, Any]:

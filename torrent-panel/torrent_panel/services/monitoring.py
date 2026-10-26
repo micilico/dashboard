@@ -341,15 +341,13 @@ def invalidate_monitoring_caches(app: FastAPI) -> None:
 async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     qbit = app.state.qbit
     media_automation = app.state.media_automation
-    service_results: dict[str, dict[str, Any]] = {
-        "Homepage": await http_service_status(app, "Homepage", HOMEPAGE_STATUS_URL, action={"kind": "open", "label": "Ouvrir le service", "url": "/"}),
-    }
     home_url = f"{PUBLIC_PREFIX or ''}/?view=home"
     torrents_url = f"{PUBLIC_PREFIX or ''}/?view=torrents"
     prowlarr_search_url = f"{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/?view=search"
     prowlarr_health_url = f"{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/?view=health"
     prowlarr_indexers_url = f"{PROWLARR_PANEL_PUBLIC_PREFIX or ''}/?view=indexers"
 
+    service_results: dict[str, dict[str, Any]] = {}
     torrent_panel_checked_at, torrent_panel_last_success = remember_service_check(app, "Torrent Panel", True)
     service_results["Torrent Panel"] = {
         "name": "Torrent Panel",
@@ -362,35 +360,79 @@ async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
         "details": {},
     }
 
-    try:
-        torrents = await qbit.torrents()
-        qbit_status = service_payload(
-            app,
-            "qBittorrent",
-            "operational",
-            f"{len(torrents)} torrent(s) récupéré(s).",
-            action={"kind": "open", "label": "Ouvrir le service", "url": torrents_url},
-            details={"torrentCount": len(torrents)},
-        )
-    except QbitError as exc:
-        torrents = []
-        qbit_status = service_payload(
-            app,
-            "qBittorrent",
-            "unavailable",
-            exc.public_message,
-            action={"kind": "retry", "label": "Réessayer", "url": home_url},
-            details={"code": exc.code},
-        )
-    service_results["qBittorrent"] = qbit_status
+    async def qbit_result() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        try:
+            values = await qbit.torrents()
+            status = service_payload(
+                app,
+                "qBittorrent",
+                "operational",
+                f"{len(values)} torrent(s) récupéré(s).",
+                action={"kind": "open", "label": "Ouvrir le service", "url": torrents_url},
+                details={"torrentCount": len(values)},
+            )
+            return values, status
+        except QbitError as exc:
+            status = service_payload(
+                app,
+                "qBittorrent",
+                "unavailable",
+                exc.public_message,
+                action={"kind": "retry", "label": "Réessayer", "url": home_url},
+                details={"code": exc.code},
+            )
+            return [], status
 
-    service_results["Prowlarr Panel"] = await http_service_status(
-        app,
-        "Prowlarr Panel",
-        PROWLARR_PANEL_READY_URL,
-        action={"kind": "open", "label": "Ouvrir le service", "url": prowlarr_indexers_url},
+    (
+        homepage_status,
+        (torrents, qbit_status),
+        prowlarr_panel_status,
+        (prowlarr_overview, prowlarr_health_alerts),
+        jellyfin_status,
+        qbit_tunnel_status,
+        prowlarr_tunnel_status,
+        storage,
+    ) = await asyncio.gather(
+        http_service_status(
+            app,
+            "Homepage",
+            HOMEPAGE_STATUS_URL,
+            action={"kind": "open", "label": "Ouvrir le service", "url": "/"},
+        ),
+        qbit_result(),
+        http_service_status(
+            app,
+            "Prowlarr Panel",
+            PROWLARR_PANEL_READY_URL,
+            action={"kind": "open", "label": "Ouvrir le service", "url": prowlarr_indexers_url},
+        ),
+        prowlarr_snapshot(),
+        http_service_status(
+            app,
+            "Jellyfin",
+            JELLYFIN_STATUS_URL,
+            ok_statuses={200, 204},
+            action={"kind": "open", "label": "Ouvrir le service", "url": JELLYFIN_PUBLIC_URL},
+        ),
+        socket_service_status(
+            app,
+            "Tunnel SSH qBittorrent",
+            SSH_QBIT_HOST,
+            SSH_QBIT_PORT,
+            action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
+        ),
+        socket_service_status(
+            app,
+            "Tunnel SSH Prowlarr",
+            SSH_PROWLARR_HOST,
+            SSH_PROWLARR_PORT,
+            action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
+        ),
+        storage_snapshot(app),
     )
-    prowlarr_overview, prowlarr_health_alerts = await prowlarr_snapshot()
+    service_results["Homepage"] = homepage_status
+    service_results["qBittorrent"] = qbit_status
+    service_results["Prowlarr Panel"] = prowlarr_panel_status
     prowlarr_status = "operational" if prowlarr_overview.get("connection") == "ready" else "unavailable"
     service_results["Prowlarr"] = service_payload(
         app,
@@ -404,28 +446,9 @@ async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
         },
     )
 
-    service_results["Jellyfin"] = await http_service_status(
-        app,
-        "Jellyfin",
-        JELLYFIN_STATUS_URL,
-        ok_statuses={200, 204},
-        action={"kind": "open", "label": "Ouvrir le service", "url": JELLYFIN_PUBLIC_URL},
-    )
-
-    service_results["Tunnel SSH qBittorrent"] = await socket_service_status(
-        app,
-        "Tunnel SSH qBittorrent",
-        SSH_QBIT_HOST,
-        SSH_QBIT_PORT,
-        action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
-    )
-    service_results["Tunnel SSH Prowlarr"] = await socket_service_status(
-        app,
-        "Tunnel SSH Prowlarr",
-        SSH_PROWLARR_HOST,
-        SSH_PROWLARR_PORT,
-        action={"kind": "retry", "label": "Réessayer", "url": "/torrent-panel/?view=home"},
-    )
+    service_results["Jellyfin"] = jellyfin_status
+    service_results["Tunnel SSH qBittorrent"] = qbit_tunnel_status
+    service_results["Tunnel SSH Prowlarr"] = prowlarr_tunnel_status
 
     alerts: list[dict[str, Any]] = []
     blocked_torrents = [torrent for torrent in torrents if state_meta_from_qbit(torrent) == "error"]
@@ -490,7 +513,6 @@ async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     if ratio_monitor is not None:
         alerts.extend(ratio_monitor.build_alerts(torrents))
 
-    storage = await storage_snapshot(app)
     overview = build_overview_metrics(torrents, prowlarr_overview)
     recent_activity = build_recent_activity(alerts, media_automation.snapshot().get("entries", []))
     critical_alerts = [item for item in alerts if item["severity"] == "critical"]
@@ -761,7 +783,8 @@ async def _stats_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     ratio_monitor = getattr(app.state, "ratio_monitor", None)
     media_history = app.state.media_automation.snapshot().get("entries", [])
     stats = (
-        stats_store.observe(
+        await asyncio.to_thread(
+            stats_store.observe,
             torrents,
             disk=dashboard.get("storage"),
             media_history=media_history,

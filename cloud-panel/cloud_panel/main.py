@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
 import sys
 import time
+from collections import OrderedDict
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,10 +20,20 @@ if str(_sys_path_root) not in sys.path:
 
 from common import build_csp, RateLimiter  # noqa: E402
 from common.monitoring import init_sentry  # noqa: E402
+from common.performance import JobManager, SharedSectionHub, safe_error  # noqa: E402
 
 from .config import (  # noqa: E402
     PUBLIC_PREFIX,
     MAX_RATE_KEYS,
+    MOUNT_PATH,
+    EVENTS_INTERVAL_SECONDS,
+    EVENTS_KEEPALIVE_SECONDS,
+    JOB_HEAVY_WORKERS,
+    JOB_MAX_ENTRIES,
+    JOB_MAX_QUEUED,
+    JOB_STATE_PATH,
+    LIVE_RATE_LIMIT_CALLS,
+    LIVE_RATE_LIMIT_SECONDS,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_SECONDS,
     READ_RATE_LIMIT_CALLS,
@@ -27,8 +42,10 @@ from .config import (  # noqa: E402
     SHARE_RATE_LIMIT_SECONDS,
     STATIC_DIR,
 )
+from .routes.events import router as events_router  # noqa: E402
 from .routes.files import router as files_router  # noqa: E402
 from .routes.favorites import router as favorites_router  # noqa: E402
+from .routes.jobs import router as jobs_router  # noqa: E402
 from .routes.share import download_share, router as share_router  # noqa: E402
 
 from logging import basicConfig, getLogger  # noqa: E402
@@ -36,9 +53,58 @@ from logging import basicConfig, getLogger  # noqa: E402
 basicConfig(level=os.getenv("CLOUD_PANEL_LOG_LEVEL", "INFO"))
 logger = getLogger("cloud_panel")
 
+
+def _load_asset_manifest() -> tuple[str, frozenset[str]]:
+    manifest_path = STATIC_DIR / "dist" / "asset-version.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        version = str(manifest.get("version") or "")
+        files = manifest.get("files")
+        if not re.fullmatch(r"[0-9a-f]{12}", version) or not isinstance(files, dict):
+            raise ValueError("invalid asset manifest")
+        for relative, expected in files.items():
+            digest = hashlib.sha256((STATIC_DIR / relative).read_bytes()).hexdigest()
+            if digest != expected:
+                return "invalid", frozenset()
+        allowed = {
+            "dist/app.min.css",
+            "dist/app.min.js",
+            "fonts/Inter-Variable.woff2",
+        }
+        paths = frozenset(
+            os.path.normpath(f"{PUBLIC_PREFIX}/static/{relative}")
+            for relative in files
+            if relative in allowed
+        )
+        if PUBLIC_PREFIX:
+            paths |= frozenset(path.removeprefix(PUBLIC_PREFIX) for path in paths)
+        return version, paths
+    except (OSError, ValueError, TypeError):
+        return "invalid", frozenset()
+
+
+ASSET_VERSION, ASSET_PATHS = _load_asset_manifest()
+
 init_sentry(os.getenv("SENTRY_DSN", ""), os.getenv("SENTRY_ENVIRONMENT", "production"))
 
-app = FastAPI(title="Cloud Panel", docs_url=None, redoc_url=None, openapi_url=None)
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    await app_instance.state.section_hub.start()
+    try:
+        yield
+    finally:
+        await app_instance.state.section_hub.close()
+        await app_instance.state.job_manager.close()
+
+
+app = FastAPI(
+    title="Cloud Panel",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=lifespan,
+)
 
 _COMMON_CSS_DIR = Path(sys.modules["common"].__file__).resolve().parent / "css"
 app.mount("/common/css", StaticFiles(directory=str(_COMMON_CSS_DIR)), name="common-css")
@@ -62,7 +128,31 @@ app.state.read_limiter = RateLimiter(
     period_seconds=READ_RATE_LIMIT_SECONDS,
     max_keys=MAX_RATE_KEYS,
 )
+app.state.live_limiter = RateLimiter(
+    max_calls=LIVE_RATE_LIMIT_CALLS,
+    period_seconds=LIVE_RATE_LIMIT_SECONDS,
+    max_keys=MAX_RATE_KEYS,
+)
 app.state.last_csrf_cleanup = 0.0
+app.state.mount_path = MOUNT_PATH
+app.state.live_sections = OrderedDict()
+app.state.job_manager = JobManager(
+    max_workers=JOB_HEAVY_WORKERS,
+    max_pending=JOB_MAX_QUEUED,
+    retention=JOB_MAX_ENTRIES,
+    queue_size=JOB_MAX_QUEUED,
+    state_path=JOB_STATE_PATH,
+    error_factory=lambda _exc: safe_error(
+        code="job_failed",
+        message="La tâche n’a pas pu aboutir.",
+        recovery="Vérifier les données puis réessayer",
+    ),
+)
+app.state.section_hub = SharedSectionHub(
+    job_manager=app.state.job_manager,
+    default_interval=EVENTS_INTERVAL_SECONDS,
+    heartbeat_interval=EVENTS_KEEPALIVE_SECONDS,
+)
 
 
 @app.middleware("http")
@@ -74,7 +164,15 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    if (
+    path = request.url.path
+    is_static_asset = "/static/dist/" in path or "/static/fonts/" in path
+    is_built_asset = os.path.normpath(path) in ASSET_PATHS
+    valid_version = re.fullmatch(r"[0-9a-f]{12}", ASSET_VERSION or "") is not None
+    if is_built_asset and valid_version and request.query_params.get("v") == ASSET_VERSION:
+        response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    elif is_static_asset:
+        response.headers["Cache-Control"] = "no-store"
+    elif (
         "/api/" in request.url.path
         or request.url.path == "/"
         or request.url.path.endswith("/")
@@ -161,7 +259,11 @@ if PUBLIC_PREFIX:
 app.include_router(files_router, prefix="/api")
 app.include_router(favorites_router, prefix="/api")
 app.include_router(share_router, prefix="/api")
+app.include_router(jobs_router, prefix="/api")
+app.include_router(events_router, prefix="/api")
 if PUBLIC_PREFIX:
     app.include_router(files_router, prefix=f"{PUBLIC_PREFIX}/api")
     app.include_router(favorites_router, prefix=f"{PUBLIC_PREFIX}/api")
     app.include_router(share_router, prefix=f"{PUBLIC_PREFIX}/api")
+    app.include_router(jobs_router, prefix=f"{PUBLIC_PREFIX}/api")
+    app.include_router(events_router, prefix=f"{PUBLIC_PREFIX}/api")

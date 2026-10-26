@@ -216,7 +216,7 @@ async function postJson(path, payload, successMessage, trigger = null) {
   }
 }
 
-async function renderActivity() {
+async function renderActivity(payloadOverride) {
   configureSummaryGrid("summary-grid-trio");
   configureContentGrid("8-4");
   els.title.textContent = "Centre d’activité";
@@ -225,7 +225,7 @@ async function renderActivity() {
   els.primaryButton.textContent = "Actualiser";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = load;
-  const payload = await api(`${state.apiPrefix}/activity`, { cache: "no-store" });
+  const payload = payloadOverride || await api(`${state.apiPrefix}/activity`, { cache: "no-store" });
   if (payloadAlreadyRendered("activity", payload)) return;
   const summary = payload.summary || {};
   els.summaryGrid.replaceChildren(
@@ -300,7 +300,7 @@ async function renderActivity() {
   els.cardsGrid.replaceChildren(...simulationCards);
 }
 
-async function renderStorage() {
+async function renderStorage(payloadOverride) {
   configureSummaryGrid("summary-grid-storage");
   configureContentGrid("12");
   els.title.textContent = "Panneau de stockage";
@@ -311,7 +311,7 @@ async function renderStorage() {
   els.primaryButton.onclick = async (event) => {
     await postJson(`${state.apiPrefix}/media-actions/rclone-refresh`, {}, "Actualisation rclone lancée.", event.currentTarget);
   };
-  const payload = await api(`${state.apiPrefix}/storage`, { cache: "no-store" });
+  const payload = payloadOverride || await api(`${state.apiPrefix}/storage`, { cache: "no-store" });
   if (payloadAlreadyRendered("storage", payload)) return;
   const disk = payload.disk || {};
   const rclone = payload.rclone || {};
@@ -365,7 +365,7 @@ async function renderStorage() {
   els.cardsGrid.replaceChildren();
 }
 
-async function renderMedia() {
+async function renderMedia(payloadOverride) {
   configureContentGrid("7-5");
   configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Panneau médias";
@@ -376,7 +376,7 @@ async function renderMedia() {
   els.primaryButton.onclick = async (event) => {
     await postJson(`${state.apiPrefix}/media-actions/jellyfin-refresh`, {}, "Scan Jellyfin lancé.", event.currentTarget);
   };
-  const payload = await api(`${state.apiPrefix}/media`, { cache: "no-store" });
+  const payload = payloadOverride || await api(`${state.apiPrefix}/media`, { cache: "no-store" });
   if (payloadAlreadyRendered("media", payload)) return;
   els.summaryGrid.replaceChildren(
     card("Serveur", text(payload.serverName), text(payload.version)),
@@ -422,7 +422,7 @@ async function renderMedia() {
   els.cardsGrid.replaceChildren();
 }
 
-async function renderHealth() {
+async function renderHealth(payloadOverride) {
   configureContentGrid("8-4");
   configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Santé du système";
@@ -431,7 +431,7 @@ async function renderHealth() {
   els.primaryButton.textContent = "Actualiser";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = load;
-  const payload = await api(`${state.apiPrefix}/health/overview`, { cache: "no-store" });
+  const payload = payloadOverride || await api(`${state.apiPrefix}/health/overview`, { cache: "no-store" });
   const summary = payload.summary || {};
   if (payloadAlreadyRendered("health", payload)) return;
   els.summaryGrid.replaceChildren(
@@ -755,7 +755,7 @@ function dailyTable(rows) {
   return element("div", { className: "table-wrap table-scroll", children: [table] });
 }
 
-async function renderStats() {
+async function renderStats(payloadOverride) {
   configureContentGrid("8-4");
   configureSummaryGrid("summary-grid-trio");
   els.title.textContent = "Statistiques";
@@ -764,7 +764,7 @@ async function renderStats() {
   els.primaryButton.textContent = "Actualiser";
   els.primaryButton.hidden = false;
   els.primaryButton.onclick = load;
-  const payload = await api(`${state.apiPrefix}/stats`, { cache: "no-store" });
+  const payload = payloadOverride || await api(`${state.apiPrefix}/stats`, { cache: "no-store" });
   const stats = payload.stats || {};
   const totals = stats.totals || {};
   const daily = stats.daily || [];
@@ -939,6 +939,73 @@ async function load() {
   return state.loadPromise;
 }
 
+function consoleLiveTopic() {
+  return ({ activity: "activity", storage: "storage", media: "media", health: "health", stats: "stats" })[state.section];
+}
+
+function renderLiveSection(frame) {
+  const topic = String(frame?.topic || "");
+  const payload = frame?.data;
+  if (frame?.stale || (payload && typeof payload === "object" && payload.error)) {
+    setSidebarStatus("Données conservées", "La dernière actualisation a échoué; la vue affichée reste disponible.", "degraded");
+    setPageStatus("Flux indisponible. Les dernières données valides sont conservées.", "warn");
+    return;
+  }
+  if (frame?.type === "freshness") {
+    const collectedAt = frame.sourceUpdatedAt || frame.collectedAt || frame.observedAt;
+    if (collectedAt && els.lastCheck) {
+      const date = new Date(collectedAt);
+      if (!Number.isNaN(date.getTime())) {
+        els.lastCheck.textContent = date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+        els.lastCheck.dateTime = date.toISOString();
+      }
+    }
+    return;
+  }
+  if (!payload || topic !== consoleLiveTopic()) return;
+  const renderers = { activity: renderActivity, storage: renderStorage, media: renderMedia, health: renderHealth, stats: renderStats };
+  renderers[topic]?.(payload).then(() => {
+    const sourceUpdatedAt = frame.sourceUpdatedAt || payload.refreshedAt || payload.generatedAt || payload.observedAt || payload.source_scanned_at;
+    if (!sourceUpdatedAt) return;
+    const date = new Date(sourceUpdatedAt);
+    if (Number.isNaN(date.getTime())) return;
+    if (els.lastCheck) {
+      els.lastCheck.textContent = date.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+      els.lastCheck.dateTime = date.toISOString();
+    }
+  }).catch((error) => {
+    setPageStatus(error.message || "Erreur de mise à jour.", "error");
+  });
+}
+
+async function pollConsoleSection({ signal } = {}) {
+  const topic = consoleLiveTopic();
+  const paths = { activity: "activity", storage: "storage", media: "media", health: "health/overview", stats: "stats" };
+  const data = await api(`${state.apiPrefix}/${paths[topic]}`, { cache: "no-store", retry: false, signal });
+  return { sections: { [topic]: data } };
+}
+
+function startConsoleLive() {
+  if (typeof window.DashboardLive?.createLiveSubscription !== "function") return;
+  const topic = consoleLiveTopic();
+  const subscription = window.DashboardLive.createLiveSubscription({
+    streamUrl: `${state.apiPrefix}/events?topics=${encodeURIComponent(topic)}`,
+    poll: pollConsoleSection,
+    pollIntervalMs: 1000,
+    reconnectDelayMs: 2500,
+    handlers: {
+      snapshot: renderLiveSection,
+      section: renderLiveSection,
+      freshness: renderLiveSection,
+      status(value) {
+        if (els.refreshStatus) els.refreshStatus.textContent = value?.mode === "sse" ? "Flux actif" : "Actualisation";
+      },
+      error(error) { setPageStatus(error.message || "Flux interrompu, nouvelle tentative…", "warn"); },
+    },
+  });
+  subscription.start();
+}
+
 configureLinks();
 els.refreshButton?.addEventListener("click", load);
-load();
+load().then(startConsoleLive);

@@ -1484,6 +1484,11 @@ dialog[open] { opacity: 1; transform: none; }
     margin-left: 0;
   }
 }
+.status-pill.stale {
+  color: var(--warning-text);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
 
 @media (max-width: 1180px) {
   .summary-grid, .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

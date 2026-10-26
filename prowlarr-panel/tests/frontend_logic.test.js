@@ -223,7 +223,7 @@ const domSource = fs.readFileSync("common/js/dom.js", "utf8");
 const commonApiSource = fs.readFileSync("common/js/api.js", "utf8");
 const source = fs.readFileSync("prowlarr-panel/prowlarr_panel/static/app.js", "utf8").replace(
   "init().catch(showError);",
-  "globalThis.__testApi = { state, renderIndexers, renderResults, renderReleaseIndexers, clearReleaseIndexerSelection, renderGrabNotice, buildTorrentFollowUrl, setView, handleTabKeydown, showResultPage, searchFingerprint, loadAll, runSearch };",
+  "globalThis.__testApi = { state, renderIndexers, renderResults, renderReleaseIndexers, clearReleaseIndexerSelection, renderGrabNotice, buildTorrentFollowUrl, setView, handleTabKeydown, showResultPage, searchFingerprint, loadAll, runSearch, applyLiveFrame, applySectionData };",
 );
 vm.runInNewContext(domSource, context);
 vm.runInNewContext(commonApiSource, context);
@@ -367,6 +367,50 @@ assert.equal(elements.get("#grabNotice").hidden, false);
 assert.equal(flattenText(elements.get("#grabNotice")).includes("Suivre dans Torrent Panel"), true);
 assert.equal(source.includes('source", isTr4kerIndexer(indexer) ? "tr4ker" : "prowlarr"'), true);
 
+api.applyLiveFrame({
+  topic: "indexers",
+  data: {
+    indexers: [{ id: 99, name: "Live", enabled: true, health: "ok" }],
+    refreshedAt: "2026-07-17T00:00:01Z",
+  },
+  collectedAt: "2099-01-01T00:00:00Z",
+  stale: false,
+});
+assert.equal(api.state.indexers[0].id, 99);
+assert.equal(api.state.sectionUpdatedAt.indexers, "2026-07-17T00:00:01Z");
+api.applyLiveFrame({
+  topic: "indexers",
+  data: {
+    indexers: [{ id: 1, name: "Stale", enabled: true, health: "ok" }],
+    refreshedAt: "2026-07-17T00:00:00Z",
+  },
+  collectedAt: "2099-01-01T00:00:01Z",
+  stale: false,
+});
+assert.equal(api.state.indexers[0].id, 99);
+api.applyLiveFrame({
+  topic: "applications",
+  data: { error: { code: "offline", message: "Applications indisponibles", recovery: "Reessayer" } },
+  collectedAt: new Date().toISOString(),
+  stale: true,
+});
+assert.equal(elements.get("#appsError").hidden, false);
+api.applyLiveFrame({
+  topic: "health",
+  data: { alerts: [{ type: "warning", message: "Live health" }], refreshedAt: "2026-07-17T00:00:02Z" },
+  collectedAt: "2026-07-17T00:00:03Z",
+  stale: false,
+});
+api.applyLiveFrame({
+  topic: "history",
+  data: { events: [{ title: "Live history" }], refreshedAt: "2026-07-17T00:00:04Z" },
+  collectedAt: "2026-07-17T00:00:05Z",
+  stale: false,
+});
+assert.equal(api.state.alerts[0].message, "Live health");
+assert.equal(api.state.events[0].title, "Live history");
+assert.match(source, /DashboardLive\.createLiveSubscription/);
+
 const tabs = context.document.querySelectorAll(".tab");
 api.setView("search", { replace: false });
 assert.equal(tabs[1].attributes["aria-selected"], "true");
@@ -410,19 +454,51 @@ async function runConcurrencyChecks() {
   };
 
   const backgroundLoad = api.loadAll(false, { background: true });
-  assert.equal(initialLoads.length, 5);
+  assert.equal(initialLoads.length, 2);
   const forcedLoad = api.loadAll(true);
-  assert.equal(initialLoads.length, 5);
+  assert.equal(initialLoads.length, 2);
 
   initialLoads.splice(0).forEach(({ url, resolve }) => resolve(responseWith(url)));
   await backgroundLoad;
   await Promise.resolve();
-  assert.equal(initialLoads.length, 5);
-  assert.equal(initialLoads.filter(({ url }) => url.includes("force=true")).length, 4);
+  assert.equal(initialLoads.length, 2);
+  assert.equal(initialLoads.filter(({ url }) => url.includes("force=true")).length, 2);
 
   initialLoads.splice(0).forEach(({ url, resolve }) => resolve(responseWith(url)));
   await forcedLoad;
   assert.equal(api.state.loadPromise, null);
+
+  api.state.sectionLoaded.indexers = false;
+  api.state.sectionLoaded.overview = false;
+  let resolveOverview;
+  let resolveIndexers;
+  context.fetch = (url) => new Promise((resolve) => {
+    const requestUrl = String(url);
+    if (requestUrl.includes("/api/indexers")) resolveIndexers = () => resolve(responseWith(requestUrl));
+    else if (requestUrl.includes("/api/overview")) resolveOverview = () => resolve(responseWith(requestUrl));
+  });
+  const independentLoad = api.loadAll(false, { background: true, sections: ["overview", "indexers"] });
+  resolveIndexers();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(api.state.sectionLoaded.indexers, true);
+  assert.equal(api.state.sectionLoaded.overview, false);
+  resolveOverview();
+  await independentLoad;
+
+  let resolveStale;
+  context.fetch = (url) => new Promise((resolve) => {
+    resolveStale = () => resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({ indexers: [{ id: 123, name: "Before action" }] }),
+    });
+  });
+  api.state.sectionLoaded.indexers = false;
+  const staleLoad = api.loadAll(false, { background: true, sections: ["indexers"] });
+  api.state.actionRevision += 1;
+  resolveStale();
+  await staleLoad;
+  assert.equal(api.state.sectionLoaded.indexers, false);
 
   context.fetch = (url, options = {}) => {
     const requestUrl = String(url);
@@ -442,6 +518,8 @@ async function runConcurrencyChecks() {
     });
   };
   const event = { preventDefault() {} };
+  let releaseOverview;
+  api.state.sectionPromises.overview = new Promise((resolve) => { releaseOverview = resolve; });
   const firstSearch = api.runSearch(event);
   const secondSearch = api.runSearch(event);
   assert.equal(searchCalls.length, 2);
@@ -452,6 +530,8 @@ async function runConcurrencyChecks() {
   assert.equal(api.state.results.length, 1);
   assert.equal(api.state.results[0].id, "search-2");
   assert.equal(api.state.searchInFlight, false);
+  releaseOverview();
+  delete api.state.sectionPromises.overview;
 }
 
 runConcurrencyChecks()

@@ -582,9 +582,9 @@ suite('Ranger les contenus feature', () => {
     assert.ok(html.includes('id="cancelOrganizeBtn"'));
   });
 
-  test('preview and apply call the media endpoints', () => {
-    assert.ok(appSource.includes('au("/files/organize/preview")'));
-    assert.ok(appSource.includes('au("/files/organize/apply")'));
+  test('preview and apply use cloud background jobs', () => {
+    assert.ok(appSource.includes('runBackgroundJob("organize_preview"'));
+    assert.ok(appSource.includes('runBackgroundJob("organize_apply"'));
     assert.ok(!appSource.includes('"/files/organize-series/'));
   });
 
@@ -664,8 +664,8 @@ suite('Folder size on demand', () => {
     assert.strictEqual(nm, "Show.S01");
   });
 
-  test('folder size requests the /files/size endpoint', () => {
-    assert.ok(appSource.includes('au("/files/size")'));
+  test('folder size runs through the shared job endpoint', () => {
+    assert.ok(appSource.includes('runBackgroundJob("folder_sizes", { paths: [item.path] })'));
     assert.ok(appSource.includes("function folderSizeCell"));
   });
 
@@ -726,7 +726,7 @@ suite('Bulk folder sizes', () => {
     assert.ok(!items[2].hasOwnProperty("size_bytes") || !items[2].size);
   });
 
-  test('batch payload joins visible folder paths with newlines', () => {
+  test('batch payload contains visible folder paths', () => {
     const dirs = [
       { path: "Films" },
       { path: "Series/Show" },
@@ -742,8 +742,8 @@ suite('Bulk folder sizes', () => {
     assert.deepEqual(map.get("Films"), { size: "2.0 Go", size_bytes: 2147483648 });
   });
 
-  test('bulk sizes post to the /files/sizes endpoint', () => {
-    assert.ok(appSource.includes('au("/files/sizes")'));
+  test('bulk sizes use the shared job endpoint', () => {
+    assert.ok(appSource.includes('runBackgroundJob("folder_sizes", { paths: dirs.map(f => f.path) })'));
     assert.ok(appSource.includes("function calcAllFolderSizes"));
     assert.ok(appSource.includes('$("btnCalcSizes").addEventListener("click", calcAllFolderSizes)'));
     assert.ok(appSource.includes("folderSizes: new Map()"));
@@ -804,10 +804,10 @@ suite('Fluidité des listes', () => {
     assert.ok(!appSource.includes("S.files.concat(items)"));
   });
 
-  test('polling suspendu en arrière-plan et sans chevauchement', () => {
-    assert.ok(appSource.includes("if (document.hidden) stopAutoRefresh()"));
-    assert.ok(appSource.includes("S.loading || S.activeLoad || S.queuedLoad"));
-    assert.ok(appSource.includes('loadFiles({ reason: "poll" })'));
+  test('live updates use the shared visibility-aware browser runtime', () => {
+    assert.ok(appSource.includes("DashboardLive.createLiveSubscription"));
+    assert.ok(!appSource.includes("new EventSource("));
+    assert.ok(appSource.includes('pollIntervalMs: 500'));
     assert.ok(appSource.includes('renderFiles({ preserveMenu: request.reason === "poll" })'));
   });
 
@@ -832,6 +832,43 @@ suite('Fluidité des listes', () => {
   test('les mutations terminées invalident les tailles mémorisées', () => {
     assert.ok(appSource.includes("function refreshAfterMutation"));
     assert.ok(appSource.includes("invalidateFolderSizes();\n  loadFiles({ reason: \"mutation\" })"));
+  });
+});
+
+suite('Background jobs and live progress', () => {
+  const appSource = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "app.js"),
+    "utf8",
+  );
+  const html = fs.readFileSync(
+    path.join(__dirname, "..", "cloud_panel", "static", "index.html"),
+    "utf8",
+  );
+  const buildSource = fs.readFileSync(
+    path.join(__dirname, "..", "build.py"),
+    "utf8",
+  );
+
+  test('background workflows submit typed jobs and wait for shared completion', () => {
+    assert.ok(appSource.includes('au("/jobs")'));
+    assert.ok(appSource.includes('runBackgroundJob("recursive_search"'));
+    assert.ok(appSource.includes('runBackgroundJob("folder_sizes"'));
+    assert.ok(appSource.includes('runBackgroundJob("copy"'));
+    assert.ok(appSource.includes('"completed", "failed", "interrupted"'));
+  });
+
+  test('job progress remains visible while the user navigates', () => {
+    assert.ok(html.includes('id="jobTray"'));
+    assert.ok(appSource.includes("function renderJobTray"));
+    assert.ok(appSource.includes("job.total"));
+    assert.ok(appSource.includes("job.progress"));
+    assert.ok(appSource.includes("ensureJobPolling"));
+  });
+
+  test('production bundle includes shared live runtime and content token', () => {
+    assert.ok(buildSource.includes('COMMON / "js" / "live.js"'));
+    assert.ok(buildSource.includes("asset-version.txt"));
+    assert.ok(buildSource.includes("asset_digest"));
   });
 });
 

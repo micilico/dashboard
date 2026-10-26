@@ -41,6 +41,8 @@ from torrent_panel.services.metadata import MediaMetadataResolver  # noqa: E402
 from torrent_panel.services.notifications import NotificationCenter  # noqa: E402
 from torrent_panel.services.automations import AutomationRuleStore  # noqa: E402
 from torrent_panel.services import metadata as metadata_service  # noqa: E402
+from torrent_panel.services.live import _stable_fingerprint  # noqa: E402
+from torrent_panel.routes.jobs import JobRequest, _runner  # noqa: E402
 
 
 VALID_HASH = "a" * 40
@@ -252,6 +254,46 @@ class BackendTests(unittest.TestCase):
         response = self.client.post("/torrent-panel/api/torrents/pause", json={"hashes": [VALID_HASH]})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"]["code"], "csrf_expired")
+
+    def test_live_fingerprint_ignores_collection_timestamps_only(self):
+        first = {
+            "observedAt": "2026-10-26T10:00:00Z",
+            "torrents": [{"hash": VALID_HASH, "progress": 0.5, "date": "2026-10-26"}],
+        }
+        second = {
+            "observedAt": "2026-10-26T10:00:01Z",
+            "torrents": [{"hash": VALID_HASH, "progress": 0.5, "date": "2026-10-26"}],
+        }
+        self.assertEqual(_stable_fingerprint(first), _stable_fingerprint(second))
+        second["torrents"][0]["progress"] = 0.6
+        self.assertNotEqual(_stable_fingerprint(first), _stable_fingerprint(second))
+        second["torrents"][0]["progress"] = 0.5
+        second["torrents"][0]["date"] = "2026-10-27"
+        self.assertNotEqual(_stable_fingerprint(first), _stable_fingerprint(second))
+
+    def test_library_apply_job_preserves_run_id_validation(self):
+        request = mock.Mock(app=app)
+        _key, runner = _runner(
+            request,
+            JobRequest(
+                type="library-apply",
+                params={"runId": "missing-run-0001", "hashes": [VALID_HASH]},
+            ),
+        )
+        context = mock.Mock()
+        context.report = mock.Mock()
+        with self.assertRaises(Exception) as error:
+            asyncio.run(runner(context))
+        self.assertEqual(getattr(error.exception, "status_code", None), 404)
+        self.assertEqual(app.state.qbit.calls, [])
+
+    def test_jobs_reject_invalid_hashes_before_queueing(self):
+        response = self.post_action(
+            "/torrent-panel/api/jobs",
+            {"type": "organize", "params": {"hashes": ["invalid"]}},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"]["code"], "job_invalid")
 
     def test_new_session_does_not_invalidate_previous_tab_token(self):
         first_token = self.csrf
@@ -667,6 +709,68 @@ class PerformanceCacheTests(unittest.IsolatedAsyncioTestCase):
         cache.invalidate()
         self.assertEqual(await cache.get_or_set(factory), 2)
 
+    async def test_invalidation_never_returns_a_previously_stored_value(self):
+        cache = AsyncTTLCache(10 ** 9)
+        values = iter([1, 2])
+
+        async def factory():
+            return next(values)
+
+        self.assertEqual(await cache.get_or_set(factory), 1)
+        cache.invalidate()
+        self.assertEqual(await cache.get_or_set(factory), 2)
+
+    async def test_failed_read_is_not_cached_and_can_retry(self):
+        cache = AsyncTTLCache(60)
+        calls = 0
+
+        async def factory():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("boom")
+            return "ok"
+
+        with self.assertRaises(RuntimeError):
+            await cache.get_or_set(factory)
+        self.assertEqual(await cache.get_or_set(factory), "ok")
+        self.assertEqual(calls, 2)
+
+    async def test_cancelled_waiter_does_not_cancel_the_shared_read(self):
+        cache = AsyncTTLCache(60)
+        calls = 0
+        release = asyncio.Event()
+
+        async def factory():
+            nonlocal calls
+            calls += 1
+            await release.wait()
+            return "value"
+
+        cancelled = asyncio.create_task(cache.get_or_set(factory))
+        survivor = asyncio.create_task(cache.get_or_set(factory))
+        await asyncio.sleep(0.05)
+
+        cancelled.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await cancelled
+
+        release.set()
+        self.assertEqual(await survivor, "value")
+        self.assertEqual(calls, 1)
+
+    async def test_invalidation_during_a_read_is_not_stored(self):
+        cache = AsyncTTLCache(60)
+        values = iter(["before", "after"])
+
+        async def factory():
+            return next(values)
+
+        self.assertEqual(await cache.get_or_set(factory), "before")
+        cache.invalidate()
+        self.assertEqual(await cache.get_or_set(factory), "after")
+        self.assertEqual(await cache.get_or_set(factory), "after")
+
     def test_repeated_state_observation_does_not_save(self):
         state_dir = Path(tempfile.mkdtemp())
         notification = NotificationCenter(state_dir / "notifications.json")
@@ -693,6 +797,46 @@ class PerformanceCacheTests(unittest.IsolatedAsyncioTestCase):
         tracker.observe(torrent, {})
         tracker.observe(torrent, {})
         self.assertEqual(tracker._save.call_count, 1)
+
+
+class RelinkScanConcurrencyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_scan_runs_off_loop_and_concurrent_misses_share_one_scan(self):
+        original_cache = relink_service._SCAN_CACHE.copy()
+        relink_service._SCAN_CACHE.update(ts=0.0, data=None, key=None)
+        self.addCleanup(relink_service._SCAN_CACHE.update, original_cache)
+        started = threading.Event()
+        release = threading.Event()
+        walk_calls = []
+        mount_root = "/tmp/relink-scan-concurrency"
+        canonical_mount = os.path.realpath(mount_root)
+        qbit_root = "/downloads/qbittorrent"
+
+        def slow_walk(root):
+            walk_calls.append(root)
+            if root == canonical_mount:
+                return iter([(root, ["qbittorrent"], [])])
+            started.set()
+            release.wait(2)
+            return iter([(os.path.join(root, "Films"), [], ["example.mkv"])])
+
+        with (
+            mock.patch.object(relink_service.os, "walk", side_effect=slow_walk),
+            mock.patch.object(relink_service.os.path, "getsize", return_value=10),
+        ):
+            tasks = [
+                asyncio.create_task(relink_service._scan_index_async(mount_root, qbit_root))
+                for _ in range(3)
+            ]
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            # The simulated FUSE scan is still blocked while the event loop runs.
+            await asyncio.wait_for(asyncio.sleep(0.01), timeout=0.2)
+            release.set()
+            results = await asyncio.gather(*tasks)
+
+        self.assertEqual(walk_calls, [canonical_mount, os.path.join(canonical_mount, "qbittorrent")])
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[1], results[2])
+        self.assertEqual(results[0]["files"], {"example.mkv": {"qbittorrent/Films": 10}})
 
 
 class MetadataResolverTests(unittest.IsolatedAsyncioTestCase):
@@ -2173,6 +2317,191 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[-1][1], "/api/v2/torrents/setContentLayout")
         self.assertEqual(calls[-1][2]["hashes"], VALID_HASH)
         self.assertEqual(calls[-1][2]["layout"], "NoSubfolder")
+
+    async def test_sync_maindata_returns_the_same_mapping_as_the_list_endpoint(self):
+        raw = {
+            "hash": VALID_HASH,
+            "name": "Example",
+            "state": "downloading",
+            "progress": 0.42,
+            "dlspeed": 2048,
+            "upspeed": 512,
+            "ratio": 0.5,
+            "size": 4096,
+            "downloaded": 2048,
+            "uploaded": 512,
+            "amount_left": 2048,
+            "eta": 120,
+            "added_on": 20,
+            "completion_on": 0,
+            "num_seeds": 3,
+            "num_leeches": 1,
+            "availability": 2.5,
+            "category": "Series",
+            "tags": "auto",
+            "save_path": "/downloads/Series",
+            "content_path": "/downloads/Series/Example",
+            "tracker": "https://user:secret@tracker.test/announce?passkey=hidden",
+            "priority": 2,
+            "last_activity": 1700000000,
+            "dl_limit": 1024,
+            "up_limit": -1,
+            "seq_dl": True,
+            "is_private": True,
+        }
+
+        incremental = QBittorrentClient(
+            QbitConfig(url="http://127.0.0.1:1", username="u", password="p", torrents_cache_ttl_seconds=0)
+        )
+        listed = QBittorrentClient(
+            QbitConfig(url="http://127.0.0.1:1", username="u", password="p", torrents_cache_ttl_seconds=0)
+        )
+        self.addAsyncCleanup(incremental.close)
+        self.addAsyncCleanup(listed.close)
+
+        async def sync_request(method, path, *, params=None, **kwargs):
+            self.assertEqual(path, "/api/v2/sync/maindata")
+            payload = dict(raw)
+            payload.pop("hash", None)
+            return FakeResponse({"rid": 4, "full_update": True, "torrents": {VALID_HASH: payload}})
+
+        async def list_request(method, path, *, params=None, **kwargs):
+            if path.endswith("/sync/maindata"):
+                raise QbitError(404, "Torrent inconnu ou action qBittorrent indisponible.", code="qbit_action_unavailable")
+            self.assertEqual(path, "/api/v2/torrents/info")
+            return FakeResponse([raw])
+
+        incremental._request = sync_request
+        listed._request = list_request
+
+        from_sync = await incremental.torrents()
+        from_list = await listed.torrents()
+
+        self.assertEqual(from_sync, from_list)
+        self.assertEqual(from_sync[0]["tracker"], "tracker.test")
+        self.assertNotIn("secret", str(from_sync))
+        self.assertNotIn("passkey", str(from_sync))
+
+    async def test_sync_maindata_applies_incremental_updates_and_removals(self):
+        removed_hash = "b" * 40
+        seen_params = []
+
+        async def fake_request(method, path, *, params=None, **kwargs):
+            self.assertEqual(path, "/api/v2/sync/maindata")
+            seen_params.append(params)
+            if params:
+                return FakeResponse(
+                    {
+                        "rid": 11,
+                        "full_update": False,
+                        "torrents": {VALID_HASH: {"dlspeed": 4096}},
+                        "torrents_removed": [removed_hash],
+                    }
+                )
+            return FakeResponse(
+                {
+                    "rid": 10,
+                    "full_update": True,
+                    "torrents": {
+                        VALID_HASH: {"name": "Example", "progress": 0.1, "dlspeed": 1024},
+                        removed_hash: {"name": "Obsolete"},
+                    },
+                }
+            )
+
+        self.client = QBittorrentClient(
+            QbitConfig(url="http://127.0.0.1:1", username="u", password="p", torrents_cache_ttl_seconds=0)
+        )
+        self.client._request = fake_request
+
+        initial = await self.client.torrents()
+        self.assertEqual([item["name"] for item in initial], ["Example", "Obsolete"])
+
+        updated = await self.client.torrents()
+        self.assertEqual([item["name"] for item in updated], ["Example"])
+        self.assertEqual(updated[0]["progress"], 0.1)
+        self.assertEqual(updated[0]["downloadSpeed"], 4096)
+        self.assertEqual(updated[0]["name"], "Example")
+        self.assertEqual(updated[0]["hash"], VALID_HASH)
+        self.assertEqual(seen_params, [None, {"rid": 10}])
+
+    async def test_sync_maindata_falls_back_to_the_full_list_when_unsupported(self):
+        paths = []
+
+        async def fake_request(method, path, *, params=None, **kwargs):
+            paths.append(path)
+            if path.endswith("/sync/maindata"):
+                raise QbitError(404, "Torrent inconnu ou action qBittorrent indisponible.", code="qbit_action_unavailable")
+            return FakeResponse([{"hash": VALID_HASH, "name": "Example"}])
+
+        self.client = QBittorrentClient(
+            QbitConfig(url="http://127.0.0.1:1", username="u", password="p", torrents_cache_ttl_seconds=0)
+        )
+        self.client._request = fake_request
+
+        self.assertEqual([item["name"] for item in await self.client.torrents()], ["Example"])
+        self.assertEqual([item["name"] for item in await self.client.torrents()], ["Example"])
+        self.assertEqual(paths, ["/api/v2/sync/maindata", "/api/v2/torrents/info", "/api/v2/torrents/info"])
+
+    async def test_sync_maindata_rejects_a_delta_it_cannot_anchor(self):
+        paths = []
+
+        async def fake_request(method, path, *, params=None, **kwargs):
+            paths.append(path)
+            if path.endswith("/sync/maindata"):
+                return FakeResponse(
+                    {"rid": 20, "full_update": False, "torrents": {VALID_HASH: {"progress": 0.5}}}
+                )
+            return FakeResponse(
+                [
+                    {"hash": VALID_HASH, "name": "Example"},
+                    {"hash": "b" * 40, "name": "Second"},
+                ]
+            )
+
+        self.client = QBittorrentClient(
+            QbitConfig(url="http://127.0.0.1:1", username="u", password="p", torrents_cache_ttl_seconds=0)
+        )
+        self.client._request = fake_request
+
+        first = await self.client.torrents()
+        second = await self.client.torrents()
+
+        # A delta the client cannot anchor must never hide torrents that only
+        # the complete list knows about.
+        self.assertEqual([item["name"] for item in first], ["Example", "Second"])
+        self.assertEqual([item["name"] for item in second], ["Example", "Second"])
+        self.assertEqual(
+            paths,
+            ["/api/v2/sync/maindata", "/api/v2/torrents/info", "/api/v2/sync/maindata", "/api/v2/torrents/info"],
+        )
+
+    async def test_concurrent_torrent_reads_share_one_upstream_request(self):
+        calls = 0
+        started = asyncio.Event()
+        gate = asyncio.Event()
+
+        async def fake_request(method, path, *, params=None, **kwargs):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await gate.wait()
+            return FakeResponse({"rid": 31, "full_update": True, "torrents": {VALID_HASH: {"name": "Example"}}})
+
+        self.client = QBittorrentClient(
+            QbitConfig(url="http://127.0.0.1:1", username="u", password="p", torrents_cache_ttl_seconds=0)
+        )
+        self.client._request = fake_request
+
+        readers = [asyncio.create_task(self.client.torrents()) for _ in range(3)]
+        await started.wait()
+        await asyncio.sleep(0.05)
+        gate.set()
+        results = await asyncio.gather(*readers)
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0][0]["name"], "Example")
 
     async def test_rename_file_uses_metadata_aware_endpoint(self):
         self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))

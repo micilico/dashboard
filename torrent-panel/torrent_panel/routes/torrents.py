@@ -219,27 +219,12 @@ async def relink_preview(request: Request) -> dict[str, Any]:
 @router.get("/torrents/relink-status")
 async def relink_status(request: Request) -> dict[str, Any]:
     """Cheap indicator (no filesystem scan) of torrents that likely need relinking."""
-    import posixpath
-
-    from ..config import QBIT_SAVE_PATH
-    from ..services.relink import MISSING_STATES, PAUSED_DL_STATES, _is_shallow_save_path, _normalize_path
+    from ..services.relink import relink_status as compute_relink_status
 
     try:
-        torrents = await request.app.state.qbit.torrents()
+        return await compute_relink_status(request.app.state.qbit)
     except QbitError as exc:
         raise qbit_error_response(exc) from exc
-
-    qbit_root = _normalize_path(QBIT_SAVE_PATH)
-    count = 0
-    for torrent in torrents:
-        state = str(torrent.get("state") or "")
-        if state in MISSING_STATES or state in PAUSED_DL_STATES:
-            count += 1
-            continue
-        current = _normalize_path(str(torrent.get("savePath") or ""))
-        if _is_shallow_save_path(qbit_root, current):
-            count += 1
-    return {"count": count}
 
 
 @router.post("/torrents/relink", dependencies=[Depends(require_action_guard)])
@@ -741,7 +726,11 @@ async def torrent_tracker_stats(request: Request) -> dict[str, Any]:
     try:
         torrents = await request.app.state.qbit.torrents()
         tracker_payload = await _tracker_index_payload(request, torrents=torrents)
-        stats = request.app.state.tracker_stats.observe(torrents, tracker_payload["index"])
+        stats = await asyncio.to_thread(
+            request.app.state.tracker_stats.observe,
+            torrents,
+            tracker_payload["index"],
+        )
         return {"stats": stats}
     except QbitError as exc:
         raise qbit_error_response(exc) from exc

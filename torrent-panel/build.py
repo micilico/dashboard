@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Build script: concatenate CSS and JS into dist/."""
+import hashlib
+import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -48,6 +51,7 @@ console_css_content = common_css + "\n" + resolve_css_imports(STATIC / "console.
 js_files_app = [
     COMMON / "js" / "api.js",
     COMMON / "js" / "dom.js",
+    COMMON / "js" / "live.js",
     COMMON / "js" / "navigation.js",
     COMMON / "js" / "focus-trap.js",
     STATIC / "app.js",
@@ -61,6 +65,7 @@ js_content_app = "\n".join(
 js_files_console = [
     COMMON / "js" / "api.js",
     COMMON / "js" / "dom.js",
+    COMMON / "js" / "live.js",
     COMMON / "js" / "navigation.js",
     COMMON / "js" / "focus-trap.js",
     STATIC / "console.js",
@@ -70,7 +75,42 @@ js_content_console = "\n".join(
 )
 (DIST / "console.min.js").write_text(js_content_console, encoding="utf-8")
 
+built_assets = [
+    "app.min.css",
+    "console.min.css",
+    "app.min.js",
+    "console.min.js",
+]
+asset_hashes = {
+    filename: hashlib.sha256((DIST / filename).read_bytes()).hexdigest()
+    for filename in built_assets
+}
+combined = hashlib.sha256()
+for filename in built_assets:
+    combined.update(asset_hashes[filename].encode("ascii"))
+asset_version = combined.hexdigest()[:12]
+(DIST / "asset-version.json").write_text(
+    json.dumps({"version": asset_version, "files": asset_hashes}, separators=(",", ":")),
+    encoding="utf-8",
+)
+
+# Every generated asset uses the manifest version. Bundles are immutable only
+# after the server verifies both the query token and each current file hash.
+for html_path in STATIC.glob("*.html"):
+    html = html_path.read_text(encoding="utf-8")
+    html = re.sub(
+        r"(\./static/dist/(?:app|console)\.min\.(?:css|js))(?:\?v=[^\"']+)?",
+        rf"\1?v={asset_version}",
+        html,
+    )
+    html = re.sub(
+        r"(\./config\.js)(?:\?v=[^\"']+)?",
+        rf"\1?v={asset_version}",
+        html,
+    )
+    html_path.write_text(html, encoding="utf-8")
+
 print(
     f"Build complete: {DIST}/app.min.css + console.min.css "
-    "+ app.min.js + console.min.js"
+    f"+ app.min.js + console.min.js (v={asset_version})"
 )

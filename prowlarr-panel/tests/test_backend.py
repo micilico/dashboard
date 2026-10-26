@@ -1,4 +1,5 @@
 import asyncio
+import httpx
 import sys
 import time
 import unittest
@@ -8,8 +9,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prowlarr_panel.main import RateLimiter, app, cleanup_csrf_tokens, parse_rate_limits  # noqa: E402
-from prowlarr_panel.prowlarr import ProwlarrClient, ProwlarrConfig, ProwlarrError, scrub  # noqa: E402
+from prowlarr_panel.main import ASSET_VERSIONS, RateLimiter, app, build_live_hub, cleanup_csrf_tokens, parse_live_topics, parse_rate_limits  # noqa: E402
+from prowlarr_panel.prowlarr import AsyncSnapshotCache, ProwlarrClient, ProwlarrConfig, ProwlarrError, scrub  # noqa: E402
 
 
 class FakeProwlarr:
@@ -34,17 +35,38 @@ class FakeProwlarr:
             "capabilities": self.capabilities,
         }
 
+    async def cached_overview(self, force=False):
+        return await self.overview()
+
     async def indexers(self):
         return [{"id": 7, "name": "Safe", "enabled": True, "health": "ok", "protocol": "torrent", "tags": []}]
+
+    async def cached_indexers(self, force=False):
+        return await self.indexers()
 
     async def applications(self):
         return []
 
+    async def cached_applications(self, force=False):
+        return await self.applications()
+
     async def health(self):
         return []
 
+    async def cached_health(self, force=False):
+        return await self.health()
+
     async def history(self):
         return []
+
+    async def cached_history(self, force=False):
+        return await self.history()
+
+    def section_updated_at(self, name):
+        return "2026-07-17T00:00:00Z"
+
+    async def close(self):
+        pass
 
     async def discover(self):
         self.calls.append(("discover",))
@@ -91,6 +113,19 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertIn("httponly", response.headers["set-cookie"].lower())
+
+    def test_content_hashed_assets_are_privately_cached_and_mismatches_are_not(self):
+        version = ASSET_VERSIONS["/static/dist/app.min.js"]
+        current = self.client.get(f"/prowlarr-panel/static/dist/app.min.js?v={version}")
+        stale = self.client.get("/prowlarr-panel/static/dist/app.min.js?v=obsolete")
+        self.assertIn("private", current.headers["cache-control"])
+        self.assertIn("immutable", current.headers["cache-control"])
+        self.assertNotIn("immutable", stale.headers.get("cache-control", ""))
+
+    def test_html_and_config_are_not_cacheable(self):
+        for path in ("/prowlarr-panel/", "/prowlarr-panel/config.js"):
+            response = self.client.get(path)
+            self.assertEqual(response.headers["cache-control"], "no-store")
 
     def test_csrf_required_for_actions(self):
         response = self.client.post("/prowlarr-panel/api/search", json={"query": "ubuntu"})
@@ -228,6 +263,267 @@ class MappingTests(unittest.IsolatedAsyncioTestCase):
         self.client.invalidate_snapshot()
         await self.client.snapshot()
         self.assertEqual(calls, {"status": 2, "indexers": 2, "applications": 2, "health": 2})
+
+    async def test_snapshot_invalidation_discards_collection_epoch(self):
+        cache = AsyncSnapshotCache(60)
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls = 0
+
+        async def factory():
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                first_started.set()
+                await release_first.wait()
+                return "stale"
+            return "fresh"
+
+        pending = asyncio.create_task(cache.get(factory))
+        await first_started.wait()
+        cache.invalidate()
+        release_first.set()
+        self.assertEqual(await pending, "fresh")
+        self.assertEqual(calls, 2)
+
+    async def test_cancelled_waiter_does_not_cancel_shared_collection(self):
+        cache = AsyncSnapshotCache(60)
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def factory():
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return {"ok": True}
+
+        first = asyncio.create_task(cache.get(factory))
+        await started.wait()
+        second = asyncio.create_task(cache.get(factory))
+        await asyncio.sleep(0)
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        release.set()
+        self.assertEqual(await second, {"ok": True})
+        self.assertEqual(calls, 1)
+
+    async def test_shared_live_hub_publishes_indexers_without_overview(self):
+        fake = FakeProwlarr()
+        indexer_calls = 0
+
+        async def cached_indexers(force=False):
+            nonlocal indexer_calls
+            indexer_calls += 1
+            return await fake.indexers()
+
+        async def cached_overview(force=False):
+            raise AssertionError("an indexers subscription must not collect overview")
+
+        fake.cached_indexers = cached_indexers
+        fake.cached_overview = cached_overview
+        hub = build_live_hub(fake)
+        await hub.start()
+        stream = hub.stream(("indexers",))
+        frame = await asyncio.wait_for(anext(stream), timeout=1)
+        self.assertEqual(frame["data"]["topic"], "indexers")
+        self.assertIn("indexers", frame["data"]["data"])
+        self.assertEqual(indexer_calls, 1)
+        await stream.aclose()
+        await hub.close()
+
+    async def test_live_unchanged_section_ignores_source_timestamp_for_fingerprint(self):
+        fake = FakeProwlarr()
+        timestamp = "2026-07-17T00:00:00Z"
+        fake.section_updated_at = lambda _name: timestamp
+        hub = build_live_hub(fake)
+        await hub.start()
+        stream = hub.stream(("indexers",))
+        first = await asyncio.wait_for(anext(stream), timeout=1)
+        self.assertEqual(first["event"], "snapshot")
+        timestamp = "2026-07-17T00:00:01Z"
+        await hub.refresh("indexers")
+        unchanged = await asyncio.wait_for(anext(stream), timeout=1)
+        self.assertEqual(unchanged["event"], "freshness")
+        self.assertEqual(unchanged["data"]["topic"], "indexers")
+        await stream.aclose()
+        await hub.close()
+
+    async def test_live_health_and_history_use_rest_payload_shape(self):
+        fake = FakeProwlarr()
+
+        async def health():
+            return [{"message": "safe"}]
+
+        async def cached_health(force=False):
+            return await health()
+
+        fake.cached_health = cached_health
+        hub = build_live_hub(fake)
+        await hub.start()
+        health_stream = hub.stream(("health",))
+        health_frame = await asyncio.wait_for(anext(health_stream), timeout=1)
+        self.assertIn("alerts", health_frame["data"]["data"])
+        self.assertNotIn("health", health_frame["data"]["data"])
+        await health_stream.aclose()
+        history_stream = hub.stream(("history",))
+        history_frame = await asyncio.wait_for(anext(history_stream), timeout=1)
+        self.assertIn("events", history_frame["data"]["data"])
+        self.assertNotIn("history", history_frame["data"]["data"])
+        await history_stream.aclose()
+        await hub.close()
+
+    async def test_sse_payload_is_sanitized_and_topics_are_bounded(self):
+        encoded = str(scrub({
+            "topic": "indexers",
+            "data": [{"name": "safe", "apiKey": "secret", "message": "https://tracker.test/?passkey=secret"}],
+        }))
+        self.assertNotIn("secret", encoded)
+        self.assertNotIn("apiKey", encoded)
+        self.assertEqual(parse_live_topics("indexers,unknown,indexers"), ("indexers",))
+
+    async def test_release_cache_evicts_oldest_handles_and_keeps_maximum(self):
+        self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))
+        now = time.monotonic()
+        for index in range(501):
+            self.client._release_cache[f"handle-{index}"] = (now, {"title": str(index)})
+        self.client._cleanup_release_cache()
+        self.assertEqual(len(self.client._release_cache), 500)
+        self.assertNotIn("handle-0", self.client._release_cache)
+        self.assertIn("handle-500", self.client._release_cache)
+
+    async def test_localhost_fallback_client_is_reused_after_primary_failure(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(url="http://host.docker.internal:16124/prowlarr", api_key="secret")
+        )
+        calls = []
+
+        class Response:
+            status_code = 200
+
+        class Primary:
+            async def request(self, *args, **kwargs):
+                calls.append("primary")
+                raise httpx.ConnectError("primary down")
+
+            async def aclose(self):
+                pass
+
+        class Fallback:
+            async def request(self, *args, **kwargs):
+                calls.append("fallback")
+                return Response()
+
+            async def aclose(self):
+                pass
+
+        self.client._client = Primary()
+        self.client._fallback_client = Fallback()
+        response = await self.client._request("GET", "/api/v1/system/status")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(self.client._using_fallback)
+        self.assertEqual(calls, ["primary", "fallback"])
+
+    async def test_ambiguous_mutation_is_never_replayed_on_localhost_fallback(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(url="http://host.docker.internal:16124/prowlarr", api_key="secret")
+        )
+        calls = []
+
+        class Primary:
+            async def request(self, *args, **kwargs):
+                calls.append("primary")
+                raise httpx.ReadError("connection dropped after send")
+
+            async def aclose(self):
+                pass
+
+        class Fallback:
+            async def request(self, *args, **kwargs):
+                calls.append("fallback")
+                raise AssertionError("mutations must not be replayed")
+
+            async def aclose(self):
+                pass
+
+        self.client._client = Primary()
+        self.client._fallback_client = Fallback()
+        with self.assertRaises(ProwlarrError) as context:
+            await self.client._request("POST", "/api/v1/search", json={"query": "ubuntu"})
+        self.assertEqual(context.exception.code, "ssh_tunnel_unavailable")
+        self.assertEqual(calls, ["primary"])
+
+    async def test_fallback_response_uses_normal_status_validation(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(url="http://host.docker.internal:16124/prowlarr", api_key="secret")
+        )
+
+        class Response:
+            status_code = 401
+
+            def json(self):
+                return {}
+
+        class Primary:
+            async def request(self, *args, **kwargs):
+                raise httpx.ConnectError("primary down")
+
+            async def aclose(self):
+                pass
+
+        class Fallback:
+            async def request(self, *args, **kwargs):
+                return Response()
+
+            async def aclose(self):
+                pass
+
+        self.client._client = Primary()
+        self.client._fallback_client = Fallback()
+        with self.assertRaises(ProwlarrError) as context:
+            await self.client._request("GET", "/api/v1/system/status")
+        self.assertEqual(context.exception.code, "prowlarr_auth_refused")
+
+    async def test_mutation_connect_failure_can_use_fallback_once(self):
+        self.client = ProwlarrClient(
+            ProwlarrConfig(url="http://host.docker.internal:16124/prowlarr", api_key="secret")
+        )
+        calls = []
+
+        class Response:
+            status_code = 202
+            content = b"{}"
+
+            def json(self):
+                return {}
+
+        class Primary:
+            async def request(self, *args, **kwargs):
+                calls.append("primary")
+                raise httpx.ConnectError("connection was not established")
+
+            async def aclose(self):
+                pass
+
+        class Fallback:
+            async def request(self, *args, **kwargs):
+                calls.append("fallback")
+                return Response()
+
+            async def aclose(self):
+                pass
+
+        self.client._client = Primary()
+        self.client._fallback_client = Fallback()
+        response = await self.client._request(
+            "POST",
+            "/api/v1/search",
+            json={"query": "ubuntu"},
+            acceptable={200, 202},
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(calls, ["primary", "fallback"])
 
     async def test_test_all_indexers_uses_testall_endpoint(self):
         self.client = ProwlarrClient(ProwlarrConfig(url="http://127.0.0.1:1/prowlarr", api_key="secret"))

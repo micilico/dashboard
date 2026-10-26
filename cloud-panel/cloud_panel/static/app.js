@@ -20,6 +20,9 @@ const S = {
   trash: [], autoRefreshTimer: null, uploadJobs: [],
   loadSequence: 0, latestLoadId: 0, activeLoad: null, queuedLoad: null,
   searchTimer: null, refreshReason: "initial",
+  liveSubscription: null, eventPath: null, directoryFingerprint: null, eventConnected: false,
+  jobs: new Map(), jobWaiters: new Map(), jobPollers: new Map(), lastFreshnessAt: 0,
+  sourceScannedAt: null, sourceMaxAgeMs: 500,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -83,6 +86,120 @@ const refreshSession = async () => {
   try { await cloudApiClient.refreshSession(); }
   catch { toast("Erreur: impossible d'initialiser la session. Rechargez la page."); }
 };
+
+const TERMINAL_JOB_STATES = new Set(["completed", "failed", "interrupted"]);
+const JOB_STATUS_LABELS = {
+  queued: "En attente",
+  running: "En cours",
+  completed: "Terminé",
+  failed: "Échec",
+  interrupted: "Interrompu",
+};
+
+function renderJobTray() {
+  const tray = $("jobTray");
+  if (!tray) return;
+  const jobs = [...S.jobs.values()].slice(-4).reverse();
+  tray.replaceChildren();
+  tray.hidden = jobs.length === 0;
+  jobs.forEach((job) => {
+    const row = document.createElement("div");
+    row.className = "job-row";
+    row.dataset.jobId = job.id;
+    const label = document.createElement("span");
+    label.className = "job-label";
+    label.textContent = job.message || job.metadata?.kind || job.type || "Traitement";
+    const status = document.createElement("span");
+    status.className = "job-state";
+    status.textContent = JOB_STATUS_LABELS[job.status] || job.status;
+    const bar = document.createElement("progress");
+    bar.className = "job-progress";
+    bar.max = 1;
+    const total = Number(job.total);
+    const current = Number(job.progress);
+    if (total > 0 && Number.isFinite(current)) bar.value = Math.min(1, Math.max(0, current / total));
+    else bar.removeAttribute("value");
+    bar.setAttribute("aria-label", label.textContent);
+    row.append(label, status, bar);
+    tray.append(row);
+  });
+}
+
+function settleJob(job) {
+  if (!TERMINAL_JOB_STATES.has(job.status)) return;
+  const waiters = S.jobWaiters.get(job.id);
+  if (waiters) {
+    S.jobWaiters.delete(job.id);
+    waiters.forEach(({ resolve, reject }) => {
+      if (job.status === "completed") resolve(job.result);
+      else {
+        const error = new Error(job.error?.message || "La tâche n’a pas pu aboutir.");
+        error.code = job.error?.code || job.status;
+        error.recovery = job.error?.recovery || "Réessayer";
+        reject(error);
+      }
+    });
+  }
+  const timer = S.jobPollers.get(job.id);
+  if (timer) clearTimeout(timer);
+  S.jobPollers.delete(job.id);
+}
+
+function updateJob(job) {
+  if (!job?.id) return;
+  const previous = S.jobs.get(job.id);
+  const previousTerminal = previous && TERMINAL_JOB_STATES.has(previous.status);
+  const incomingTerminal = TERMINAL_JOB_STATES.has(job.status);
+  if (!previousTerminal || incomingTerminal) S.jobs.set(job.id, job);
+  renderJobTray();
+  settleJob(S.jobs.get(job.id));
+}
+
+function ensureJobPolling(jobId) {
+  if (S.jobPollers.has(jobId)) return;
+  const tick = async () => {
+    const job = S.jobs.get(jobId);
+    if (!job || TERMINAL_JOB_STATES.has(job.status)) {
+      S.jobPollers.delete(jobId);
+      return;
+    }
+    if (!S.liveSubscription?.isStarted() && !document.hidden) {
+      try { updateJob(await api(au(`/jobs/${encodeURIComponent(jobId)}`), { timeout: 7000 })); }
+      catch { /* shared reconnect keeps the next cycle available */ }
+    }
+    if (!TERMINAL_JOB_STATES.has(S.jobs.get(jobId)?.status)) {
+      S.jobPollers.set(jobId, setTimeout(tick, 1000));
+    } else {
+      S.jobPollers.delete(jobId);
+    }
+  };
+  S.jobPollers.set(jobId, setTimeout(tick, 1000));
+}
+
+function trackJob(job) {
+  updateJob(job);
+  if (!TERMINAL_JOB_STATES.has(job.status)) ensureJobPolling(job.id);
+  return new Promise((resolve, reject) => {
+    if (TERMINAL_JOB_STATES.has(job.status)) {
+      if (job.status === "completed") resolve(job.result);
+      else reject(Object.assign(new Error(job.error?.message || "Tâche interrompue."), { code: job.status }));
+      return;
+    }
+    const waiters = S.jobWaiters.get(job.id) || new Set();
+    waiters.add({ resolve, reject });
+    S.jobWaiters.set(job.id, waiters);
+  });
+}
+
+async function runBackgroundJob(type, params) {
+  const response = await api(au("/jobs"), {
+    method: "POST",
+    body: JSON.stringify({ type, params }),
+    retry: false,
+    timeout: 15000,
+  });
+  return trackJob(response.job);
+}
 
 // ── Toast ──
 const toast = createToast(() => $("toast"));
@@ -148,12 +265,15 @@ function refreshAfterMutation() {
 // ── Navigation ──
 function navigate(p) {
   clearTimeout(S.searchTimer);
+  if (p !== S.path) S.directoryFingerprint = null;
   S.view = "files"; S.path = p; S.page = 1; S.hasMore = true; S.selected = new Set(); S.selectedItems = new Map(); S.focusedIdx = -1; S.selectionMode = false;
   ["files","history","links","stats"].forEach(x => { const el = $(x + "View"); if (el) el.hidden = x !== "files"; });
   qsa(".sidebar-link").forEach(b => b.classList.toggle("active", b.dataset.nav === "files"));
   updateUrl();
   renderBreadcrumb();
   loadFiles({ reason: "navigation" });
+  stopEvents();
+  connectEvents();
 }
 function updateUrl() {
   const u = new URL(window.location.href);
@@ -228,8 +348,12 @@ function runFileLoad(request) {
       const offset = (request.page - 1) * request.pageSize;
       let data;
       if (request.globalSearch && request.search) {
-        const params = new URLSearchParams({ q: request.search, path: request.path, offset: String(offset), limit: String(request.pageSize) });
-        data = await api(au(`/files/search?${params.toString()}`), { signal: request.controller.signal });
+        data = await runBackgroundJob("recursive_search", {
+          q: request.search,
+          path: request.path,
+          offset,
+          limit: request.pageSize,
+        });
       } else {
         const params = new URLSearchParams({ path: request.path, offset: String(offset), limit: String(request.pageSize) });
         if (request.search) params.set("search", request.search);
@@ -348,10 +472,9 @@ function folderSizeCell(f) {
     try {
       const pp = item.path.split("/").slice(0, -1).join("/");
       const nm = item.path.split("/").pop();
-      const fd = new FormData();
-      fd.append("path", pp);
-      fd.append("name", nm);
-      const d = await api(au("/files/size"), { method: "POST", body: fd, timeout: 600000 });
+      const result = await runBackgroundJob("folder_sizes", { paths: [item.path] });
+      const d = (result.items || []).find(entry => entry.path === item.path);
+      if (!d) throw new Error("Dossier introuvable ou taille indisponible.");
       if (rememberFolderSize(item, d, sizeEpoch)) {
         btn.textContent = d.size;
         btn.setAttribute("aria-label", `Taille de ${item.name} : ${d.size}. Recalculer`);
@@ -395,9 +518,7 @@ async function calcAllFolderSizes() {
   const sizeEpoch = S.folderSizeEpoch;
   setButtonBusy(btn, true);
   try {
-    const fd = new FormData();
-    fd.append("paths", dirs.map(f => f.path).join("\n"));
-    const d = await api(au("/files/sizes"), { method: "POST", body: fd, timeout: 600000 });
+    const d = await runBackgroundJob("folder_sizes", { paths: dirs.map(f => f.path) });
     if (sizeEpoch !== S.folderSizeEpoch) {
       toast("Tailles ignorées : le dossier a changé pendant le calcul.");
       return;
@@ -1279,9 +1400,7 @@ $("btnOrganizeSeries").addEventListener("click", async (event) => {
   msg.textContent = "";
   setButtonBusy(btn, true);
   try {
-    const fd = new FormData();
-    fd.append("path", S.path);
-    const d = await api(au("/files/organize/preview"), { method: "POST", body: fd });
+    const d = await runBackgroundJob("organize_preview", { path: S.path });
     renderOrganizePreview(d);
     openDialog($("organizeDialog"), btn);
   } catch (e) {
@@ -1470,9 +1589,7 @@ $("confirmOrganizeBtn").addEventListener("click", async () => {
   const btn = $("confirmOrganizeBtn");
   setButtonBusy(btn, true);
   try {
-    const fd = new FormData();
-    fd.append("path", S.path);
-    const r = await api(au("/files/organize/apply"), { method: "POST", body: fd });
+    const r = await runBackgroundJob("organize_apply", { path: S.path });
     $("organizeDialog").close();
     const sc = Number(r.series_count) || 0;
     const sm = Number(r.series_moved) || 0;
@@ -1566,7 +1683,8 @@ function switchView(v) {
   if (v === "links") { stopAutoRefresh(); loadLinks(); }
   if (v === "stats") { stopAutoRefresh(); loadStats(); }
   if (v === "trash") { stopAutoRefresh(); loadTrash(); }
-  if (v === "files") { stopObserving(); loadFiles({ reason: "view" }); startAutoRefresh(); }
+  if (v === "files") { stopObserving(); loadFiles({ reason: "view" }); connectEvents(); startAutoRefresh(); }
+  else stopEvents();
 }
 
 // ── Keyboard ──
@@ -1992,24 +2110,25 @@ function cutToClipboard(items) {
 }
 
 async function copyItems(items, destPath) {
-  let done = 0; const errors = [];
   setRowBusy(items, true, "Copie…");
-  for (const it of items) {
-    const srcDir = it.path.split("/").slice(0, -1).join("/");
-    const name = it.name || it.path.split("/").pop();
-    const fd = new FormData();
-    fd.append("path", srcDir);
-    fd.append("name", name);
-    fd.append("dest", destPath);
-    try {
-      await api(au("/files/copy"), { method: "POST", body: fd });
-      done++;
-    } catch (e) { errors.push(`${name} : ${e.message}`); }
+  try {
+    const result = await runBackgroundJob("copy", {
+      dest: destPath,
+      items: items.map(it => ({
+        path: it.path,
+        name: it.name || it.path.split("/").pop(),
+      })),
+    });
+    const done = Number(result.copied) || 0;
+    const errors = result.errors || [];
+    if (errors.length) toast(`Copie refusée : ${errors.slice(0, 2).map(error => error.name).join(" · ")}`);
+    toast(done ? (done === 1 ? "Élément copié." : `${done} éléments copiés.`) : "Aucune copie effectuée.");
+    refreshAfterMutation();
+  } catch (error) {
+    toast(describeError(error, "Copie impossible."));
+  } finally {
+    setRowBusy(items, false);
   }
-  setRowBusy(items, false);
-  if (errors.length) toast(`Copie refusée : ${errors.slice(0, 2).join(" · ")}`);
-  toast(done ? (done === 1 ? "Élément copié." : `${done} éléments copiés.`) : "Aucune copie effectuée.");
-  refreshAfterMutation();
 }
 
 async function pasteItems() {
@@ -2250,8 +2369,8 @@ $("btnHiddenToggle").addEventListener("click", () => {
 });
 
 // ── Auto-refresh ──
-function startAutoRefresh() {
-  if (S.autoRefreshTimer || document.hidden || S.view !== "files") return;
+function startAutoRefresh(interval = 5000) {
+  if (S.liveSubscription || S.autoRefreshTimer || document.hidden || S.view !== "files") return;
   stopAutoRefresh();
   S.autoRefreshTimer = setInterval(() => {
     if (document.hidden || S.view !== "files" || S.loading || S.activeLoad || S.queuedLoad) return;
@@ -2259,13 +2378,77 @@ function startAutoRefresh() {
     const active = document.activeElement;
     if (active && (active.id === "pathInput" || active.id === "searchInput")) return;
     loadFiles({ reason: "poll" });
-  }, 30000);
+  }, interval);
 }
 function stopAutoRefresh() { if (S.autoRefreshTimer) { clearInterval(S.autoRefreshTimer); S.autoRefreshTimer = null; } }
-document.addEventListener("visibilitychange", () => {
-  if (document.hidden) stopAutoRefresh();
-  else if (S.view === "files") startAutoRefresh();
-});
+
+function stopEvents() {
+  S.liveSubscription?.stop();
+  S.liveSubscription = null;
+  S.eventPath = null;
+  S.eventConnected = false;
+}
+
+function updateSourceAge(sourceScannedAt) {
+  if (sourceScannedAt) S.sourceScannedAt = sourceScannedAt;
+  const parsed = Date.parse(S.sourceScannedAt || "");
+  const ageMs = Number.isFinite(parsed) ? Math.max(0, Date.now() - parsed) : null;
+  const detail = $("sidebarStatusDetail");
+  if (detail && ageMs !== null) detail.title = `Donnée source âgée de ${ageMs} ms (cache max ${S.sourceMaxAgeMs} ms)`;
+}
+
+function handleDirectoryPayload(payload, changedHint = false) {
+  const evaluation = window.DashboardLive?.evaluateDirectoryPayload?.(
+    payload,
+    S.path,
+    S.directoryFingerprint,
+    changedHint,
+  );
+  if (!evaluation?.accepted) return;
+  S.lastFreshnessAt = Date.now();
+  S.sourceMaxAgeMs = Math.max(0, Number(payload.source_max_age_ms) || 500);
+  updateSourceAge(evaluation.sourceScannedAt);
+  S.directoryFingerprint = evaluation.fingerprint;
+  if (evaluation.changed && !document.querySelector("dialog[open]")) loadFiles({ reason: "event" });
+}
+
+function connectEvents() {
+  if (document.hidden || S.view !== "files") return;
+  if (S.liveSubscription?.isStarted() && S.eventPath === S.path) return;
+  stopEvents();
+  if (!window.DashboardLive?.createLiveSubscription) {
+    startAutoRefresh(5000);
+    return;
+  }
+  S.eventPath = S.path;
+  S.liveSubscription = window.DashboardLive.createLiveSubscription({
+    document,
+    streamUrl: au(`/events?path=${encodeURIComponent(S.path)}`),
+    pollIntervalMs: 500,
+    poll: ({ signal }) => api(au(`/live?path=${encodeURIComponent(S.path)}`), { signal, timeout: 7000 }),
+    handlers: {
+      snapshot(frame) {
+        const reconnected = S.directoryFingerprint !== null && Date.now() - S.lastFreshnessAt > 5000;
+        handleDirectoryPayload(frame?.data, reconnected);
+      },
+      section(frame) { handleDirectoryPayload(frame?.data, false); },
+      freshness(frame) {
+        // The directory fingerprint and file list are unchanged. Update only
+        // the source age indicator; never pass a freshness frame to the full
+        // directory payload handler.
+        S.lastFreshnessAt = Date.now();
+        updateSourceAge(frame?.sourceUpdatedAt);
+      },
+      job(frame) { if (frame?.job) updateJob(frame.job); },
+      status(next) {
+        S.eventConnected = Boolean(next.connected);
+        if (next.mode === "polling") startAutoRefresh(5000);
+        if (next.mode === "sse") stopAutoRefresh();
+      },
+    },
+  });
+  S.liveSubscription.start();
+}
 
 // ── Retry ──
 $("retryButton").addEventListener("click", () => { clearError(); loadFiles({ reason: "retry" }); });

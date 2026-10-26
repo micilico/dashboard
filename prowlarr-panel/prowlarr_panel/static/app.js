@@ -25,11 +25,23 @@ const state = {
   loadPromise: null,
   queuedRefreshPromise: null,
   pollTimer: null,
+  freshnessTimer: null,
+  live: {
+    controller: null,
+    topics: "",
+    connected: false,
+  },
+  sectionUpdatedAt: {},
+  sectionSignatures: {},
+  initialized: false,
   resultPage: 0,
   indexerRowNodes: new Map(),
   resultRowNodes: new Map(),
   releaseIndexerSelection: new Set(),
   sectionErrors: {},
+  sectionPromises: {},
+  actionRevision: 0,
+  actionInFlight: 0,
   partialFailures: [],
   lastGrab: null,
   sectionLoaded: {
@@ -37,11 +49,28 @@ const state = {
     indexers: false,
     applications: false,
     health: false,
+    history: false,
   },
 };
 
 const RESULT_PAGE_SIZE = 80;
-const POLL_INTERVAL_MS = 30000;
+const POLL_INTERVAL_MS = 1000;
+const LIVE_STALE_AFTER_MS = 15000;
+
+const SECTION_ENDPOINTS = {
+  overview: "/api/overview",
+  indexers: "/api/indexers",
+  applications: "/api/applications",
+  health: "/api/health",
+  history: "/api/history",
+};
+
+const VIEW_SECTIONS = {
+  indexers: ["overview", "indexers"],
+  search: ["overview", "indexers"],
+  applications: ["overview", "applications"],
+  health: ["overview", "health", "history"],
+};
 
 const SEARCH_CATEGORY_PRESETS = [
   { label: "Films", value: 2000 },
@@ -149,12 +178,43 @@ function clearNode(node) {
 
 const { element, button, state: systemState } = window.DashboardDOM;
 
-function setRefreshStamp() {
-  const now = new Date();
+function parseTimestamp(value) {
+  const parsed = value ? new Date(value) : new Date();
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function setRefreshStamp(value = null) {
+  const now = parseTimestamp(typeof value === "string" ? value : null);
   if (els.lastCheck) {
     els.lastCheck.textContent = now.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
     els.lastCheck.dateTime = now.toISOString();
   }
+}
+
+function noteFreshness(sections, updatedAt) {
+  if (!updatedAt) return;
+  const names = Array.isArray(sections) ? sections : [sections];
+  let newest = null;
+  names.filter(Boolean).forEach((name) => {
+    const current = Date.parse(state.sectionUpdatedAt[name] || "");
+    const incoming = Date.parse(updatedAt);
+    if (Number.isFinite(current) && Number.isFinite(incoming) && incoming < current) return;
+    state.sectionUpdatedAt[name] = updatedAt;
+    if (!newest || String(updatedAt) > newest) newest = String(updatedAt);
+  });
+  if (newest) setRefreshStamp(newest);
+  refreshFreshnessIndicator();
+}
+
+function refreshFreshnessIndicator() {
+  if (!els.refreshStatus) return;
+  const staleSections = Object.entries(state.sectionUpdatedAt)
+    .filter(([, value]) => Date.now() - parseTimestamp(value).getTime() > LIVE_STALE_AFTER_MS)
+    .map(([name]) => name);
+  els.refreshStatus.classList?.toggle("stale", staleSections.length > 0);
+  els.refreshStatus.title = staleSections.length
+    ? `Données anciennes: ${staleSections.join(", ")}`
+    : "Dernière collecte réussie";
 }
 
 function setSidebarStatus(label, detail, tone = "operational") {
@@ -287,7 +347,7 @@ function renderSummary(overview) {
     overview.systemWarnings ? `${overview.systemWarnings} alerte(s) système à examiner.` : "Indexeurs, recherche et applications alignés.",
     overview.systemWarnings ? "warn" : "ok",
   );
-  setRefreshStamp();
+  noteFreshness("overview", overview.refreshedAt || overview.lastSuccessfulRefresh);
 }
 
 function indexerHealthLabel(indexer) {
@@ -298,11 +358,15 @@ function indexerHealthLabel(indexer) {
 
 function renderSectionError(section, error) {
   state.sectionErrors[section] = error || null;
-  const container = els[`${section}Error`];
+  const group = section === "history" ? "health" : section;
+  const container = els[`${group}Error`];
   if (!container) return;
+  const groupError = group === "health"
+    ? (state.sectionErrors.health || state.sectionErrors.history)
+    : state.sectionErrors[group];
   const message = container.querySelector("span");
-  message.textContent = error ? describeError(error) : "";
-  container.hidden = !error;
+  message.textContent = groupError ? describeError(groupError) : "";
+  container.hidden = !groupError;
 }
 
 function renderIndexerFilters() {
@@ -791,6 +855,10 @@ function setView(view, options = {}) {
   });
   updateUrl(options.replace !== false);
   if (options.focus) focusActiveTab();
+  if (state.initialized) {
+    loadAll(false, { sections: VIEW_SECTIONS[view], background: true }).catch(() => null);
+    connectLive();
+  }
 }
 
 function applyUrlState() {
@@ -809,46 +877,77 @@ function setRefreshBusy(busy) {
   });
 }
 
-async function performLoadAll(force = false, background = false) {
+function sectionKeysFor(options, view = state.activeView) {
+  const requested = Array.isArray(options?.sections) ? options.sections : (VIEW_SECTIONS[view] || VIEW_SECTIONS.indexers);
+  return [...new Set(requested.filter((key) => Object.hasOwn(SECTION_ENDPOINTS, key)))];
+}
+
+function applySectionData(key, payload) {
+  const knownAt = Date.parse(state.sectionUpdatedAt[key] || "");
+  const incomingAt = Date.parse(payload?.refreshedAt || "");
+  if (Number.isFinite(knownAt) && Number.isFinite(incomingAt) && incomingAt < knownAt) return false;
+  state.sectionLoaded[key] = true;
+  renderSectionError(key, null);
+  const content = { ...(payload || {}) };
+  delete content.refreshedAt;
+  const signature = JSON.stringify(content);
+  if (state.sectionSignatures[key] === signature) {
+    if (payload?.refreshedAt) noteFreshness(key, payload.refreshedAt);
+    return;
+  }
+  state.sectionSignatures[key] = signature;
+  if (key === "overview") renderSummary(payload || {});
+  if (key === "indexers") {
+    state.indexers = payload?.indexers || [];
+    renderIndexers();
+  }
+  if (key === "applications") {
+    state.applications = payload?.applications || [];
+    renderApplications();
+  }
+  if (key === "health") {
+    state.alerts = payload?.alerts || [];
+    renderHealth();
+  }
+  if (key === "history") {
+    state.events = payload?.events || [];
+    renderHealth();
+  }
+  if (payload?.refreshedAt) noteFreshness(key, payload.refreshedAt);
+  return true;
+}
+
+async function performLoadAll(force = false, background = false, options = {}) {
   if (!background) {
     clearError();
     setSidebarStatus("Actualisation en cours", "Synchronisation Prowlarr.", "checking");
   }
   const refreshQuery = force ? "?force=true" : "";
-  const requests = {
-    overview: api(route(`/api/overview${refreshQuery}`), { cache: "no-store" }),
-    indexers: api(route(`/api/indexers${refreshQuery}`), { cache: "no-store" }),
-    applications: api(route(`/api/applications${refreshQuery}`), { cache: "no-store" }),
-    health: api(route(`/api/health${refreshQuery}`), { cache: "no-store" }),
-    history: api(route("/api/history"), { cache: "no-store" }),
-  };
-  const results = await Promise.allSettled(Object.values(requests));
-  const keys = Object.keys(requests);
-  let failures = 0;
-
-  results.forEach((result, index) => {
-    const key = keys[index];
-    if (result.status === "fulfilled") {
-      state.sectionLoaded[key] = true;
-      renderSectionError(key === "history" ? "health" : key, null);
-      if (key === "overview") renderSummary(result.value);
-      if (key === "indexers") state.indexers = result.value.indexers || [];
-      if (key === "applications") state.applications = result.value.applications || [];
-      if (key === "health") state.alerts = result.value.alerts || [];
-      if (key === "history") state.events = result.value.events || [];
-      return;
-    }
-    failures += 1;
-    const section = key === "history" ? "health" : key;
-    renderSectionError(section, result.reason);
-    if (!state.sectionLoaded[key] && key === "overview") showError(result.reason);
+  const keys = sectionKeysFor(options);
+  const revisionAtStart = state.actionRevision;
+  const requests = keys.map((key) => {
+    const request = api(route(`${SECTION_ENDPOINTS[key]}${refreshQuery}`), { cache: "no-store" }).then(
+      (payload) => {
+        if (revisionAtStart === state.actionRevision) applySectionData(key, payload);
+        return key;
+      },
+      (error) => {
+        renderSectionError(key, error);
+        if (!state.sectionLoaded[key] && key === "overview") showError(error);
+        throw error;
+      },
+    );
+    state.sectionPromises[key] = request;
+    request.finally(() => {
+      if (state.sectionPromises[key] === request) delete state.sectionPromises[key];
+    }).catch(() => null);
+    return request;
   });
-
-  renderIndexers();
-  renderApplications();
-  renderHealth();
+  const results = await Promise.allSettled(requests);
+  const failures = results.filter((result) => result.status === "rejected").length;
   if (failures === 0) {
-    setRefreshStamp();
+    const timestamps = keys.map((key) => state.sectionUpdatedAt[key]).filter(Boolean).sort();
+    if (timestamps.length) setRefreshStamp(timestamps.at(-1));
   } else if (failures < keys.length) {
     setSidebarStatus("Actualisation partielle", `${failures} section(s) en échec.`, "degraded");
     setPageStatus("Certaines sections Prowlarr n'ont pas pu être rafraîchies.", "warn");
@@ -856,6 +955,15 @@ async function performLoadAll(force = false, background = false) {
     setSidebarStatus("Erreur", "Aucune section n'a pu être chargée.", "unavailable");
     setPageStatus("Erreur de chargement Prowlarr.", "error");
   }
+}
+
+function beginAction() {
+  state.actionRevision += 1;
+  state.actionInFlight += 1;
+}
+
+function finishAction() {
+  state.actionInFlight = Math.max(0, state.actionInFlight - 1);
 }
 
 function loadAll(force = false, options = {}) {
@@ -877,7 +985,7 @@ function loadAll(force = false, options = {}) {
   }
   const background = Boolean(options.background);
   if (!background) setRefreshBusy(true);
-  const request = performLoadAll(force, background);
+  const request = performLoadAll(force, background, options);
   state.loadPromise = request;
   request.then(
     () => {
@@ -917,6 +1025,7 @@ async function testIndexer(id) {
   const key = `test:${id}`;
   if (state.busy.has(key)) return;
   setBusy(key, true, "Test en cours...");
+  beginAction();
   try {
     await api(route("/api/indexers/test"), { method: "POST", body: JSON.stringify({ id: Number(id) }) });
     showToast("Test d'indexer demande.");
@@ -924,6 +1033,7 @@ async function testIndexer(id) {
   } catch (error) {
     showError(error);
   } finally {
+    finishAction();
     setBusy(key, false);
   }
 }
@@ -938,6 +1048,7 @@ async function toggleIndexer(buttonNode) {
   const key = `toggle:${id}`;
   if (state.busy.has(key)) return;
   setBusy(key, true, enabled ? "Desactivation..." : "Activation...");
+  beginAction();
   try {
     await api(route("/api/indexers/enabled"), { method: "POST", body: JSON.stringify({ id, enabled: !enabled }) });
     showToast(enabled ? "Indexer desactive." : "Indexer active.");
@@ -945,6 +1056,7 @@ async function toggleIndexer(buttonNode) {
   } catch (error) {
     showError(error);
   } finally {
+    finishAction();
     setBusy(key, false);
   }
 }
@@ -983,7 +1095,7 @@ async function runSearch(event) {
   state.searchPromise = searchPromise;
   setBusy("search", true, "Recherche...");
   try {
-    if (state.loadPromise) await state.loadPromise.catch(() => null);
+    if (state.sectionPromises.indexers) await state.sectionPromises.indexers.catch(() => null);
     if (requestId !== state.searchRequestId) return;
     const parameters = collectSearchParameters();
     const requestFingerprint = searchFingerprint(parameters);
@@ -1022,6 +1134,7 @@ async function grabRelease(buttonNode) {
   const key = buttonNode.dataset.busyKey;
   if (state.busy.has(key)) return;
   setBusy(key, true, "Envoi en cours...");
+  beginAction();
   try {
     await api(route("/api/grab"), {
       method: "POST",
@@ -1039,6 +1152,7 @@ async function grabRelease(buttonNode) {
   } catch (error) {
     showError(error);
   } finally {
+    finishAction();
     setBusy(key, false);
   }
 }
@@ -1089,6 +1203,97 @@ function isPanelVisible() {
   return document.visibilityState !== "hidden" && document.hidden !== true;
 }
 
+function liveTopicsForView() {
+  return sectionKeysFor({}, state.activeView).join(",");
+}
+
+function applyLiveFrame(frame) {
+  const topic = frame?.topic;
+  if (!Object.hasOwn(SECTION_ENDPOINTS, topic)) return;
+  const data = { ...(frame.data || {}) };
+  const error = data.error;
+  delete data.error;
+  if (frame.stale || state.actionInFlight > 0) {
+    if (error && state.actionInFlight === 0) renderSectionError(topic, error);
+    return;
+  }
+  if (Object.keys(data).length) applySectionData(topic, data);
+  if (error) renderSectionError(topic, error);
+}
+
+function applyLiveFreshness(frame) {
+  const topic = frame?.topic;
+  if (!Object.hasOwn(SECTION_ENDPOINTS, topic)) return;
+  // collectedAt is the panel's cache-check time, not Prowlarr's source refresh
+  // time. Only advance the indicator when the backend supplies an actual
+  // source timestamp; unchanged cached data must not be presented as fresh.
+  const sourceUpdatedAt = frame.sourceUpdatedAt;
+  if (sourceUpdatedAt) noteFreshness(topic, sourceUpdatedAt);
+}
+
+async function pollLiveSections({ signal } = {}) {
+  const keys = sectionKeysFor({}, state.activeView);
+  const settled = await Promise.allSettled(keys.map(async (key) => {
+    const payload = await api(route(SECTION_ENDPOINTS[key]), { cache: "no-store", signal });
+    return [key, payload];
+  }));
+  const sections = {};
+  settled.forEach((result) => {
+    if (result.status === "fulfilled") sections[result.value[0]] = result.value[1];
+  });
+  return { sections };
+}
+
+function disconnectLive() {
+  state.live.controller?.stop?.();
+  state.live.controller = null;
+  state.live.topics = "";
+  state.live.connected = false;
+}
+
+function connectLive() {
+  if (!isPanelVisible()) {
+    disconnectLive();
+    return;
+  }
+  if (!window.DashboardLive?.createLiveSubscription) {
+    startPolling();
+    return;
+  }
+  const topics = liveTopicsForView();
+  if (state.live.controller?.isStarted?.() && state.live.topics === topics) return;
+  disconnectLive();
+  state.live.topics = topics;
+  const controller = window.DashboardLive.createLiveSubscription({
+    streamUrl: route(`/api/events?topics=${encodeURIComponent(topics)}`),
+    pollIntervalMs: POLL_INTERVAL_MS,
+    reconnectDelayMs: 1000,
+    heartbeatTimeoutMs: 35000,
+    poll: pollLiveSections,
+    handlers: {
+      snapshot: applyLiveFrame,
+      section: applyLiveFrame,
+      freshness: applyLiveFreshness,
+      status: ({ connected }) => {
+        state.live.connected = Boolean(connected);
+        if (connected) stopPolling();
+      },
+      error: (error) => showError(error),
+    },
+  });
+  state.live.controller = controller;
+  controller.start();
+}
+
+function handleVisibilityChange() {
+  if (!isPanelVisible()) {
+    disconnectLive();
+    stopPolling();
+    return;
+  }
+  connectLive();
+}
+
 function stopPolling() {
   if (state.pollTimer === null) return;
   window.clearInterval(state.pollTimer);
@@ -1098,19 +1303,10 @@ function stopPolling() {
 function startPolling() {
   if (state.pollTimer !== null || !isPanelVisible()) return;
   state.pollTimer = window.setInterval(() => {
-    if (!isPanelVisible() || state.searchInFlight || state.loadPromise) return;
+    if (!isPanelVisible() || state.live.connected || state.searchInFlight || state.loadPromise) return;
     if (document.activeElement?.matches("input, select, textarea, [contenteditable='true']")) return;
     loadAll(false, { background: true }).catch(showError);
   }, POLL_INTERVAL_MS);
-}
-
-function handleVisibilityChange() {
-  if (!isPanelVisible()) {
-    stopPolling();
-    return;
-  }
-  startPolling();
-  if (!state.loadPromise) loadAll(false, { background: true }).catch(showError);
 }
 
 function clearReleaseIndexerSelection() {
@@ -1141,6 +1337,7 @@ function bindEvents() {
     if (!ok) return;
     if (state.busy.has("test-all")) return;
     setBusy("test-all", true, "Tests en cours...");
+    beginAction();
     try {
       await api(route("/api/indexers/test-all"), { method: "POST", body: "{}" });
       showToast("Test global demande.");
@@ -1148,6 +1345,7 @@ function bindEvents() {
     } catch (error) {
       showError(error);
     } finally {
+      finishAction();
       setBusy("test-all", false);
     }
   });
@@ -1195,8 +1393,10 @@ async function init() {
   applyUrlState();
   setView(state.activeView, { replace: false });
   await refreshSession();
-  await loadAll();
-  startPolling();
+  state.initialized = true;
+  connectLive();
+  await loadAll(false, { sections: VIEW_SECTIONS[state.activeView] });
+  state.freshnessTimer = window.setInterval(refreshFreshnessIndicator, 5000);
   const confirmActionName = currentUrl().searchParams.get("confirm");
   if (confirmActionName === "test-all") {
     state.activeView = "indexers";

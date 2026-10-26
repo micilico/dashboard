@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
@@ -21,7 +22,7 @@ if str(_cloud_panel_parent) not in sys.path:
 from cloud_panel.security import resolve_path_within, validate_public_id
 from cloud_panel.storage import format_size, clear_scandir_cache, get_cached_scandir
 from cloud_panel.storage import clear_folder_size_cache, get_folder_size
-from cloud_panel.storage import sanitize_filename, list_directory
+from cloud_panel.storage import sanitize_filename, list_directory, directory_summary
 
 
 class TestSecurity:
@@ -162,8 +163,8 @@ class TestScandirCache:
 
     def test_scandir_nonexistent(self, tmp_path):
         clear_scandir_cache()
-        result = get_cached_scandir(str(tmp_path / "nonexistent"))
-        assert result == []
+        with pytest.raises(FileNotFoundError):
+            get_cached_scandir(str(tmp_path / "nonexistent"))
 
 
 class TestFolderSize:
@@ -248,6 +249,30 @@ class TestFolderSize:
 
         note.write_bytes(b"a" * 30)
         assert get_folder_size_fn("", "docs")["size_bytes"] == 30
+
+    def test_cancelled_upload_removes_temporary_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+
+        class CancelledUpload:
+            filename = "partial.bin"
+            reads = 0
+
+            async def read(self, _size):
+                self.reads += 1
+                if self.reads == 1:
+                    return b"partial"
+                raise asyncio.CancelledError
+
+        async def run():
+            with pytest.raises(asyncio.CancelledError):
+                await storage.upload_file_streaming("", CancelledUpload())
+
+        asyncio.run(run())
+        assert not (tmp_path / "partial.bin").exists()
+        assert list(tmp_path.glob("*.tmp")) == []
 
 
 class TestFolderSizes:
@@ -1970,6 +1995,33 @@ class TestSearchFiles:
         from cloud_panel.storage import search_files
         assert search_files("", "", limit=50)["total"] == 0
 
+    def test_search_pages_reuse_one_recursive_walk(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+
+        for index in range(25):
+            (tmp_path / f"match-{index:02d}.txt").write_text("x")
+        original_walk = storage.os.walk
+        walks = 0
+
+        def counting_walk(*args, **kwargs):
+            nonlocal walks
+            walks += 1
+            return original_walk(*args, **kwargs)
+
+        monkeypatch.setattr(storage.os, "walk", counting_walk)
+        first = storage.search_files("match", "", offset=0, limit=10)
+        second = storage.search_files("match", "", offset=10, limit=10)
+
+        assert len(first["items"]) == 10
+        assert len(second["items"]) == 10
+        assert {item["name"] for item in first["items"]}.isdisjoint(
+            {item["name"] for item in second["items"]}
+        )
+        assert walks == 1
+
 
 class TestTextFiles:
     def _reload(self, tmp_path, monkeypatch):
@@ -2084,3 +2136,278 @@ class TestProperties:
         assert props["is_dir"] is True
         assert props["file_count"] == 2
         assert props["mime"] is None
+
+
+class TestStoragePerformanceRuntime:
+    def test_scandir_cache_expires_using_monotonic_clock(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+
+        clock = [100.0]
+        calls = 0
+        original_scandir = storage.os.scandir
+
+        def counting_scandir(path):
+            nonlocal calls
+            calls += 1
+            return original_scandir(path)
+
+        monkeypatch.setattr(storage.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(storage.os, "scandir", counting_scandir)
+        (tmp_path / "file.txt").write_text("data")
+
+        storage.get_cached_scandir(str(tmp_path), ttl=1.0)
+        clock[0] = 100.9
+        storage.get_cached_scandir(str(tmp_path), ttl=1.0)
+        assert calls == 1
+        clock[0] = 101.1
+        storage.get_cached_scandir(str(tmp_path), ttl=1.0)
+        assert calls == 2
+
+    def test_failed_scandir_is_not_cached(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+
+        original_scandir = storage.os.scandir
+        calls = 0
+
+        def flaky_scandir(path):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OSError("remote unavailable")
+            return original_scandir(path)
+
+        (tmp_path / "visible.txt").write_text("ok")
+        monkeypatch.setattr(storage.os, "scandir", flaky_scandir)
+        with pytest.raises(OSError):
+            storage.get_cached_scandir(str(tmp_path))
+        result = storage.get_cached_scandir(str(tmp_path))
+        assert [item["name"] for item in result] == ["visible.txt"]
+        assert calls == 2
+
+    def test_inflight_scandir_is_partitioned_by_cache_generation(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import threading
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+
+        original_scandir = storage.os.scandir
+        first_iteration_created = threading.Event()
+        release_first = threading.Event()
+        calls = 0
+        calls_guard = threading.Lock()
+
+        def gated_scandir(path):
+            nonlocal calls
+            with calls_guard:
+                calls += 1
+                call_number = calls
+            iterator = original_scandir(path)
+            if call_number != 1:
+                return iterator
+
+            def delayed_entries():
+                with iterator:
+                    entries = list(iterator)
+                first_iteration_created.set()
+                release_first.wait(timeout=2)
+                yield from entries
+
+            return delayed_entries()
+
+        (tmp_path / "old.txt").write_text("old")
+        monkeypatch.setattr(storage.os, "scandir", gated_scandir)
+        first_result = []
+        first = threading.Thread(
+            target=lambda: first_result.extend(storage.get_cached_scandir(str(tmp_path)))
+        )
+        first.start()
+        assert first_iteration_created.wait(timeout=1)
+
+        (tmp_path / "new.txt").write_text("new")
+        storage.clear_scandir_cache()
+        second_result = storage.get_cached_scandir(str(tmp_path))
+        release_first.set()
+        first.join(timeout=2)
+
+        assert [item["name"] for item in first_result] == ["old.txt"]
+        assert "new.txt" in {item["name"] for item in second_result}
+        assert "new.txt" in {item["name"] for item in storage.get_cached_scandir(str(tmp_path))}
+
+    def test_directory_summary_fingerprints_all_entries_and_reports_true_age(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+        storage.clear_scandir_cache()
+
+        for index in range(205):
+            (tmp_path / f"item-{index:03d}.txt").write_text("x")
+        clock = [100.0]
+        monkeypatch.setattr(storage.time, "monotonic", lambda: clock[0])
+        first = storage.directory_summary("")
+        clock[0] = 100.4
+        cached = storage.directory_summary("")
+
+        assert first["total"] == 205
+        assert len(first["fingerprint"]) == 64
+        assert cached["fingerprint"] == first["fingerprint"]
+        assert cached["source_age_ms"] == 400
+        assert cached["source_max_age_ms"] == 500
+        assert first["source_scanned_at"].endswith("Z")
+
+        (tmp_path / "item-204.txt").write_text("changed and larger")
+        storage.clear_scandir_cache()
+        changed = storage.directory_summary("")
+        assert changed["fingerprint"] != first["fingerprint"]
+
+
+class TestCloudBackgroundJobs:
+    def test_background_search_and_live_poll_use_shared_runtime(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from common.performance import JobManager, SharedSectionHub, safe_error
+        import importlib
+        import time
+
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", tmp_path / "test.db")
+        import cloud_panel.models
+        import cloud_panel.storage
+        import cloud_panel.routes.files
+        import cloud_panel.routes.jobs
+        import cloud_panel.routes.events
+        import cloud_panel.main
+        importlib.reload(cloud_panel.models)
+        importlib.reload(cloud_panel.storage)
+        importlib.reload(cloud_panel.routes.files)
+        importlib.reload(cloud_panel.routes.jobs)
+        importlib.reload(cloud_panel.routes.events)
+        importlib.reload(cloud_panel.main)
+
+        app = cloud_panel.main.app
+        manager = JobManager(
+            max_workers=1,
+            max_pending=4,
+            queue_size=4,
+            state_path=tmp_path / "jobs.json",
+            error_factory=lambda _exc: safe_error(),
+        )
+        app.state.job_manager = manager
+        app.state.section_hub = SharedSectionHub(job_manager=manager, default_interval=0.05)
+        app.state.action_limiter = type("L", (), {"allow": lambda self, key: True})()
+        (tmp_path / "needle.txt").write_text("found")
+        (tmp_path / "one").mkdir()
+        (tmp_path / "two").mkdir()
+        (tmp_path / "three").mkdir()
+
+        with TestClient(app) as client:
+            token = client.get("/cloud-panel/api/session").json()["csrfToken"]
+            invalid = client.post(
+                "/cloud-panel/api/jobs",
+                json={
+                    "type": "recursive_search",
+                    "params": {"q": "needle", "path": "", "offset": "invalid"},
+                },
+                headers={"X-Cloud-Panel-CSRF": token},
+            )
+            assert invalid.status_code == 422
+            assert invalid.json()["detail"]["code"] == "invalid_job_params"
+            response = client.post(
+                "/cloud-panel/api/jobs",
+                json={
+                    "type": "recursive_search",
+                    "params": {"q": "needle", "path": "", "offset": 0, "limit": 50},
+                },
+                headers={"X-Cloud-Panel-CSRF": token},
+            )
+            assert response.status_code == 202
+            job = response.json()["job"]
+            assert job["status"] in {"queued", "running", "completed"}
+
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                current = client.get(f"/cloud-panel/api/jobs/{job['id']}").json()
+                if current["status"] == "completed":
+                    break
+                time.sleep(0.02)
+            else:
+                raise AssertionError("background search did not complete")
+
+            assert current["result"]["items"][0]["name"] == "needle.txt"
+            live = client.get("/cloud-panel/api/live", params={"path": ""})
+            assert live.status_code == 200
+            assert live.json()["sections"]
+            assert any(item["id"] == job["id"] for item in live.json()["jobs"])
+            live_frame = next(iter(live.json()["sections"].values()))
+            assert live_frame["type"] == "snapshot"
+            assert live_frame["data"]["path"] == ""
+            assert live_frame["data"]["total"] >= 4
+            assert len(live_frame["data"]["fingerprint"]) == 64
+            assert isinstance(live_frame["data"]["source_age_ms"], int)
+            assert live_frame["data"]["source_max_age_ms"] == 500
+            assert live_frame["data"]["source_scanned_at"].endswith("Z")
+
+            first_fingerprint = live_frame["data"]["fingerprint"]
+            (tmp_path / "external-change.txt").write_text("visible to polling fallback")
+            # Let the metadata cache expire, then poll without opening any SSE
+            # stream. The endpoint must collect again instead of returning its
+            # retained full frame indefinitely.
+            time.sleep(0.55)
+            refreshed = client.get("/cloud-panel/api/live", params={"path": ""})
+            refreshed_frame = next(iter(refreshed.json()["sections"].values()))
+            assert refreshed_frame["data"]["fingerprint"] != first_fingerprint
+            assert refreshed_frame["data"]["total"] == live_frame["data"]["total"] + 1
+
+            cloud_panel.routes.events.LIVE_SECTION_MAX_IDLE = 2
+            client.get("/cloud-panel/api/live", params={"path": "one/"})
+            client.get("/cloud-panel/api/live", params={"path": "./one"})
+            assert len(app.state.live_sections) == 2
+            client.get("/cloud-panel/api/live", params={"path": "two"})
+            client.get("/cloud-panel/api/live", params={"path": "three"})
+            assert len(app.state.live_sections) <= 2
+
+    def test_mutation_queues_only_the_changed_remote_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+        scheduled = []
+        monkeypatch.setattr(storage, "schedule_targeted_refresh", scheduled.extend)
+        (tmp_path / "parent").mkdir()
+
+        storage.create_directory("parent", "child")
+
+        assert scheduled == ["parent"]
+
+    def test_versioned_assets_only_get_private_long_cache_for_current_hash(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        import importlib
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import cloud_panel.main
+        importlib.reload(cloud_panel.main)
+        client = TestClient(cloud_panel.main.app)
+
+        current = client.get(f"/cloud-panel/static/dist/app.min.js?v={cloud_panel.main.ASSET_VERSION}")
+        stale = client.get("/cloud-panel/static/dist/app.min.js?v=stale")
+        manifest = client.get(f"/cloud-panel/static/dist/asset-version.json?v={cloud_panel.main.ASSET_VERSION}")
+        index = client.get("/cloud-panel/")
+        config = client.get("/cloud-panel/config.js")
+        api = client.get("/cloud-panel/api/session")
+
+        assert current.status_code == 200
+        assert current.headers["cache-control"] == "private, max-age=31536000, immutable"
+        assert stale.headers["cache-control"] == "no-store"
+        assert manifest.headers["cache-control"] == "no-store"
+        assert index.headers["cache-control"] == "no-store"
+        assert config.headers["cache-control"] == "no-store"
+        assert api.headers["cache-control"] == "no-store"
+
+        cloud_panel.main.ASSET_VERSION = "invalid"
+        invalid = client.get("/cloud-panel/static/dist/app.min.js?v=invalid")
+        assert invalid.headers["cache-control"] == "no-store"

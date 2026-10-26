@@ -68,6 +68,25 @@ La CI exécute ces contrôles avec Python 3.12 et Node.js 24, puis construit les
 trois images applicatives. Après toute modification frontend, les bundles
 `static/dist/` doivent être reconstruits et versionnés.
 
+Le contrôle de performance local est reproductible et n'appelle aucun service
+configuré :
+
+```bash
+.venv/bin/python scripts/perf/dashboard_perf.py \\
+  --iterations 5 \\
+  --delay-ms 100 \\
+  --output /tmp/dashboard-perf.json
+```
+
+Il compare le HEAD et le code courant avec les vrais composants de cache,
+mutualisation et monitoring, puis mesure le rendu Chrome et les réglages
+Caddy/Homepage/rclone. Le test SSE séparé `scripts/perf/live_integration.test.js`
+charge les trois bundles réels dans Chrome. Les
+figures locales ne constituent pas une mesure du VPS. La procédure de mesure
+sur l'hôte, les cinq largeurs visuelles, le déploiement et le retour arrière
+sont documentés dans
+[`docs/PERFORMANCE_DEPLOYMENT.md`](docs/PERFORMANCE_DEPLOYMENT.md).
+
 ## Vérification locale
 
 ```bash
@@ -88,7 +107,8 @@ montage ne sont pas actifs.
 1. Copier [`autossh/autossh-ultra.service`](autossh/autossh-ultra.service) dans
    `/etc/systemd/system/` et son fichier d’environnement hors du dépôt.
 2. Adapter [`rclone/override.conf`](rclone/override.conf) à la commande réelle
-   du serveur en conservant l’API RC sur `127.0.0.1:5572`.
+   du serveur en conservant l’API RC sur `127.0.0.1:5572`. Utiliser les
+   rafraîchissements ciblés et ne pas redémarrer le montage périodiquement.
 3. Adapter le domaine et le hash `basic_auth` dans
    [`caddy/dashboard.conf`](caddy/dashboard.conf), valider puis recharger Caddy.
 4. Ne jamais exposer directement les ports applicatifs, les tunnels SSH ou

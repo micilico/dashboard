@@ -37,16 +37,19 @@
         description: Activité de transfert et état du stockage
         widget:
           type: customapi
-          url: http://host.docker.internal:5572/core/stats
-          method: POST
-          requestBody: {}
+          url: http://host.docker.internal:3110/api/storage
+          method: GET
           refreshInterval: 10000
           mappings:
-            - field: transfers
-              label: Transferts
-            - field: speed
+            - field: rclone.transfersActive
+              label: Transferts actifs
+              format: number
+            - field: rclone.speedBytes
               label: Vitesse
-            - field: bytes
-              label: Données
-            - field: errors
+              format: bitrate
+            - field: rclone.bytesTransferred
+              label: Données transférées
+              format: bytes
+            - field: rclone.errors
               label: Erreurs
+              format: number

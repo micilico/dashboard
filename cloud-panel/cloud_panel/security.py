@@ -6,11 +6,19 @@ import re
 _SAFE_ID_RE = re.compile(r'\A[A-Za-z0-9_-]{1,128}\Z')
 
 
-def resolve_path_within(base_dir: str, relative_path: str, *, must_exist: bool = True) -> str:
+def resolve_path_within(
+    base_dir: str,
+    relative_path: str,
+    *,
+    must_exist: bool = True,
+    base_real: str | None = None,
+) -> str:
     """Resolve a user-controlled path while containing symlinks inside base_dir."""
     if not isinstance(relative_path, str) or '\x00' in relative_path:
         raise ValueError('Chemin invalide')
-    base = os.path.realpath(base_dir)
+    # Storage callers may pass an already-resolved, process-stable mount root.
+    # This avoids one or more remote stat/realpath calls per filesystem item.
+    base = base_real or os.path.realpath(base_dir)
     candidate = os.path.realpath(os.path.join(base, relative_path))
     try:
         contained = os.path.commonpath((base, candidate)) == base

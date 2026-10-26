@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,8 +25,25 @@ class StatsStore:
         self._last_save_at = 0.0
         self._dirty = False
         self._persist_debounce_seconds = max(0.0, persist_debounce_seconds)
+        self._lock = threading.RLock()
 
     def observe(
+        self,
+        torrents: list[dict[str, Any]],
+        *,
+        disk: dict[str, Any] | None = None,
+        media_history: list[dict[str, Any]] | None = None,
+        alerts: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self._observe_locked(
+                torrents,
+                disk=disk,
+                media_history=media_history,
+                alerts=alerts,
+            )
+
+    def _observe_locked(
         self,
         torrents: list[dict[str, Any]],
         *,
@@ -177,11 +195,12 @@ class StatsStore:
         self._state = state
 
     def flush(self) -> None:
-        if not self._dirty:
-            return
-        self._save(self._state)
-        self._last_save_at = time.monotonic()
-        self._dirty = False
+        with self._lock:
+            if not self._dirty:
+                return
+            self._save(self._state)
+            self._last_save_at = time.monotonic()
+            self._dirty = False
 
     def _trim_days(self, days: dict[str, Any]) -> dict[str, Any]:
         return {key: days[key] for key in sorted(days)[-self._history_days:]}

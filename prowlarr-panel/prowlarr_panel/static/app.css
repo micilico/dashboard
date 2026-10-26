@@ -151,3 +151,8 @@
     margin-left: 0;
   }
 }
+.status-pill.stale {
+  color: var(--warning-text);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}

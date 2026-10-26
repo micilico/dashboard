@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cloud · Dashboard</title>
-    <link rel="stylesheet" href="./static/dist/app.min.css?v=20261021-audit-fixes">
+    <link rel="stylesheet" href="./static/dist/app.min.css?v=76de6636ff46">
   </head>
   <body>
     <a class="skip-link" href="#content">Aller au contenu</a>
@@ -109,6 +109,8 @@
           </button>
         </div>
       </section>
+
+      <section id="jobTray" class="job-tray" aria-label="Traitements en arrière-plan" aria-live="polite" hidden></section>
 
       <div class="content-panel cloud-content" id="cloudContent" data-od-id="cloud-content">
         <button id="inspectorToggle" class="inspector-toggle button secondary" type="button" aria-expanded="false" aria-controls="cloudInspector">Afficher les informations du cloud</button>
@@ -444,7 +446,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <div id="fileActionMenu" class="action-menu" role="menu" hidden></div>
 
-    <script src="./config.js?v=20261021-audit-fixes"></script>
-    <script src="./static/dist/app.min.js?v=20261021-audit-fixes" defer></script>
+    <script src="./config.js?v=76de6636ff46"></script>
+    <script src="./static/dist/app.min.js?v=76de6636ff46" defer></script>
   </body>
 </html>

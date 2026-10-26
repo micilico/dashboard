@@ -1,6 +1,6 @@
 @font-face {
   font-family: 'Inter Variable';
-  src: url('../fonts/Inter-Variable.woff2') format('woff2');
+  src: url('../fonts/Inter-Variable.woff2?v=76de6636ff46') format('woff2');
   font-weight: 100 900;
   font-display: swap;
   font-style: normal;
@@ -1580,6 +1580,12 @@ dialog[open] { opacity: 1; transform: none; }
 .progress-row .ptrack { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
 .progress-row .ptrack .pfill { height: 100%; background: var(--accent); border-radius: 2px; transition: width .2s; }
 .progress-row .pstatus { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.job-tray { display: grid; gap: var(--space-8); padding: var(--space-12); margin-block-end: var(--space-16); border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-2); }
+.job-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-4) var(--space-12); align-items: center; }
+.job-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-state { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
+.job-progress { grid-column: 1 / -1; inline-size: 100%; block-size: 4px; accent-color: var(--accent); }
 
 /* ── Progress overlay ── */
 .progress-overlay { position: fixed; inset: 0; z-index: var(--z-overlay); background: var(--overlay-scrim); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }

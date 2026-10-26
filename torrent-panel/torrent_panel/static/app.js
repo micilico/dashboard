@@ -56,6 +56,7 @@ const state = {
   },
   storage: { disk: {}, rclone: {} },
   activity: { summary: {}, timeline: [] },
+  relinkStatus: { count: 0 },
   trackerStats: { updatedAt: "", observedDays: 0, totals: [], daily: [] },
   metricHistory: {
     downloadSpeedBytes: [],
@@ -76,8 +77,6 @@ const state = {
   organizeDuplicateSelected: new Set(),
   organizeRunning: false,
   organizeFinished: false,
-  organizeProgressTimer: null,
-  organizeProgressRunId: "",
   organizeProgressStage: "preparing",
   organizeProgressFailedStage: "",
   organizeProgressItems: new Map(),
@@ -85,7 +84,14 @@ const state = {
   detailHash: "",
   lastFocus: null,
   refreshTimer: null,
+  liveSubscription: null,
+  liveStatus: "idle",
+  renderFrame: null,
+  renderPromise: null,
   refreshPromise: null,
+  liveGeneration: 0,
+  liveActionRevision: 0,
+  resumeLiveAfterRefresh: false,
   refreshRevision: null,
   forceRefreshQueued: false,
   pollCycle: 0,
@@ -519,7 +525,9 @@ function applyUrlState() {
 }
 
 function setView(view, { push = true } = {}) {
-  state.activeView = view === "torrents" ? "torrents" : "home";
+  const nextView = view === "torrents" ? "torrents" : "home";
+  const changed = state.activeView !== nextView;
+  state.activeView = nextView;
   els.homeView.hidden = state.activeView !== "home";
   els.torrentsView.hidden = state.activeView !== "torrents";
   els.summaryGrid.hidden = true;
@@ -532,6 +540,7 @@ function setView(view, { push = true } = {}) {
     else els.torrentsNavLink.removeAttribute?.("aria-current");
   }
   updateUrl(!push);
+  if (changed && typeof startLive === "function") startLive();
 }
 
 function summarize(torrents) {
@@ -861,6 +870,7 @@ function quickActionButton(item) {
     } finally {
       trigger.disabled = false;
       trigger.textContent = previous;
+      resumeLiveAfterAction();
     }
   });
   action.className = "quick-action quick-action-button";
@@ -1465,6 +1475,7 @@ function retryWorkflow(entryId, scope, trigger) {
   }).catch((error) => {
     showError(error);
   }).finally(() => {
+    resumeLiveAfterAction();
     if (trigger) {
       trigger.disabled = false;
       trigger.textContent = scope === "jellyfin" ? "Relancer Jellyfin" : "Réessayer";
@@ -1656,8 +1667,43 @@ function renderTrackerStats() {
   }
 }
 
-async function loadDashboard() {
-  const payload = await api(route("/api/dashboard"), { cache: "no-store" });
+function scheduleRender() {
+  if (state.renderFrame !== null) return state.renderPromise;
+  const token = {};
+  let fallbackTimer = null;
+  let resolveRender;
+  state.renderFrame = token;
+  state.renderPromise = new Promise((resolve) => { resolveRender = resolve; });
+  const flush = () => {
+    if (state.renderFrame !== token) return;
+    window.clearTimeout(fallbackTimer);
+    state.renderFrame = null;
+    try {
+      render();
+    } finally {
+      state.renderPromise = null;
+      resolveRender();
+    }
+  };
+  fallbackTimer = window.setTimeout(flush, 32);
+  window.requestAnimationFrame?.(flush);
+  return state.renderPromise;
+}
+
+function stampFreshness(value = new Date()) {
+  const observed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(observed.getTime())) return;
+  if (!state.lastUpdatedAt || observed > state.lastUpdatedAt) state.lastUpdatedAt = observed;
+  const lastCheck = els.lastCheck;
+  if (lastCheck) {
+    lastCheck.textContent = formatFreshness(state.lastUpdatedAt);
+    lastCheck.setAttribute("datetime", state.lastUpdatedAt.toISOString());
+  } else {
+    els.refreshStatus.textContent = `À jour ${formatFreshness(state.lastUpdatedAt)}`;
+  }
+}
+
+function applyDashboardPayload(payload) {
   state.dashboard = {
     alerts: Array.isArray(payload.alerts) ? payload.alerts : [],
     criticalCount: Number(payload.criticalCount) || 0,
@@ -1670,10 +1716,214 @@ async function loadDashboard() {
       ? payload.mediaAutomation
       : { enabled: false, entries: [], notification: null },
   };
+  if (state.activeView === "home") scheduleRender();
+}
+
+function applyTorrentPayload(payload) {
+  const torrents = Array.isArray(payload?.torrents) ? payload.torrents : [];
+  const signature = JSON.stringify(torrents);
+  if (signature !== state.lastSignature) {
+    state.torrents = torrents;
+    state.lastSignature = signature;
+  }
+  stampFreshness(payload?.observedAt || new Date());
+  clearError();
+  state.backendStatus = torrents.length || state.dashboard.services.length
+    ? BACKEND_STATES.ready
+    : BACKEND_STATES.empty;
+  scheduleRender();
+  window.setTimeout(() => tryAutoTr4kerTracker(), 0);
+}
+
+function applyStoragePayload(payload) {
+  state.storage = payload && typeof payload === "object" ? payload : { disk: {}, rclone: {} };
+  const disk = state.storage.disk || {};
+  if (Number(disk.usedBytes) > 0) {
+    window.DashboardDOM?.updateDiskRing({ percent: disk.usedPercent, usedBytes: disk.usedBytes, totalBytes: disk.totalBytes });
+  } else {
+    window.DashboardDOM?.hideDiskRing();
+  }
+}
+
+function applyActivityPayload(payload) {
+  const next = payload && typeof payload === "object" ? payload : { summary: {}, timeline: [] };
+  if (JSON.stringify(next) === JSON.stringify(state.activity)) return;
+  state.activity = next;
+  if (state.activeView === "home") scheduleRender();
+}
+
+function applyTrackerStatsPayload(payload) {
+  if (!payload?.stats || typeof payload.stats !== "object") return;
+  if (JSON.stringify(payload.stats) === JSON.stringify(state.trackerStats)) return;
+  state.trackerStats = payload.stats;
+  if (state.activeView === "torrents") scheduleRender();
+}
+
+function applyRelinkStatusPayload(payload) {
+  state.relinkStatus = { count: Number(payload?.count) || 0 };
+  renderRelinkButton();
+}
+
+function liveTopics() {
+  return state.activeView === "home"
+    ? ["torrents", "dashboard", "storage", "activity", "relink"]
+    : ["torrents", "relink"];
+}
+
+function applyLiveFrame(frame) {
+  if (state.globalActionCount > 0) return;
+  if (frame?.type === "freshness") {
+    if (frame.sourceUpdatedAt || frame.collectedAt || frame.observedAt) {
+      stampFreshness(frame.sourceUpdatedAt || frame.collectedAt || frame.observedAt);
+    }
+    return;
+  }
+  const topic = String(frame?.topic || "");
+  const payload = frame?.data && typeof frame.data === "object" ? frame.data : {};
+  if (frame?.stale && payload.error) {
+    state.liveStatus = "stale";
+    return;
+  }
+  const collectedAt = frame?.sourceUpdatedAt || payload.refreshedAt || payload.generatedAt
+    || payload.observedAt || payload.source_scanned_at || frame?.collectedAt;
+  if (topic === "torrents") applyTorrentPayload({ ...payload, observedAt: collectedAt });
+  if (topic === "dashboard") applyDashboardPayload(payload);
+  if (topic === "storage") applyStoragePayload(payload);
+  if (topic === "activity") applyActivityPayload(payload);
+  if (topic === "relink") applyRelinkStatusPayload(payload);
+  if (collectedAt) stampFreshness(collectedAt);
+}
+
+function applyLiveFrameForRevision(frame, generation, actionRevision) {
+  if (generation !== state.liveGeneration || actionRevision !== state.actionRevision || state.globalActionCount > 0) return;
+  applyLiveFrame(frame);
+}
+
+async function awaitPrimaryRender(primaryRequest) {
+  const applied = await primaryRequest;
+  if (applied && state.renderPromise) await state.renderPromise;
+  return applied;
+}
+
+async function pollLiveSections({ signal } = {}) {
+  if (state.refreshPromise || state.globalActionCount > 0) return { sections: {} };
+  const topics = liveTopics();
+  const generation = state.liveGeneration;
+  const actionRevision = state.actionRevision;
+  const requests = {
+    torrents: route("/api/torrents"),
+    dashboard: route("/api/dashboard"),
+    relink: route("/api/torrents/relink-status"),
+    storage: route("/api/storage"),
+    activity: route("/api/activity"),
+  };
+  await Promise.all(topics.map(async (topic) => {
+    try {
+      const data = await api(requests[topic], { cache: "no-store", retry: false, signal });
+      if (signal?.aborted || generation !== state.liveGeneration || actionRevision !== state.actionRevision || state.globalActionCount > 0) return;
+      applyLiveFrameForRevision({ type: "snapshot", topic, data }, generation, actionRevision);
+    } catch {
+      // Une section indisponible ne bloque pas la mise à jour des autres.
+    }
+  }));
+  return { sections: {} };
+}
+
+async function submitJob(type, params = {}) {
+  return api(route("/api/jobs"), {
+    method: "POST",
+    body: JSON.stringify({ type, params }),
+    retry: false,
+  });
+}
+
+async function waitForJob(jobId, onUpdate = () => {}) {
+  let latest = null;
+  while (true) {
+    const job = await api(route(`/api/jobs/${encodeURIComponent(jobId)}`), {
+      cache: "no-store", retry: false, timeout: 10000,
+    });
+    latest = job;
+    onUpdate(job);
+    if (["completed", "failed", "interrupted"].includes(String(job.status || "").toLowerCase())) {
+      if (job.status !== "completed") throw new Error(job.error?.message || job.message || "La tâche a échoué.");
+      return job;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+  }
+}
+
+function jobProgressLabel(job) {
+  const progress = Number(job?.progress);
+  const total = Number(job?.total);
+  return total > 0 && Number.isFinite(progress)
+    ? `${job.message || "Tâche en cours"} (${Math.min(progress, total)}/${total})`
+    : job?.message || "Tâche en cours";
+}
+
+function startLive() {
+  stopLive();
+  state.liveActionRevision = state.actionRevision;
+  if (!state.prefs.autoRefresh || document.hidden || typeof window.DashboardLive?.createLiveSubscription !== "function") return;
+  const topics = liveTopics();
+  const generation = state.liveGeneration;
+  const actionRevision = state.actionRevision;
+  const dispatchFrame = (frame) => applyLiveFrameForRevision(frame, generation, actionRevision);
+  state.liveSubscription = window.DashboardLive.createLiveSubscription({
+    streamUrl: `${route("/api/events")}?topics=${encodeURIComponent(topics.join(","))}`,
+    pollIntervalMs: 1000,
+    reconnectDelayMs: 2500,
+    poll: pollLiveSections,
+    handlers: {
+      snapshot: dispatchFrame,
+      section: dispatchFrame,
+      freshness: dispatchFrame,
+      job(frame) {
+        const job = frame?.job || {};
+        if (state.organizeRunning && (job.type || job.metadata?.type) === "library-apply") renderOrganizeProgressJob(job);
+        if (job.status === "running" || job.status === "queued") els.refreshStatus.textContent = jobProgressLabel(job);
+      },
+      status(value) {
+        if (generation !== state.liveGeneration) return;
+        state.liveStatus = value?.mode || "idle";
+        restartRefreshTimer();
+      },
+      error() {
+        state.liveStatus = "degraded";
+      },
+    },
+  });
+  state.liveSubscription.start();
+}
+
+function stopLive() {
+  state.liveGeneration += 1;
+  const subscription = state.liveSubscription;
+  state.liveSubscription = null;
+  subscription?.stop();
+  state.liveStatus = "idle";
+}
+
+function resumeLiveAfterAction() {
+  if (state.globalActionCount === 0 && state.liveActionRevision !== state.actionRevision) startLive();
+}
+
+async function loadDashboard() {
+  const payload = await api(route("/api/dashboard"), { cache: "no-store" });
+  applyDashboardPayload(payload);
+  scheduleRender();
 }
 
 async function loadTorrents({ silent = false, force = false } = {}) {
   if (!force && (state.globalActionCount > 0 || document.hidden)) return null;
+  if (force && state.globalActionCount > 0) {
+    state.forceRefreshQueued = true;
+    return null;
+  }
+  if (state.liveSubscription && state.liveStatus === "polling") {
+    state.resumeLiveAfterRefresh = true;
+    stopLive();
+  }
   if (state.refreshPromise) {
     if (force && state.refreshRevision !== state.actionRevision) state.forceRefreshQueued = true;
     const activeRefresh = state.refreshPromise;
@@ -1695,79 +1945,49 @@ async function loadTorrents({ silent = false, force = false } = {}) {
   const revisionAtStart = state.actionRevision;
   state.refreshRevision = revisionAtStart;
   const request = (async () => {
+    const cycle = state.pollCycle++;
+    const refreshActivity = force || cycle % 3 === 0;
+    const refreshStorage = force || cycle % 7 === 0;
+    const refreshTrackers = force || cycle % 30 === 0;
+    const requests = [
+      [route("/api/torrents"), applyTorrentPayload],
+      [route("/api/dashboard"), applyDashboardPayload],
+      [route("/api/torrents/relink-status"), applyRelinkStatusPayload],
+    ];
+    if (refreshStorage) requests.push([route("/api/storage"), applyStoragePayload]);
+    if (refreshActivity) requests.push([route("/api/activity"), applyActivityPayload]);
+    if (refreshTrackers) requests.push([route("/api/torrents/stats/trackers"), applyTrackerStatsPayload]);
+
+    const fetchAndApply = async ([path, apply]) => {
+      const payload = await api(path, { cache: "no-store" });
+      if (revisionAtStart !== state.actionRevision || state.globalActionCount > 0) return false;
+      apply(payload);
+      return true;
+    };
+    const primaryRequest = fetchAndApply(requests[0]);
+    if (!state.secondaryRefreshPromise) {
+      const secondaryRequests = requests.slice(1).map((entry) => fetchAndApply(entry));
+      state.secondaryRefreshPromise = Promise.allSettled(secondaryRequests).then((results) => {
+        const failures = results.filter((result) => result.status === "rejected");
+        state.secondaryRefreshError = failures.length === secondaryRequests.length && failures.length
+          ? failures[0].reason
+          : null;
+      }).finally(() => { state.secondaryRefreshPromise = null; });
+    }
     try {
-      const cycle = state.pollCycle++;
-      const refreshActivity = force || cycle % 3 === 0;
-      const refreshStorage = force || cycle % 7 === 0;
-      const refreshTrackers = force || cycle % 30 === 0;
-      const [dashboardPayload, torrentPayload, storagePayload, activityPayload, trackerStatsPayload, relinkStatusPayload] = await Promise.all([
-        api(route("/api/dashboard"), { cache: "no-store" }),
-        api(route("/api/torrents"), { cache: "no-store" }),
-        refreshStorage ? api(route("/api/storage"), { cache: "no-store" }).catch(() => ({ disk: state.storage.disk || {}, rclone: state.storage.rclone || {} })) : Promise.resolve(state.storage),
-        refreshActivity ? api(route("/api/activity"), { cache: "no-store" }).catch(() => ({ summary: state.activity.summary || {}, timeline: state.activity.timeline || [] })) : Promise.resolve(state.activity),
-        refreshTrackers ? api(route("/api/torrents/stats/trackers"), { cache: "no-store" }).catch(() => ({ stats: state.trackerStats })) : Promise.resolve({ stats: state.trackerStats }),
-        api(route("/api/torrents/relink-status"), { cache: "no-store" }).catch(() => ({ count: 0 })),
-      ]);
-      if (revisionAtStart !== state.actionRevision || state.globalActionCount > 0) {
-        state.forceRefreshQueued = true;
-        return null;
-      }
-      state.relinkStatus = { count: Number(relinkStatusPayload?.count) || 0 };
-      state.dashboard = {
-        alerts: Array.isArray(dashboardPayload.alerts) ? dashboardPayload.alerts : [],
-        criticalCount: Number(dashboardPayload.criticalCount) || 0,
-        overview: dashboardPayload.overview && typeof dashboardPayload.overview === "object" ? dashboardPayload.overview : {},
-        recentActivity: Array.isArray(dashboardPayload.recentActivity) ? dashboardPayload.recentActivity : [],
-        storage: dashboardPayload.storage && typeof dashboardPayload.storage === "object" ? dashboardPayload.storage : {},
-        quickActions: Array.isArray(dashboardPayload.quickActions) ? dashboardPayload.quickActions : [],
-        services: Array.isArray(dashboardPayload.services) ? dashboardPayload.services : [],
-        mediaAutomation: dashboardPayload.mediaAutomation && typeof dashboardPayload.mediaAutomation === "object"
-          ? dashboardPayload.mediaAutomation
-          : { enabled: false, entries: [], notification: null },
-      };
-      state.storage = storagePayload && typeof storagePayload === "object" ? storagePayload : { disk: {}, rclone: {} };
-      const disk = state.storage.disk || {};
-      if (Number(disk.usedBytes) > 0) {
-        window.DashboardDOM?.updateDiskRing({ percent: disk.usedPercent, usedBytes: disk.usedBytes, totalBytes: disk.totalBytes });
-      } else {
-        window.DashboardDOM?.hideDiskRing();
-      }
-      state.activity = activityPayload && typeof activityPayload === "object" ? activityPayload : { summary: {}, timeline: [] };
-      state.trackerStats = trackerStatsPayload?.stats && typeof trackerStatsPayload.stats === "object"
-        ? trackerStatsPayload.stats
-        : state.trackerStats;
-      const torrents = Array.isArray(torrentPayload.torrents) ? torrentPayload.torrents : [];
-      const signature = JSON.stringify(torrents);
-      state.lastUpdatedAt = new Date();
-      if (signature !== state.lastSignature) {
-        state.torrents = torrents;
-        state.lastSignature = signature;
-      }
-      clearError();
-      state.backendStatus = torrents.length || state.dashboard.services.length
-        ? BACKEND_STATES.ready
-        : BACKEND_STATES.empty;
-      render();
-      window.setTimeout(() => {
-        tryAutoTr4kerTracker();
-      }, 0);
-      const lastCheck = els.lastCheck;
-      if (lastCheck) {
-        lastCheck.textContent = formatFreshness(state.lastUpdatedAt);
-        lastCheck.setAttribute("datetime", state.lastUpdatedAt.toISOString());
-      }
-      if (!lastCheck) {
-        els.refreshStatus.textContent = `À jour ${formatFreshness(state.lastUpdatedAt)}`;
+      const applied = await awaitPrimaryRender(primaryRequest);
+      state.primaryRefreshResolved = true;
+      if (applied && revisionAtStart === state.actionRevision && state.globalActionCount === 0
+          && (state.liveActionRevision !== state.actionRevision || state.resumeLiveAfterRefresh)) {
+        state.resumeLiveAfterRefresh = false;
+        startLive();
       }
     } catch (error) {
-      state.backendStatus = state.lastUpdatedAt ? BACKEND_STATES.degraded : BACKEND_STATES.unavailable;
-      if (state.activeView === "home") renderHome();
-      showError(error);
-      const lastCheck = els.lastCheck;
-      if (lastCheck && state.lastUpdatedAt) {
-        lastCheck.textContent = formatFreshness(state.lastUpdatedAt);
-      } else if (!state.lastUpdatedAt) {
-        els.refreshStatus.textContent = "Erreur";
+      if (revisionAtStart === state.actionRevision) {
+        state.backendStatus = state.lastUpdatedAt ? BACKEND_STATES.degraded : BACKEND_STATES.unavailable;
+        if (state.activeView === "home") renderHome();
+        showError(error);
+        if (!state.lastUpdatedAt) els.refreshStatus.textContent = "Erreur";
       }
     }
   })();
@@ -1806,7 +2026,9 @@ function beginGlobalAction() {
 
 function endGlobalAction() {
   state.globalActionCount = Math.max(0, state.globalActionCount - 1);
-  if (state.globalActionCount > 0 || !state.forceRefreshQueued || document.hidden) return;
+  if (state.globalActionCount > 0) return;
+  state.forceRefreshQueued = true;
+  if (document.hidden) return;
   window.setTimeout(() => {
     if (state.globalActionCount > 0 || !state.forceRefreshQueued || document.hidden) return;
     loadTorrents({ silent: true, force: true });
@@ -2164,6 +2386,7 @@ async function confirmAddTracker() {
   } finally {
     els.confirmAddTrackerButton.disabled = false;
     els.confirmAddTrackerButton.textContent = "Ajouter";
+    resumeLiveAfterAction();
   }
 }
 
@@ -2188,6 +2411,8 @@ async function addConfiguredTrackerToHashes(hashes, endpoint, successLabel) {
     loadTrackerIndex();
   } catch (error) {
     showToast(describeError(error));
+  } finally {
+    resumeLiveAfterAction();
   }
 }
 
@@ -2217,10 +2442,10 @@ function renderRelinkButton() {
 async function runRelink(hashes = []) {
   try {
     state.actionRevision += 1;
-    const payload = await api(route("/api/torrents/relink"), {
-      method: "POST",
-      body: JSON.stringify(hashes.length ? { hashes } : {}),
-    });
+    const submitted = await submitJob("relink", hashes.length ? { hashes } : {});
+    els.refreshStatus.textContent = "Réparation en arrière-plan…";
+    const job = await waitForJob(submitted.id, (value) => { els.refreshStatus.textContent = jobProgressLabel(value); });
+    const payload = job.result || {};
     const result = payload.result;
     if (!result || !result.relinked) {
       showToast("Aucun torrent manquant n'a pu être repositionné.");
@@ -2236,6 +2461,7 @@ async function runRelink(hashes = []) {
     return true;
   } catch (error) {
     showToast(describeError(error));
+    resumeLiveAfterAction();
     return false;
   }
 }
@@ -2245,8 +2471,15 @@ async function openRelinkDialog() {
   els.confirmRelinkButton.disabled = true;
   els.confirmRelinkButton.textContent = "Réparer";
   els.relinkPlan.replaceChildren();
+  els.relinkSummary.textContent = "Analyse des fichiers à réparer…";
+  els.refreshStatus.textContent = "Analyse des fichiers à réparer…";
   try {
-    const payload = await api(route("/api/torrents/relink-preview"));
+    const submitted = await submitJob("relink-preview");
+    const job = await waitForJob(submitted.id, (value) => {
+      els.relinkSummary.textContent = jobProgressLabel(value);
+      els.refreshStatus.textContent = jobProgressLabel(value);
+    });
+    const payload = job.result || {};
     const plan = payload.plan || {};
     const relinkCount = Number(plan.relinkCount) || 0;
     const recheckOnlyCount = Number(plan.recheckOnlyCount) || 0;
@@ -2270,6 +2503,7 @@ async function openRelinkDialog() {
     els.relinkDialog.showModal();
   } catch (error) {
     els.relinkSummary.textContent = describeError(error);
+    els.relinkDialog.showModal();
   }
 }
 
@@ -2277,9 +2511,10 @@ async function confirmRelink() {
   els.confirmRelinkButton.disabled = true;
   els.confirmRelinkButton.textContent = "Réparation…";
   els.relinkMessage.textContent = "";
+  els.relinkDialog.close();
   try {
     const ok = await runRelink();
-    if (ok) els.relinkDialog.close();
+    if (!ok) showToast(els.relinkMessage.textContent || "La réparation a échoué.");
   } catch (error) {
     els.relinkMessage.textContent = describeError(error);
   } finally {
@@ -2293,6 +2528,10 @@ function cancelRelink() {
 }
 
 async function openOrganizeMediaDialog(hashes = [], trigger = null) {
+  if (state.organizeRunning) {
+    showToast("Un rangement est déjà en cours. Sa progression reste visible dans la barre d’état.");
+    return;
+  }
   state.organizeHashes = Array.isArray(hashes) ? hashes : [];
   state.organizeRunId = "";
   state.organizeSelected = new Set();
@@ -2306,15 +2545,17 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
   els.organizeMediaPlan.replaceChildren();
   els.confirmOrganizeMediaButton.disabled = true;
   try {
-    await api(route("/api/torrents/organize-library-refresh"), {
-      method: "POST",
-      body: JSON.stringify({}),
-      timeout: 300000,
+    const refreshJob = await submitJob("library-refresh");
+    await waitForJob(refreshJob.id, (job) => {
+      els.organizeMediaSummary.textContent = jobProgressLabel(job);
+      els.refreshStatus.textContent = jobProgressLabel(job);
     });
-    const previewPath = state.organizeHashes.length === 1
-      ? `/api/torrents/organize-library-preview?hash=${encodeURIComponent(state.organizeHashes[0])}`
-      : "/api/torrents/organize-library-preview";
-    const payload = await api(route(previewPath), { cache: "no-store", timeout: 300000 });
+    const previewJob = await submitJob("library-preview", state.organizeHashes.length ? { hashes: state.organizeHashes } : {});
+    const completedPreview = await waitForJob(previewJob.id, (job) => {
+      els.organizeMediaSummary.textContent = jobProgressLabel(job);
+      els.refreshStatus.textContent = jobProgressLabel(job);
+    });
+    const payload = completedPreview.result || {};
     state.organizeRunId = payload.runId || "";
     const plan = payload.plan || {};
     const entries = plan.entries || [];
@@ -2444,7 +2685,6 @@ async function openOrganizeMediaDialog(hashes = [], trigger = null) {
     els.confirmOrganizeMediaButton.disabled = entries.length + orphanMedia.length + duplicateGroups.filter((group) => group.status !== "conflict").length === 0;
     applyOrganizeFilter();
     if (typeof trapFocus === "function") trapFocus(els.organizeMediaDialog);
-    els.organizeMediaDialog.showModal();
   } catch (error) {
     els.organizeMediaSummary.textContent = describeError(error);
     els.organizeMediaDialog.showModal();
@@ -2514,14 +2754,6 @@ function organizeStageInfo(stage) {
     default:
       return { step: 0, title: "Préparation du rangement", detail: "Sélection prête — démarrage du rangement." };
   }
-}
-
-function stopOrganizeProgressPolling() {
-  if (state.organizeProgressTimer) {
-    window.clearTimeout(state.organizeProgressTimer);
-    state.organizeProgressTimer = null;
-  }
-  state.organizeProgressRunId = "";
 }
 
 function applyOrganizeStepStates(states) {
@@ -2731,6 +2963,22 @@ function renderOrganizeProgressRun(run) {
   els.organizeWorkflow?.setAttribute("aria-busy", done ? "false" : "true");
 }
 
+function renderOrganizeProgressJob(job) {
+  const data = job?.data && typeof job.data === "object" ? job.data : {};
+  const total = Number(job?.total);
+  const progress = Number(job?.progress);
+  state.organizeProgressStage = String(data.stage || state.organizeProgressStage || "preparing");
+  if (data.hash) updateOrganizeRowsFromProgress({ stage: state.organizeProgressStage, hash: data.hash });
+  if (els.organizeWorkflowTitle && job?.message) els.organizeWorkflowTitle.textContent = job.message;
+  if (els.organizeWorkflowDetail) {
+    els.organizeWorkflowDetail.textContent = total > 0 && Number.isFinite(progress)
+      ? `${Math.min(progress, total)} / ${total} étape(s) terminée(s).`
+      : job?.message || "Tâche en cours.";
+  }
+  if (total > 0 && els.organizeWorkflowCount) els.organizeWorkflowCount.textContent = `${Math.min(progress || 0, total)} / ${total}`;
+  els.refreshStatus.textContent = jobProgressLabel(job);
+}
+
 function renderOrganizeWorkflowResult(payload) {
   const result = payload?.result || {};
   const refresh = payload?.refresh || {};
@@ -2814,31 +3062,7 @@ function renderOrganizeWorkflowError(error) {
   els.organizeWorkflow?.setAttribute("aria-busy", "false");
 }
 
-function startOrganizeProgressPolling(runId) {
-  stopOrganizeProgressPolling();
-  if (!runId) return;
-  state.organizeProgressRunId = runId;
-  const tick = async () => {
-    if (!state.organizeRunning || state.organizeProgressRunId !== runId) return;
-    try {
-      const run = await api(route(`/api/torrents/organize-library-runs/${encodeURIComponent(runId)}`), {
-        cache: "no-store",
-        timeout: 8000,
-        retry: false,
-      });
-      if (state.organizeRunning && state.organizeProgressRunId === runId) renderOrganizeProgressRun(run);
-    } catch (error) {
-      // Le suivi est indicatif : un échec transitoire conserve la dernière étape réelle connue.
-    }
-    if (state.organizeRunning && state.organizeProgressRunId === runId) {
-      state.organizeProgressTimer = window.setTimeout(tick, 1000);
-    }
-  };
-  tick();
-}
-
 function resetOrganizeWorkflow() {
-  stopOrganizeProgressPolling();
   state.organizeRunning = false;
   state.organizeFinished = false;
   state.organizeRunSelection = null;
@@ -2873,7 +3097,11 @@ function resetOrganizeWorkflow() {
 }
 
 function cancelOrganizeMedia() {
-  if (state.organizeRunning) return;
+  if (state.organizeRunning) {
+    els.organizeMediaDialog?.close();
+    showToast("Le rangement continue en arrière-plan.");
+    return;
+  }
   els.organizeMediaDialog?.close();
 }
 
@@ -2894,16 +3122,22 @@ async function confirmOrganizeMedia() {
   if (els.cancelOrganizeMediaButton) els.cancelOrganizeMediaButton.disabled = true;
   els.organizeMediaMessage.textContent = "";
   renderOrganizeWorkflowStart(selection);
-  startOrganizeProgressPolling(state.organizeRunId);
+  if (els.cancelOrganizeMediaButton) {
+    els.cancelOrganizeMediaButton.disabled = false;
+    els.cancelOrganizeMediaButton.textContent = "Continuer en arrière-plan";
+  }
   try {
     state.actionRevision += 1;
-    const payload = await api(route("/api/torrents/organize-library"), {
-      method: "POST",
-      body: JSON.stringify({ hashes, orphanPaths, duplicateGroupIds, runId: state.organizeRunId || null }),
-      timeout: 600000,
-      retry: false,
+    const submitted = await submitJob("library-apply", {
+      hashes,
+      orphanPaths,
+      duplicateGroupIds,
+      runId: state.organizeRunId || null,
     });
-    stopOrganizeProgressPolling();
+    els.organizeMediaDialog.close();
+    showToast("Rangement lancé. La progression reste visible dans la barre d’état.");
+    const job = await waitForJob(submitted.id, (value) => renderOrganizeProgressJob(value));
+    const payload = job.result || {};
     const result = payload.result || {};
     const refresh = payload.refresh || {};
     const parts = [`${result.organized || 0} rangé${result.organized > 1 ? "s" : ""}`];
@@ -2922,10 +3156,11 @@ async function confirmOrganizeMedia() {
     if (els.confirmOrganizeMediaButton) els.confirmOrganizeMediaButton.hidden = true;
     await loadTorrents({ silent: true, force: true });
   } catch (error) {
-    stopOrganizeProgressPolling();
     state.organizeRunning = false;
     renderOrganizeWorkflowError(error);
     els.organizeMediaMessage.textContent = describeError(error);
+    showToast(describeError(error));
+    resumeLiveAfterAction();
     if (els.confirmOrganizeMediaButton) {
       els.confirmOrganizeMediaButton.hidden = false;
       els.confirmOrganizeMediaButton.disabled = false;
@@ -2995,7 +3230,11 @@ async function submitMagnets(event) {
 function restartRefreshTimer() {
   window.clearInterval(state.refreshTimer);
   state.refreshTimer = null;
-  if (!state.prefs.autoRefresh) return;
+  if (!state.prefs.autoRefresh) {
+    if (state.liveSubscription) stopLive();
+    return;
+  }
+  if (state.liveSubscription) return;
   state.refreshTimer = window.setInterval(() => {
     loadTorrents({ silent: true });
   }, Number(state.prefs.refreshIntervalMs) || 9000);
@@ -3064,6 +3303,8 @@ function bindEvents() {
   els.autoRefreshToggle.addEventListener("change", () => {
     state.prefs.autoRefresh = els.autoRefreshToggle.checked;
     savePrefs();
+    if (state.prefs.autoRefresh) startLive();
+    else stopLive();
     restartRefreshTimer();
     renderControls();
   });
@@ -3137,7 +3378,7 @@ function bindEvents() {
     if (state.organizeRunning) event.preventDefault();
   });
   els.organizeMediaDialog?.addEventListener("close", () => {
-    resetOrganizeWorkflow();
+    if (!state.organizeRunning) resetOrganizeWorkflow();
     state.lastFocus?.focus?.();
   });
   document.querySelector("#organizeMediaForm")?.addEventListener("submit", (event) => {
@@ -3218,6 +3459,7 @@ async function init() {
   restartRefreshTimer();
   try {
     await refreshSession();
+    startLive();
     await loadTorrents({ force: true });
     loadTrackerIndex();
     const url = currentUrl();

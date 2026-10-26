@@ -57,6 +57,7 @@ const context = {
   clearInterval() {},
   window: {
     location: { href: "http://localhost/torrent-panel/" },
+    requestAnimationFrame(fn) { fn(); return 1; },
     setTimeout(fn) {
       return fn ? 1 : 0;
     },
@@ -112,13 +113,14 @@ assert.match(overviewHtml, /id="sortDirectionSelect"/);
 assert.match(overviewHtml, /id="tr4kerTrackerInput"/);
 assert.match(overviewHtml, /id="organizeMediaButton"/);
 assert.match(overviewHtml, /id="organizeMediaDialog"/);
-assert.match(source, /\/api\/torrents\/organize-library-preview/);
-assert.match(source, /\/api\/torrents\/organize-library/);
+assert.match(source, /submitJob\("library-preview"/);
+assert.match(source, /submitJob\("library-apply"/);
 assert.match(source, /Les torrents restent en pause/);
 assert.match(source, /entry\.currentPath.*entry\.targetPath/);
 assert.match(source, /operation\.oldPath.*operation\.newPath/);
 assert.match(source, /button\("Ranger ce torrent"/);
-assert.match(source, /organize-library-preview\?hash=/);
+assert.match(source, /waitForJob\(previewJob\.id/);
+assert.match(source, /waitForJob\(submitted\.id/);
 assert.match(source, /hashes/);
 assert.match(source, /organizeSelectAll/);
 assert.match(overviewHtml, /id="organizeFilter"/);
@@ -153,6 +155,7 @@ assert.ok(torrentsCss.includes(".torrents-panel.compact"), "compact density styl
 assert.ok(torrentsCss.includes(".toast-action"), "undo toast button styles required");
 assert.ok(torrentsCss.includes("mark.search-hit"), "search highlight styles required");
 assert.match(consoleSource, /function panel\(title, subtitle, bodyChildren/);
+assert.match(consoleSource, /pollIntervalMs: 1000/);
 assert.match(consoleSource, /systemState\(\{ type: "empty"/);
 assert.match(consoleSource, /className: "table-wrap table-scroll"/);
 assert.match(source, /function createSystemState/);
@@ -190,7 +193,7 @@ assert.match(overviewCss, /\.metric-card\.unavailable/);
 vm.runInNewContext(
   `${commonApiSource}
 ${source}
-globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, formatFreshness, showUndoToast, torrentRowSignature, updateTorrentRowValues, resetTorrentWindow, torrentWindow, applyUrlState, state, els };`,
+globalThis.__testApi = { formatBytes, formatSpeed, formatRatio, formatEta, stateMeta, filteredTorrents, renderFollowNotice, renderSelection, formatFreshness, showUndoToast, torrentRowSignature, updateTorrentRowValues, resetTorrentWindow, torrentWindow, applyUrlState, applyLiveFrame, applyLiveFrameForRevision, applyActivityPayload, applyTrackerStatsPayload, scheduleRender, awaitPrimaryRender, state, els };`,
   context,
 );
 
@@ -208,6 +211,30 @@ assert.equal(api.formatFreshness(null), "");
 assert.equal(api.formatFreshness(new Date(Date.now() - 15000)), "il y a 15 s");
 assert.equal(api.formatFreshness(new Date(Date.now() - 5000)), "à l'instant");
 assert.equal(typeof api.showUndoToast, "function");
+
+const liveTorrentSnapshot = [{ hash: "live-1", name: "Flux SSE", state: "downloading", progress: 0.2 }];
+api.applyLiveFrame({ type: "section", topic: "torrents", data: { torrents: liveTorrentSnapshot, observedAt: "2026-10-26T10:00:00Z" }, collectedAt: "2026-10-26T10:00:00Z", sourceUpdatedAt: "2026-10-26T09:59:00Z" });
+assert.equal(api.state.torrents[0].hash, "live-1", "a real SSE section frame updates the visible torrent model");
+assert.equal(api.state.lastUpdatedAt.toISOString(), "2026-10-26T09:59:00.000Z", "source timestamps take precedence over collection timestamps");
+const storageBeforeFreshness = api.state.storage;
+api.applyLiveFrame({ type: "freshness", topic: "storage", collectedAt: "2026-10-26T10:00:02Z", unchanged: true });
+assert.equal(api.state.storage, storageBeforeFreshness, "metadata-only freshness frames update timestamps without replacing data");
+assert.equal(api.state.lastUpdatedAt.toISOString(), "2026-10-26T10:00:02.000Z");
+api.state.globalActionCount = 1;
+api.applyLiveFrame({ type: "section", topic: "torrents", data: { torrents: [{ hash: "stale", name: "Mutation in progress" }] } });
+assert.equal(api.state.torrents[0].hash, "live-1", "SSE data cannot replace torrent state during a mutation");
+api.state.globalActionCount = 0;
+api.applyLiveFrameForRevision({ type: "section", topic: "torrents", data: { torrents: [{ hash: "late", name: "Late frame" }] } }, api.state.liveGeneration, api.state.actionRevision - 1);
+assert.equal(api.state.torrents[0].hash, "live-1", "a frame from a pre-mutation subscription is ignored after the action revision changes");
+let scheduledFrames = 0;
+context.window.requestAnimationFrame = (callback) => { scheduledFrames += 1; callback(); return 3; };
+api.state.renderFrame = null;
+api.applyActivityPayload({ summary: { active: 2 }, timeline: [] });
+assert.equal(scheduledFrames, 1, "changed activity schedules a render on the overview");
+api.state.activeView = "torrents";
+api.state.renderFrame = null;
+api.applyTrackerStatsPayload({ stats: { totals: [{ tracker: "tracker", downloaded: 5 }], daily: [] } });
+assert.equal(scheduledFrames, 2, "changed tracker statistics schedule a render on the torrents view");
 
 const rowTemplate = { hash: "a", name: "Ubuntu ISO", state: "downloading", progress: 0.3, downloadSpeed: 200, uploadSpeed: 10 };
 const initialRowSignature = api.torrentRowSignature(rowTemplate);
@@ -427,10 +454,14 @@ vm.runInNewContext(
 ${fs.readFileSync("common/js/dom.js", "utf8")}
 window.__DASHBOARD_CONSOLE_CONFIG__ = { section: "stats", apiPrefix: "/api", publicPrefix: "/stats-panel" };
 ${consoleSource}
-globalThis.__chartTest = { seriesLineChart, chartEmptyState };`,
+globalThis.__chartTest = { seriesLineChart, chartEmptyState, renderLiveSection, state, els };`,
   chartContext,
 );
 const chartApi = chartContext.__chartTest;
+chartApi.els.lastCheck.textContent = "Dernière donnée valide";
+chartApi.renderLiveSection({ type: "section", topic: "stats", stale: true, collectedAt: "2026-10-26T10:00:05Z", data: { error: { code: "offline" }, stats: { daily: [] } } });
+assert.equal(chartApi.els.lastCheck.textContent, "Dernière donnée valide", "stale console frames must not advance freshness timestamps");
+assert.match(chartApi.els.pageStatus.textContent, /dernières données valides sont conservées/i);
 const chartSeries = [
   { key: "downloaded", label: "Download", format: (v) => `${v} o`, className: "series-a" },
   { key: "uploaded", label: "Upload", format: (v) => `${v} o`, className: "series-b" },
@@ -491,3 +522,23 @@ assert.equal(zeroBox.className, "chart-box", "zero values must still render a ch
 console.log("chart svg ok");
 
 console.log("frontend logic ok");
+
+(async () => {
+  let pendingFrame = null;
+  api.state.renderFrame = null;
+  api.state.renderPromise = null;
+  context.window.requestAnimationFrame = (callback) => { pendingFrame = callback; return 9; };
+  api.scheduleRender();
+  assert.equal(typeof pendingFrame, "function", "a render frame is scheduled");
+  let refreshSettled = false;
+  const refresh = api.awaitPrimaryRender(Promise.resolve(true)).then(() => { refreshSettled = true; });
+  await Promise.resolve();
+  assert.equal(refreshSettled, false, "the primary refresh contract waits for its scheduled render");
+  pendingFrame();
+  await refresh;
+  assert.equal(refreshSettled, true, "the primary refresh contract resolves after rendering");
+  console.log("primary refresh render synchronization ok");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

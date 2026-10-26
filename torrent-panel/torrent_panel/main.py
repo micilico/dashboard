@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sys
 import asyncio
@@ -19,6 +21,7 @@ if str(_sys_path_root) not in sys.path:
 from common import build_csp, RateLimiter  # noqa: E402
 from common.monitoring import init_sentry  # noqa: E402
 from common.csrf import csrf_cookie_matches, csrf_token_is_valid  # noqa: E402
+from common.performance import JobManager, safe_error  # noqa: E402
 
 from .config import (  # noqa: E402
     ACTIVITY_PUBLIC_PREFIX,
@@ -27,6 +30,10 @@ from .config import (  # noqa: E402
     AUTOMATION_RULES_STATE_PATH,
     CONSOLE_PREFIXES,
     HEALTH_PUBLIC_PREFIX,
+    JOB_MAX_PENDING,
+    JOB_MAX_WORKERS,
+    JOB_RETENTION,
+    JOB_STATE_PATH,
     MAX_RATE_KEYS,
     MEDIA_PUBLIC_PREFIX,
     NOTIFICATION_STATE_PATH,
@@ -57,6 +64,8 @@ from .routes.csrf_guard import (  # noqa: E402
     require_action_guard,
 )
 from .routes.dashboard import router as dashboard_router  # noqa: E402
+from .routes.events import router as events_router  # noqa: E402
+from .routes.jobs import router as jobs_router  # noqa: E402
 from .routes.media_automation import router as media_automation_router  # noqa: E402
 from .routes.notifications import router as notifications_router  # noqa: E402
 from .routes.torrents import (  # noqa: E402
@@ -82,6 +91,7 @@ from .services.ratio_monitor import RatioMonitor  # noqa: E402
 from .services.stats import StatsStore  # noqa: E402
 from .services.tracker_stats import TrackerStatsStore  # noqa: E402
 from .services.monitoring import close_http_clients, initialize_http_clients  # noqa: E402
+from .services.live import VALID_TOPICS, build_live_hub  # noqa: E402
 
 from logging import basicConfig, getLogger  # noqa: E402
 
@@ -103,20 +113,71 @@ def build_client() -> QBittorrentClient:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await initialize_http_clients()
+    await app.state.section_hub.start()
     await app.state.media_automation.start()
     await app.state.auto_relink.start()
     yield
+    await app.state.section_hub.stop()
     await app.state.auto_relink.stop()
     await app.state.media_automation.stop()
+    await app.state.job_manager.close()
     getattr(app.state.stats, "flush", lambda: None)()
     getattr(app.state.tracker_stats, "flush", lambda: None)()
     await close_http_clients()
     await app.state.qbit.close()
+    await app.state.section_hub.close()
 
 
 init_sentry(os.getenv("SENTRY_DSN", ""), os.getenv("SENTRY_ENVIRONMENT", "production"))
 
 app = FastAPI(title="Torrent Panel", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+
+
+def _asset_version() -> str:
+    manifest_path = STATIC_DIR / "dist" / "asset-version.json"
+    expected_order = (
+        "app.min.css",
+        "console.min.css",
+        "app.min.js",
+        "console.min.js",
+    )
+    expected_files = set(expected_order)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            return "invalid"
+        version = str(manifest.get("version") or "")
+        files = manifest.get("files")
+        if (
+            len(version) != 12
+            or any(character not in "0123456789abcdef" for character in version)
+            or not isinstance(files, dict)
+            or set(files) != expected_files
+        ):
+            return "invalid"
+        combined = hashlib.sha256()
+        for relative in expected_order:
+            expected = files[relative]
+            if (
+                not isinstance(expected, str)
+                or len(expected) != 64
+                or any(character not in "0123456789abcdef" for character in expected)
+            ):
+                return "invalid"
+            actual = hashlib.sha256(
+                (STATIC_DIR / "dist" / relative).read_bytes()
+            ).hexdigest()
+            if actual != expected:
+                return "invalid"
+            combined.update(expected.encode("ascii"))
+        if combined.hexdigest()[:12] != version:
+            return "invalid"
+        return version
+    except (OSError, TypeError, ValueError):
+        return "invalid"
+
+
+ASSET_VERSION = _asset_version()
 
 _COMMON_CSS_DIR = Path(sys.modules["common"].__file__).resolve().parent / "css"
 app.mount("/common/css", StaticFiles(directory=str(_COMMON_CSS_DIR)), name="common-css")
@@ -128,6 +189,26 @@ for prefix in CONSOLE_PREFIXES:
         app.mount(f"{prefix}/static", StaticFiles(directory=STATIC_DIR), name=f"{prefix.strip('/').replace('-', '_')}_static")
 
 app.state.qbit = build_client()
+
+
+def _job_error(exc: BaseException) -> dict[str, str]:
+    if isinstance(exc, QbitError):
+        return safe_error(
+            code=exc.code,
+            message=exc.public_message,
+            recovery=exc.recovery,
+        )
+    return safe_error()
+
+
+app.state.job_manager = JobManager(
+    max_workers=JOB_MAX_WORKERS,
+    max_pending=JOB_MAX_PENDING,
+    retention=JOB_RETENTION,
+    state_path=JOB_STATE_PATH,
+    error_factory=_job_error,
+)
+app.state.section_hub = build_live_hub(app, app.state.job_manager)
 app.state.media_automation = MediaAutomationManager(app.state.qbit, build_media_automation_config())
 app.state.notifications = NotificationCenter(NOTIFICATION_STATE_PATH)
 app.state.auto_relink = AutoRelinkManager(
@@ -171,12 +252,23 @@ async def add_security_headers(request: Request, call_next):
         from .services.monitoring import invalidate_monitoring_caches
         invalidate_monitoring_caches(request.app)
         invalidate_tracker_index()
+        for topic in VALID_TOPICS:
+            request.app.state.section_hub.invalidate(topic)
     response.headers["Content-Security-Policy"] = build_csp()
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    if (
+    is_versioned_asset = (
+        "/static/dist/" in request.url.path
+        and request.query_params.get("v") == ASSET_VERSION
+        and ASSET_VERSION != "invalid"
+    )
+    if is_versioned_asset:
+        response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    elif "/static/dist/" in request.url.path:
+        response.headers["Cache-Control"] = "private, no-cache"
+    elif (
         "/api/" in request.url.path
         or request.url.path == "/"
         or request.url.path.endswith("/")
@@ -311,6 +403,8 @@ if PUBLIC_PREFIX:
 # Include all routers under /api and prefixed variants
 app.include_router(torrents_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
+app.include_router(events_router, prefix="/api")
+app.include_router(jobs_router, prefix="/api")
 app.include_router(media_automation_router, prefix="/api")
 app.include_router(notifications_router, prefix="/api")
 app.include_router(automations_router, prefix="/api")
@@ -318,6 +412,8 @@ app.include_router(automations_router, prefix="/api")
 if PUBLIC_PREFIX:
     app.include_router(torrents_router, prefix=f"{PUBLIC_PREFIX}/api")
     app.include_router(dashboard_router, prefix=f"{PUBLIC_PREFIX}/api")
+    app.include_router(events_router, prefix=f"{PUBLIC_PREFIX}/api")
+    app.include_router(jobs_router, prefix=f"{PUBLIC_PREFIX}/api")
     app.include_router(media_automation_router, prefix=f"{PUBLIC_PREFIX}/api")
     app.include_router(notifications_router, prefix=f"{PUBLIC_PREFIX}/api")
     app.include_router(automations_router, prefix=f"{PUBLIC_PREFIX}/api")
@@ -325,5 +421,7 @@ if PUBLIC_PREFIX:
 for prefix in CONSOLE_PREFIXES:
     if prefix:
         app.include_router(dashboard_router, prefix=f"{prefix}/api")
+        app.include_router(events_router, prefix=f"{prefix}/api")
+        app.include_router(jobs_router, prefix=f"{prefix}/api")
         app.include_router(notifications_router, prefix=f"{prefix}/api")
         app.include_router(media_automation_router, prefix=f"{prefix}/api")
