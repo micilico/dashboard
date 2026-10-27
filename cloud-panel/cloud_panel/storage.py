@@ -12,13 +12,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from stat import S_ISREG
 from typing import Callable
 
 import httpx
 from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
-from .config import FOLDER_SIZE_CACHE_MAX_ENTRIES, MOUNT_PATH, PATH_LOCK_MAX_ENTRIES, SCANDIR_CACHE_MAX_ENTRIES, SCANDIR_CACHE_TTL, SEARCH_CACHE_MAX_ENTRIES, SEARCH_CACHE_TTL, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, UPLOAD_CHUNK_SIZE
+from .config import FOLDER_SIZE_CACHE_MAX_ENTRIES, MOUNT_PATH, PATH_LOCK_MAX_ENTRIES, RESOLVE_CACHE_MAX_ENTRIES, RESOLVE_CACHE_TTL, SCANDIR_CACHE_MAX_ENTRIES, SCANDIR_CACHE_TTL, SEARCH_CACHE_MAX_ENTRIES, SEARCH_CACHE_TTL, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH, TEXT_EDITOR_MAX_BYTES, TRASH_DIR_NAME, UPLOAD_CHUNK_SIZE
 from .rclone_refresh import schedule_targeted_refresh
 from .security import resolve_path_within
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _scandir_cache: dict[tuple[str, float], tuple[float, list[dict]]] = {}
 _folder_size_cache: dict[tuple[str, float], tuple[float, int]] = {}
+_resolve_cache: dict[str, tuple[float, str]] = {}
 _path_locks: dict[str, threading.Lock] = {}
 _search_cache: dict[tuple[str, str, int], tuple[float, list[dict]]] = {}
 _path_locks_guard = threading.Lock()
@@ -49,12 +51,43 @@ _search_inflight: dict[tuple, _InflightResult] = {}
 
 
 def _resolve(relative_path: str, *, must_exist: bool = True) -> str:
-    return resolve_path_within(
+    """Resolve a client path, memoizing the containment check per path.
+
+    Every resolution walks the path one component at a time (``realpath``) and
+    stats the result. On a remote/FUSE mount those calls add up, and the same
+    file is requested repeatedly (listing, preview, thumbnail, download). The
+    memo keeps the security check identical while making repeat lookups free;
+    it is dropped on every mutation and expires after ``RESOLVE_CACHE_TTL``.
+    """
+    key = relative_path if isinstance(relative_path, str) else ""
+    now = time.monotonic()
+    with _cache_guard:
+        cached = _resolve_cache.get(key)
+    if cached is not None and now - cached[0] < RESOLVE_CACHE_TTL:
+        return cached[1]
+
+    resolved = resolve_path_within(
         MOUNT_PATH,
         relative_path,
         must_exist=must_exist,
         base_real=_mount_real(),
     )
+    if must_exist:
+        with _cache_guard:
+            if len(_resolve_cache) >= RESOLVE_CACHE_MAX_ENTRIES:
+                for stale_key, _value in sorted(
+                    _resolve_cache.items(), key=lambda item: item[1][0]
+                )[: max(1, len(_resolve_cache) // 4)]:
+                    _resolve_cache.pop(stale_key, None)
+            _resolve_cache[key] = (now, resolved)
+    return resolved
+
+
+def forget_resolution(relative_path: str) -> None:
+    """Drop one memoized resolution so the next call revalidates on the mount."""
+    key = relative_path if isinstance(relative_path, str) else ""
+    with _cache_guard:
+        _resolve_cache.pop(key, None)
 
 
 def _canonical_from_target(target: str) -> str:
@@ -170,6 +203,7 @@ def clear_scandir_cache() -> None:
         _cache_generation += 1
         _scandir_cache.clear()
         _search_cache.clear()
+        _resolve_cache.clear()
 
 
 def clear_folder_size_cache() -> None:
@@ -545,12 +579,21 @@ def _remove_if_exists(path: str) -> None:
         pass
 
 
-def download_file(relative_path: str) -> str:
-    """Return absolute path for file download."""
+def download_file(relative_path: str) -> tuple[str, os.stat_result]:
+    """Return the absolute path and metadata for a file download.
+
+    The stat is returned so the HTTP layer can build ``Content-Length``,
+    ``Last-Modified`` and ``ETag`` without stat-ing the mount a second time.
+    """
     file_path = _resolve(relative_path)
-    if not os.path.isfile(file_path):
+    try:
+        stat_result = os.stat(file_path)
+    except OSError as exc:
+        forget_resolution(relative_path)
+        raise ValueError('Fichier introuvable') from exc
+    if not S_ISREG(stat_result.st_mode):
         raise ValueError('Fichier introuvable')
-    return file_path
+    return file_path, stat_result
 
 
 def create_directory(relative_path: str, dirname: str) -> dict:

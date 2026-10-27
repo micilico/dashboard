@@ -10,11 +10,12 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Path as FPath, Query
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from common import error_detail
 
-from ..config import MOUNT_PATH, PUBLIC_PREFIX, SHARE_MAX_EXPIRY_DAYS
+from ..config import MOUNT_PATH, PUBLIC_PREFIX, SHARE_MAX_EXPIRY_DAYS, SHARE_PASSWORD_COOKIE_SECONDS
+from ..file_response import StreamingFileResponse
 from ..services.share import (
     create_file_share_link,
     create_folder_share_link,
@@ -35,7 +36,9 @@ from .csrf_guard import client_key, require_action_guard
 
 router = APIRouter()
 
-_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud</title><link rel="stylesheet" href="{assets}/static/share.css?v=20260725-a"></head><body class="{body_class}"><main class="share-shell">{body}</main></body></html>"""
+_SHARE_ASSET_VERSION = "20261027-a"
+
+_BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud</title><link rel="stylesheet" href="{assets}/static/share.css?v=""" + _SHARE_ASSET_VERSION + """"><script src="{assets}/static/share.js?v=""" + _SHARE_ASSET_VERSION + """" defer></script></head><body class="{body_class}"><main class="share-shell">{body}</main></body></html>"""
 
 
 def _asset_prefix() -> str:
@@ -44,6 +47,21 @@ def _asset_prefix() -> str:
 
 def _public_download_path(token: str) -> str:
     return f"{PUBLIC_PREFIX}/download/{quote(token)}" if PUBLIC_PREFIX else f"/download/{quote(token)}"
+
+
+def _file_response(
+    request: Request,
+    path: str,
+    filename: str,
+    media_type: str | None = None,
+) -> StreamingFileResponse:
+    """Stream a shared file with the panel's large-read, bounded response."""
+    return StreamingFileResponse(
+        path,
+        filename=filename,
+        media_type=media_type,
+        limiter=getattr(request.app.state, "download_limiter", None),
+    )
 
 
 def _render_page(title: str, body: str, body_class: str = "") -> str:
@@ -96,6 +114,24 @@ def _notice_card(title: str, message: str, variant: str = "error") -> str:
         title,
         '<section class="share-card"><div class="logo">' + _SLICE_LOGO + '</div>' + extra + '<div class="ft">Cloud &middot; Lien sécurisé</div></section>',
     )
+
+
+def _share_error(
+    wants_json: bool,
+    code: str,
+    title: str,
+    message: str,
+    variant: str,
+    status_code: int,
+):
+    """Public share errors: JSON for the folder-download client, HTML otherwise."""
+    if wants_json:
+        return JSONResponse(
+            {"error": {"code": code, "message": message}},
+            status_code=status_code,
+            headers={"Cache-Control": "no-store"},
+        )
+    return HTMLResponse(content=_notice_card(title, message, variant), status_code=status_code)
 
 
 def _password_cookie_name(token: str) -> str:
@@ -191,7 +227,11 @@ def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
             "name": entry.name,
             "path": item_path,
             "is_dir": entry.is_dir(),
+            # Symlinks can escape the share or create loops; the browser
+            # downloader skips them even though they stay browsable.
+            "is_symlink": entry.is_symlink(),
             "size": "" if entry.is_dir() else _format_size(stat.st_size),
+            "size_bytes": 0 if entry.is_dir() else stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M"),
             "category": category,
             "previewable": (not entry.is_dir()) and category in ("video", "audio", "image", "pdf"),
@@ -208,6 +248,7 @@ def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
         "items": items,
         "current_path": current_relative,
         "parent_path": "/".join(parts[:-1]) if parts else "",
+        "folder_name": os.path.basename(current_dir.rstrip(os.sep)) or "Racine",
         "breadcrumbs": breadcrumbs,
     }
 
@@ -237,6 +278,9 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
             preview_url = _folder_url(token, item["path"], preview=1, password=password_param)
             actions = (
                 '<a class="mini-btn" href="' + html.escape(open_url, quote=True) + '">Ouvrir</a>'
+                '<button type="button" class="mini-btn js-download-folder"'
+                ' data-folder-path="' + html.escape(item["path"], quote=True) + '"'
+                ' data-folder-name="' + html.escape(item["name"], quote=True) + '">Télécharger</button>'
                 if item["is_dir"]
                 else (
                     ('<a class="mini-btn" target="_blank" rel="noopener noreferrer" href="' + html.escape(preview_url, quote=True) + '">Aperçu</a>' if item["previewable"] else "")
@@ -271,6 +315,40 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
     if listing["current_path"]:
         parent = '<p class="folder-parent"><a class="mini-btn" href="' + html.escape(_folder_url(token, listing["parent_path"], password=password_param), quote=True) + '">Retour au dossier parent</a></p>'
 
+    folder_name = listing["folder_name"] if listing["current_path"] else (link.get("filename") or listing["folder_name"])
+    download_toolbar = (
+        '<div class="folder-toolbar">'
+        '<button type="button" class="btn folder-download js-download-folder"'
+        ' data-folder-path="' + html.escape(listing["current_path"], quote=True) + '"'
+        ' data-folder-name="' + html.escape(folder_name, quote=True) + '">'
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">'
+        '<path d="M12 4v10m0 0 3.5-3.5M12 14l-3.5-3.5M5 18.25h14"/></svg>'
+        'Télécharger le dossier</button>'
+        '<p class="folder-hint">Choisissez un dossier de destination : un sous-dossier « '
+        + html.escape(folder_name)
+        + ' » y sera créé.</p>'
+        '</div>'
+        '<div class="download-panel" id="downloadPanel" hidden>'
+        '<div class="download-head">'
+        '<span id="downloadStatus" role="status" aria-live="polite">Préparation…</span>'
+        '<button type="button" class="mini-btn" id="downloadCancel">Annuler</button>'
+        '</div>'
+        '<div class="download-bar" id="downloadBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">'
+        '<span class="download-bar-fill" id="downloadBarFill"></span>'
+        '</div>'
+        '<p class="download-detail" id="downloadDetail"></p>'
+        '<div class="download-error" id="downloadError" hidden></div>'
+        '</div>'
+        '<details class="download-fallback" id="downloadFallback" hidden>'
+        '<summary>Autre méthode : téléchargement multiple</summary>'
+        '<p>Les fichiers seront téléchargés à plat dans le dossier de téléchargements du navigateur. '
+        'Les sous-dossiers ne sont pas recréés et les doublons sont renommés automatiquement. '
+        'Autorisez les téléchargements multiples si le navigateur le demande.</p>'
+        '<button type="button" class="mini-btn" id="downloadCascade">Télécharger les fichiers un par un</button>'
+        '</details>'
+        '<noscript><p class="folder-hint">Activez JavaScript pour télécharger le dossier entier.</p></noscript>'
+    )
+
     return _render_page(
         link.get("filename") or "Dossier partage",
         (
@@ -279,13 +357,14 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3.75 6.75a2 2 0 0 1 2-2H10l2 2.5h6.25a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2z"/></svg>'
             '</div><div class="folder-title"><h1>'
             + html.escape(link.get("filename") or "Dossier partage")
-            + '</h1><p>Dossier partage sans archive, consultable en ligne.</p></div></div>'
+            + '</h1><p>Dossier partagé : navigation et téléchargement du dossier.</p></div></div>'
             '<div class="meta-grid">'
             '<div class="mi"><div class="mi-lbl">Contenu</div><div class="mi-val">' + _format_size(int(link.get("size_bytes") or 0)) + '</div></div>'
             '<div class="mi"><div class="mi-lbl">Telechargements</div><div class="mi-val">' + str(int(link.get("download_count") or 0)) + '</div></div>'
             '<div class="mi"><div class="mi-lbl">Expire le</div><div class="mi-val">' + html.escape(expires) + '</div></div>'
             '<div class="mi"><div class="mi-lbl">Type</div><div class="mi-val">Dossier</div></div>'
             '</div><nav class="folder-crumbs" aria-label="Chemin">' + "".join(crumbs) + "</nav>"
+            + download_toolbar
             + parent
             + content
             + '<div class="ft ft-center">Cloud &middot; Dossier sécurisé</div></section>'
@@ -412,17 +491,20 @@ async def download_share(
     token: str = FPath(...),
     dl: bool = Query(default=False),
     preview: bool = Query(default=False),
+    list_only: bool = Query(default=False, alias="list"),
+    count: int = Query(default=1, ge=0, le=1),
     path: str = Query(default=""),
     password: Optional[str] = Query(default=None),
 ):
+    wants_json = bool(list_only)
     try:
         link = _get_share_link(token)
         if not link:
-            return HTMLResponse(content=_notice_card("Lien invalide", "Ce lien n'existe pas.", "error"), status_code=404)
+            return _share_error(wants_json, "share_not_found", "Lien invalide", "Ce lien n'existe pas.", "error", 404)
         if link["is_revoked"]:
-            return HTMLResponse(content=_notice_card("Lien revoque", "Ce lien a ete revoque.", "warn"), status_code=403)
+            return _share_error(wants_json, "share_revoked", "Lien revoque", "Ce lien a ete revoque.", "warn", 403)
         if link["expires_at"] and link["expires_at"] < time.time():
-            return HTMLResponse(content=_notice_card("Lien expire", "Ce lien a expire.", "error"), status_code=403)
+            return _share_error(wants_json, "share_expired", "Lien expire", "Ce lien a expire.", "error", 403)
 
         pw_hash = link.get("password_hash")
         if pw_hash:
@@ -435,18 +517,28 @@ async def download_share(
                     response.set_cookie(
                         _password_cookie_name(token),
                         _password_cookie_value(token, pw_hash),
-                        max_age=600,
+                        max_age=SHARE_PASSWORD_COOKIE_SECONDS,
                         httponly=True,
                         secure=request.url.scheme == "https",
                         samesite="Lax",
                     )
                     return response
                 if not password:
+                    if wants_json:
+                        return _share_error(
+                            True, "share_password_required", "Mot de passe requis",
+                            "Ce contenu est protégé par un mot de passe.", "error", 401,
+                        )
                     return HTMLResponse(content=PASSWORD_FORM, status_code=401)
                 if not _share_attempt_allowed(request, token):
-                    return HTMLResponse(
-                        content=_notice_card("Trop de tentatives", "Trop de tentatives de connexion. Réessayez plus tard.", "error"),
-                        status_code=429,
+                    return _share_error(
+                        wants_json, "share_rate_limited", "Trop de tentatives",
+                        "Trop de tentatives de connexion. Réessayez plus tard.", "error", 429,
+                    )
+                if wants_json:
+                    return _share_error(
+                        True, "share_password_invalid", "Mot de passe incorrect",
+                        "Le mot de passe fourni est incorrect.", "error", 403,
                     )
                 return HTMLResponse(content=PASSWORD_WRONG, status_code=403)
 
@@ -455,24 +547,72 @@ async def download_share(
         if is_dir:
             shared_root = resolve_path_within(MOUNT_PATH, link["path"], must_exist=True)
             if not os.path.isdir(shared_root):
-                return HTMLResponse(content=_notice_card("Dossier introuvable", "Ce dossier n'est plus disponible.", "error"), status_code=404)
+                return _share_error(
+                    wants_json, "share_folder_missing", "Dossier introuvable",
+                    "Ce dossier n'est plus disponible.", "error", 404,
+                )
 
             requested_path = (path or "").strip("/")
             current_target = resolve_path_within(shared_root, requested_path or ".", must_exist=True)
             if os.path.isfile(current_target):
+                if list_only:
+                    return _share_error(
+                        wants_json, "share_not_a_folder", "Dossier requis",
+                        "La liste demandée ne correspond pas à un dossier.", "error", 400,
+                    )
                 if preview:
-                    return FileResponse(current_target, filename=os.path.basename(current_target))
+                    return _file_response(request, current_target, os.path.basename(current_target))
                 if dl:
-                    increment_download_count(token)
-                    return FileResponse(current_target, filename=os.path.basename(current_target), media_type="application/octet-stream")
+                    if count:
+                        increment_download_count(token)
+                    return _file_response(
+                        request,
+                        current_target,
+                        os.path.basename(current_target),
+                        media_type="application/octet-stream",
+                    )
                 return RedirectResponse(url=_folder_url(token, os.path.dirname(requested_path), password=password))
 
             listing = _shared_folder_listing(shared_root, requested_path)
+            if list_only:
+                if count:
+                    increment_download_count(token)
+                folder_name = (
+                    os.path.basename(current_target.rstrip(os.sep)) or link["filename"]
+                    if requested_path
+                    else link["filename"]
+                )
+                return JSONResponse(
+                    {
+                        "current_path": listing["current_path"],
+                        "parent_path": listing["parent_path"],
+                        "folder_name": folder_name,
+                        "items": [
+                            {
+                                "name": item["name"],
+                                "path": item["path"],
+                                "is_dir": item["is_dir"],
+                                "is_symlink": item.get("is_symlink", False),
+                                "size_bytes": item.get("size_bytes", 0),
+                            }
+                            for item in listing["items"]
+                        ],
+                    },
+                    headers={"Cache-Control": "no-store"},
+                )
             return HTMLResponse(content=_folder_page(token, link, listing, password))
 
+        if list_only:
+            return _share_error(
+                wants_json, "share_not_a_folder", "Dossier requis",
+                "Ce lien de partage ne correspond pas à un dossier.", "error", 400,
+            )
+
         if dl:
-            file_path, filename = get_share_download_path(token)
-            return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
+            if count:
+                increment_download_count(token)
+            file_path, filename = get_share_download_path(token, increment=False)
+            return _file_response(request, file_path, filename, media_type="application/octet-stream")
 
         file_path, filename = get_share_download_path(token, increment=False)
         size_formatted = _format_size(os.path.getsize(file_path))
@@ -494,14 +634,14 @@ async def download_share(
         page = _download_page(filename, size_formatted, category, file_type, download_count, expires_str, dl_url)
         return HTMLResponse(content=page)
     except ValueError:
-        return HTMLResponse(
-            content=_notice_card("Lien invalide", "Le contenu demandé est indisponible.", "error"),
-            status_code=404,
+        return _share_error(
+            wants_json, "share_invalid_path", "Lien invalide",
+            "Le contenu demandé est indisponible.", "error", 404,
         )
     except Exception:
-        return HTMLResponse(
-            content=_notice_card("Erreur", "Le téléchargement est temporairement indisponible.", "error"),
-            status_code=500,
+        return _share_error(
+            wants_json, "share_error", "Erreur",
+            "Le téléchargement est temporairement indisponible.", "error", 500,
         )
 
 

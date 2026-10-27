@@ -12,6 +12,7 @@ venv/
 *.log
 logs/
 **/logs/
+cloud-panel/data/
 torrent-panel/data/media-automation-state.json
 torrent-panel/data/notification-state.json
 torrent-panel/data/stats-state.json

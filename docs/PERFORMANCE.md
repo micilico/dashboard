@@ -60,6 +60,27 @@ run in bounded background queues. Interactive file operations use a separate
 thread capacity. A restarted process marks unfinished work as interrupted and
 does not replay a mutation automatically.
 
+## Cloud download latency
+
+A download must not spend its first seconds on bookkeeping. The path is built
+so that the first byte is only limited by the rclone mount itself:
+
+- path resolution is memoized per path (`CLOUD_PANEL_RESOLVE_CACHE_TTL`), so a
+  repeated preview, thumbnail or download does not re-walk the mount;
+- the download stat is reused for `Content-Length`/`Last-Modified`/`ETag`
+  instead of stat-ing the same file twice;
+- bodies are streamed in `CLOUD_PANEL_DOWNLOAD_CHUNK_SIZE` (1 MiB) reads on a
+  dedicated limiter (`CLOUD_PANEL_DOWNLOAD_STREAM_LIMIT`), so a multi-gigabyte
+  transfer cannot starve listings, searches or SSE;
+- the security headers middleware is pure ASGI: it rewrites
+  `http.response.start` only and never copies a response body;
+- Caddy never compresses or buffers `/api/files/download` or the public
+  `/download/*` share route;
+- grid tiles use `/api/files/thumbnail`, a downscaled WebP cached under `/tmp`,
+  instead of downloading full images;
+- the browser asks for the first 256 KiB when the download item is pressed, so
+  the rclone VFS opens the file before the real request arrives.
+
 ## rclone and static assets
 
 The rclone mount keeps `--dir-cache-time 72h`, full VFS cache mode and its

@@ -26,6 +26,21 @@ TRUSTED_PROXY_IPS = {
     if item.strip()
 }
 UPLOAD_CHUNK_SIZE = int(os.getenv("CLOUD_PANEL_UPLOAD_CHUNK_SIZE", str(1024 * 1024)))
+# File transfers read the (remote) mount in large blocks so a download spends
+# its time on bytes instead of on thread hand-offs. DEDICATED_DOWNLOAD_STREAMS
+# bounds how many transfers may occupy that pool, keeping interactive requests
+# responsive while a big file is streaming.
+DOWNLOAD_CHUNK_SIZE = int(os.getenv("CLOUD_PANEL_DOWNLOAD_CHUNK_SIZE", str(1024 * 1024)))
+DOWNLOAD_STREAM_LIMIT = int(os.getenv("CLOUD_PANEL_DOWNLOAD_STREAM_LIMIT", "6"))
+RESOLVE_CACHE_TTL = float(os.getenv("CLOUD_PANEL_RESOLVE_CACHE_TTL", "15"))
+RESOLVE_CACHE_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_RESOLVE_CACHE_MAX_ENTRIES", "512"))
+THUMBNAIL_WIDTH = int(os.getenv("CLOUD_PANEL_THUMBNAIL_WIDTH", "320"))
+THUMBNAIL_MAX_SOURCE_BYTES = int(os.getenv("CLOUD_PANEL_THUMBNAIL_MAX_SOURCE_BYTES", str(64 * 1024 * 1024)))
+THUMBNAIL_CACHE_DIR = os.getenv("CLOUD_PANEL_THUMBNAIL_CACHE_DIR", "").strip()
+THUMBNAIL_CACHE_MAX_FILES = int(os.getenv("CLOUD_PANEL_THUMBNAIL_CACHE_MAX_FILES", "1024"))
+THUMBNAIL_CONCURRENCY = int(os.getenv("CLOUD_PANEL_THUMBNAIL_CONCURRENCY", "3"))
+THUMBNAIL_RATE_LIMIT_CALLS = int(os.getenv("CLOUD_PANEL_THUMBNAIL_RATE_LIMIT_CALLS", "600"))
+THUMBNAIL_RATE_LIMIT_SECONDS = int(os.getenv("CLOUD_PANEL_THUMBNAIL_RATE_LIMIT_SECONDS", "60"))
 SCANDIR_CACHE_TTL = float(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_TTL", "0.5"))
 SCANDIR_CACHE_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_SCANDIR_CACHE_MAX_ENTRIES", "256"))
 FOLDER_SIZE_CACHE_MAX_ENTRIES = int(os.getenv("CLOUD_PANEL_FOLDER_SIZE_CACHE_MAX_ENTRIES", "128"))
@@ -41,6 +56,9 @@ TEXT_EDITOR_MAX_BYTES = int(os.getenv("CLOUD_PANEL_TEXT_EDITOR_MAX_BYTES", str(1
 SHARE_TOKEN_BYTES = int(os.getenv("CLOUD_PANEL_SHARE_TOKEN_BYTES", "24"))
 SHARE_DEFAULT_EXPIRY_DAYS = int(os.getenv("CLOUD_PANEL_SHARE_DEFAULT_EXPIRY_DAYS", "7"))
 SHARE_MAX_EXPIRY_DAYS = int(os.getenv("CLOUD_PANEL_SHARE_MAX_EXPIRY_DAYS", "30"))
+# Password unlock cookie lifetime. Folder downloads can take hours; a 10 minute
+# cookie used to break them mid-transfer. 12 h matches the CSRF token lifetime.
+SHARE_PASSWORD_COOKIE_SECONDS = int(os.getenv("CLOUD_PANEL_SHARE_PASSWORD_COOKIE_SECONDS", "43200"))
 
 # Background work uses a bounded heavy queue while blocking route work keeps
 # Starlette's independent interactive thread pool available.

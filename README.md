@@ -140,6 +140,14 @@ validation fonctionnelle, responsive et accessible sont dans
   passe optionnel protège le contenu ; les tentatives sont limitées en débit
   (`CLOUD_PANEL_SHARE_RATE_LIMIT_*`). Les API et l'interface Cloud Panel
   restent protégées par `basic_auth`.
+- Un lien de **dossier navigable** propose « Télécharger le dossier » sans
+  archive : `share.js` utilise la File System Access API pour écrire
+  l'arborescence dans un dossier choisi par le visiteur (progression,
+  annulation), avec un repli « téléchargement multiple » sur les navigateurs
+  non compatibles. Le cookie de mot de passe dure 12 h
+  (`CLOUD_PANEL_SHARE_PASSWORD_COOKIE_SECONDS`) pour ne pas casser un long
+  transfert. `/cloud-panel/static/share.js` doit rester dans la whitelist
+  `basic_auth` de Caddy, comme `share.css`.
 - Toute mutation exige un jeton CSRF et passe par une limite de débit.
 - La CSP interdit les scripts inline, les CDN et l’encapsulation.
 - Les erreurs sont structurées et nettoyées avant de parvenir au navigateur.

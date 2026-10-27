@@ -300,7 +300,8 @@ curl -I http://127.0.0.1:3130/healthz
 | GET | `/api/files` | Liste des fichiers (query: path, offset, limit, search) |
 | GET | `/api/files/search` | Recherche récursive des noms (query: q, path, offset, limit) |
 | POST | `/api/files/upload` | Upload fichier (streaming, conflit : rename/overwrite/skip) |
-| GET | `/api/files/download` | Téléchargement fichier (query: path) |
+| GET | `/api/files/download` | Téléchargement fichier (query: path) — streaming 1 Mio, `Range`/`HEAD` supportés |
+| GET | `/api/files/thumbnail` | Vignette WebP mise en cache pour la grille (query: path, w) |
 | GET | `/api/files/content` | Contenu texte d'un petit fichier (query: path) |
 | POST | `/api/files/write` | Écrire atomiquement un fichier texte |
 | POST | `/api/files/mkdir` | Créer un dossier |
@@ -318,6 +319,23 @@ curl -I http://127.0.0.1:3130/healthz
 | POST | `/api/files/sizes` | Taille récursive groupée |
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Readiness |
+
+### Téléchargement d'un dossier partagé (sans archive)
+
+Les liens « dossier navigable » (`/cloud-panel/download/<jeton>`) exposent :
+
+- `GET /download/{token}?list=1[&path=...][&count=0]` : liste JSON d'un dossier
+  (chemins relatifs au partage uniquement, tailles comprises) pour construire le
+  plan de téléchargement ;
+- `GET /download/{token}?path=...&dl=1&count=0` : fichier unitaire sans
+  incrémenter le compteur ; le premier `list=1` compte l'opération une fois.
+
+`static/share.js` (public, comme `share.css`) utilise la **File System Access
+API** : le visiteur choisit un dossier parent, le script recrée le sous-dossier
+du partage et streame chaque fichier dedans (progression + annulation). Aucun
+ZIP ni temporaire serveur. Repli « téléchargement multiple » pour les
+navigateurs sans `showDirectoryPicker` (fichiers à plat, sous-dossiers perdus).
+La whitelist `basic_auth` de Caddy doit inclure `/cloud-panel/static/share.js`.
 
 ## Variables d'environnement clés
 
@@ -414,6 +432,14 @@ pour alimenter le bouton « Réparer les fichiers manquants (N) ».
 | `CLOUD_PANEL_RATE_LIMIT_CALLS` | Limite d'appels (défaut 40) |
 | `CLOUD_PANEL_RATE_LIMIT_SECONDS` | Fenêtre de temps (défaut 60) |
 | `CLOUD_PANEL_CSRF_TOKEN_TTL_SECONDS` | Durée de vie du token CSRF (défaut 43200) |
+| `CLOUD_PANEL_SHARE_PASSWORD_COOKIE_SECONDS` | Durée du cookie après mot de passe d'un lien partagé (défaut 43200 = 12 h) |
+| `CLOUD_PANEL_DOWNLOAD_CHUNK_SIZE` | Taille des lectures de téléchargement (défaut 1 Mio) |
+| `CLOUD_PANEL_DOWNLOAD_STREAM_LIMIT` | Transferts simultanés sur le pool dédié (défaut 6) |
+| `CLOUD_PANEL_RESOLVE_CACHE_TTL` | Durée du cache de résolution de chemin (défaut 15 s) |
+| `CLOUD_PANEL_THUMBNAIL_WIDTH` | Largeur des vignettes de grille (défaut 320 px) |
+| `CLOUD_PANEL_THUMBNAIL_CACHE_DIR` | Dossier du cache de vignettes (défaut `<tmp>/cloud-panel-thumbs`) |
+| `CLOUD_PANEL_THUMBNAIL_MAX_SOURCE_BYTES` | Taille maximale d'une image source (défaut 64 Mio) |
+| `CLOUD_PANEL_THUMBNAIL_CONCURRENCY` | Encodages de vignettes simultanés (défaut 3) |
 
 ### Prowlarr Panel (`prowlarr-panel/.env`)
 

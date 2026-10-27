@@ -733,8 +733,47 @@ class TestDownloadFile:
         from cloud_panel.storage import download_file
 
         (tmp_path / "dl.txt").write_text("download me")
-        file_path = download_file("dl.txt")
+        file_path, stat_result = download_file("dl.txt")
         assert file_path == os.path.realpath(str(tmp_path / "dl.txt"))
+        assert stat_result.st_size == len("download me")
+
+    def test_download_resolution_is_memoized(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import download_file
+
+        (tmp_path / "dl.txt").write_text("download me")
+
+        calls = {"count": 0}
+        real_realpath = os.path.realpath
+
+        def counting_realpath(path, *args, **kwargs):
+            calls["count"] += 1
+            return real_realpath(path, *args, **kwargs)
+
+        monkeypatch.setattr(os.path, "realpath", counting_realpath)
+        download_file("dl.txt")
+        first = calls["count"]
+        monkeypatch.setattr(os.path, "realpath", real_realpath)
+        download_file("dl.txt")
+        assert first >= 1
+        # The second lookup is served from the memo: one stat, no path walk.
+        assert calls["count"] == first
+
+    def test_mutation_invalidates_resolution(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import importlib
+        import cloud_panel.storage
+        importlib.reload(cloud_panel.storage)
+        from cloud_panel.storage import download_file, rename_item
+
+        (tmp_path / "dl.txt").write_text("download me")
+        download_file("dl.txt")
+        rename_item("", "dl.txt", "renamed.txt")
+        with pytest.raises(ValueError, match="introuvable|hors du repertoire"):
+            download_file("dl.txt")
 
     def test_download_nonexistent_raises(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
@@ -1055,6 +1094,208 @@ class TestSharePasswordRateLimit:
         assert wrong2.status_code == 429, "second wrong password must be rate-limited"
         good = client.get(url, params={"password": "hunter2"}, follow_redirects=False)
         assert good.status_code == 303, "correct password must bypass the limiter"
+
+
+class TestShareFolderDownload:
+    """Public folder shares can download the whole tree without any archive."""
+
+    def _app(self, tmp_path, monkeypatch):
+        import importlib
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setattr("cloud_panel.config.DB_PATH", Path(tmp_path) / "test.db")
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import cloud_panel.models
+        import cloud_panel.services.share
+        import cloud_panel.routes.share
+        import cloud_panel.main
+
+        importlib.reload(cloud_panel.models)
+        importlib.reload(cloud_panel.services.share)
+        importlib.reload(cloud_panel.routes.share)
+        importlib.reload(cloud_panel.main)
+        return TestClient(cloud_panel.main.app)
+
+    def _seed(self, tmp_path):
+        shared = Path(tmp_path) / "shared"
+        (shared / "Saison 1").mkdir(parents=True)
+        (shared / "Extras").mkdir()
+        (shared / "note.txt").write_text("hello")
+        (shared / "Saison 1" / "ep1.mkv").write_bytes(b"x" * 100)
+        (shared / "Saison 1" / "ep2.mkv").write_bytes(b"y" * 200)
+
+    def _share(self, path="shared", password_hash=None):
+        from cloud_panel.models import create_share_link, _get_conn
+
+        _get_conn()
+        token = "folder_" + secrets.token_hex(6)
+        create_share_link(
+            path=path,
+            filename=os.path.basename(path) or "root",
+            is_dir=True,
+            size_bytes=0,
+            token=token,
+            password_hash=password_hash,
+            expiry_days=7,
+        )
+        return token
+
+    def test_folder_page_exposes_download_controls(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+
+        response = client.get(f"/cloud-panel/download/{token}")
+
+        assert response.status_code == 200
+        html = response.text
+        assert "Télécharger le dossier" in html
+        assert 'class="btn folder-download js-download-folder"' in html
+        assert 'data-folder-name="shared"' in html
+        assert 'data-folder-name="Saison 1"' in html
+        assert "share.js?v=" in html
+        assert 'id="downloadPanel"' in html
+        assert 'id="downloadCascade"' in html
+
+    def test_listing_is_relative_and_sized(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+
+        response = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        body = response.json()
+        assert body["current_path"] == ""
+        assert body["folder_name"] == "shared"
+        items = {item["name"]: item for item in body["items"]}
+        assert items["note.txt"]["path"] == "note.txt"
+        assert items["note.txt"]["size_bytes"] == 5
+        assert items["Saison 1"]["is_dir"] is True
+        assert str(tmp_path) not in response.text
+
+    def test_listing_is_scoped_to_a_subfolder(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+
+        body = client.get(
+            f"/cloud-panel/download/{token}", params={"list": 1, "path": "Saison 1"}
+        ).json()
+
+        assert body["current_path"] == "Saison 1"
+        assert body["folder_name"] == "Saison 1"
+        assert sorted(item["name"] for item in body["items"]) == ["ep1.mkv", "ep2.mkv"]
+
+    def test_listing_rejects_traversal(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+
+        response = client.get(
+            f"/cloud-panel/download/{token}", params={"list": 1, "path": "../"}
+        )
+
+        assert response.status_code in (403, 404)
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.json()["error"]["code"] in ("share_invalid_path", "share_folder_missing")
+
+    def test_listing_requires_the_password_cookie(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        from cloud_panel.routes.share import _hash_password
+
+        token = self._share(password_hash=_hash_password("secret"))
+
+        locked = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+        assert locked.status_code == 401
+        assert locked.json()["error"]["code"] == "share_password_required"
+
+        unlocked = client.get(
+            f"/cloud-panel/download/{token}",
+            params={"list": 1, "password": "secret"},
+            follow_redirects=False,
+        )
+        assert unlocked.status_code == 303
+        assert "Max-Age=43200" in unlocked.headers["set-cookie"]
+
+        allowed = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+        assert allowed.status_code == 200
+
+    def test_count_flag_avoids_inflating_the_download_counter(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+        from cloud_panel.models import get_share_link
+
+        before = get_share_link(token)["download_count"]
+
+        first = client.get(
+            f"/cloud-panel/download/{token}",
+            params={"path": "note.txt", "dl": 1, "count": 0},
+        )
+        assert first.status_code == 200
+        assert first.content == b"hello"
+        assert get_share_link(token)["download_count"] == before
+
+        second = client.get(
+            f"/cloud-panel/download/{token}", params={"path": "note.txt", "dl": 1}
+        )
+        assert second.status_code == 200
+        assert get_share_link(token)["download_count"] == before + 1
+
+    def test_listing_flags_symlinks_for_the_downloader(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+        try:
+            (Path(tmp_path) / "outside.txt").write_text("outside")
+            (Path(tmp_path) / "shared" / "link.txt").symlink_to(Path(tmp_path) / "outside.txt")
+        except OSError:
+            pytest.skip("symlinks are not available on this platform")
+
+        body = client.get(f"/cloud-panel/download/{token}", params={"list": 1}).json()
+
+        items = {item["name"]: item for item in body["items"]}
+        assert items["link.txt"]["is_symlink"] is True
+        assert items["note.txt"]["is_symlink"] is False
+
+    def test_listing_count_is_opt_out(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+        from cloud_panel.models import get_share_link
+
+        before = get_share_link(token)["download_count"]
+
+        client.get(f"/cloud-panel/download/{token}", params={"list": 1, "count": 0})
+        assert get_share_link(token)["download_count"] == before
+
+        client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+        assert get_share_link(token)["download_count"] == before + 1
+
+    def test_file_share_rejects_listing(self, tmp_path, monkeypatch):
+        (Path(tmp_path) / "file.txt").write_text("x")
+        client = self._app(tmp_path, monkeypatch)
+        from cloud_panel.models import create_share_link, _get_conn
+
+        _get_conn()
+        token = "file_" + secrets.token_hex(6)
+        create_share_link(
+            path="file.txt",
+            filename="file.txt",
+            is_dir=False,
+            size_bytes=1,
+            token=token,
+            password_hash=None,
+            expiry_days=7,
+        )
+
+        response = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "share_not_a_folder"
 
 
 class TestInternalArrangeBatch:
@@ -2502,3 +2743,200 @@ class TestCloudBackgroundJobs:
         cloud_panel.main.ASSET_VERSION = "invalid"
         invalid = client.get("/cloud-panel/static/dist/app.min.js?v=invalid")
         assert invalid.headers["cache-control"] == "no-store"
+
+
+class TestDownloadRoutes:
+    """The download path must stream large reads with a single stat."""
+
+    def _client(self, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        import importlib
+        monkeypatch.setattr("cloud_panel.config.MOUNT_PATH", str(tmp_path))
+        import cloud_panel.storage as storage
+        importlib.reload(storage)
+        import cloud_panel.services.thumbnails as thumbnails
+        importlib.reload(thumbnails)
+        import cloud_panel.main
+        importlib.reload(cloud_panel.main)
+        return cloud_panel.main.app, TestClient(cloud_panel.main.app)
+
+    def test_download_streams_full_body_with_metadata(self, tmp_path, monkeypatch):
+        _app, client = self._client(tmp_path, monkeypatch)
+        payload = b"0123456789abcdef" * (300 * 1024)
+        (tmp_path / "big.bin").write_bytes(payload)
+
+        response = client.get("/cloud-panel/api/files/download", params={"path": "big.bin"})
+
+        assert response.status_code == 200
+        assert response.content == payload
+        assert int(response.headers["content-length"]) == len(payload)
+        assert response.headers["accept-ranges"] == "bytes"
+        assert "filename=" in response.headers["content-disposition"]
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert "content-security-policy" in response.headers
+        assert response.headers["cache-control"] == "no-store"
+
+    def test_download_head_returns_metadata_only(self, tmp_path, monkeypatch):
+        _app, client = self._client(tmp_path, monkeypatch)
+        (tmp_path / "small.txt").write_text("hello")
+
+        response = client.head("/cloud-panel/api/files/download", params={"path": "small.txt"})
+
+        assert response.status_code == 200
+        assert response.content == b""
+        assert response.headers["content-length"] == "5"
+
+    def test_download_supports_byte_ranges(self, tmp_path, monkeypatch):
+        _app, client = self._client(tmp_path, monkeypatch)
+        (tmp_path / "media.bin").write_bytes(bytes(range(256)) * 4096)
+
+        response = client.get(
+            "/cloud-panel/api/files/download",
+            params={"path": "media.bin"},
+            headers={"Range": "bytes=0-1023"},
+        )
+
+        assert response.status_code == 206
+        assert len(response.content) == 1024
+        assert response.headers["content-range"].startswith("bytes 0-1023/")
+        assert response.content == bytes(range(256)) * 4
+
+    def test_download_rejects_traversal(self, tmp_path, monkeypatch):
+        _app, client = self._client(tmp_path, monkeypatch)
+        (tmp_path / "safe.txt").write_text("safe")
+
+        response = client.get("/cloud-panel/api/files/download", params={"path": "../../etc/passwd"})
+
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "path_error"
+
+    def test_thumbnail_serves_cached_webp(self, tmp_path, monkeypatch):
+        app, client = self._client(tmp_path, monkeypatch)
+        cache_dir = tmp_path / "thumbs"
+        import cloud_panel.services.thumbnails as thumbnails
+        monkeypatch.setattr(thumbnails, "THUMBNAIL_CACHE_DIR", str(cache_dir))
+        monkeypatch.setattr(thumbnails, "_created_since_prune", 0)
+
+        from PIL import Image
+        source = tmp_path / "photo.png"
+        Image.new("RGB", (1600, 1200), (30, 60, 120)).save(source)
+
+        first = client.get("/cloud-panel/api/files/thumbnail", params={"path": "photo.png"})
+        assert first.status_code == 200
+        assert first.headers["content-type"] == "image/webp"
+        assert first.headers["cache-control"] == "private, max-age=3600"
+        cached = list(cache_dir.glob("*.webp"))
+        assert len(cached) == 1
+        with Image.open(cached[0]) as thumbnail:
+            assert thumbnail.width <= 320
+
+        second = client.get("/cloud-panel/api/files/thumbnail", params={"path": "photo.png"})
+        assert second.status_code == 200
+        assert second.content == first.content
+
+    def test_thumbnail_rejects_unsupported_file(self, tmp_path, monkeypatch):
+        _app, client = self._client(tmp_path, monkeypatch)
+        (tmp_path / "notes.txt").write_text("hello")
+
+        response = client.get("/cloud-panel/api/files/thumbnail", params={"path": "notes.txt"})
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "thumbnail_unavailable"
+
+    def test_thumbnail_invalidates_when_the_source_changes(self, tmp_path, monkeypatch):
+        _app, client = self._client(tmp_path, monkeypatch)
+        import cloud_panel.services.thumbnails as thumbnails
+        monkeypatch.setattr(thumbnails, "THUMBNAIL_CACHE_DIR", str(tmp_path / "thumbs"))
+        monkeypatch.setattr(thumbnails, "_created_since_prune", 0)
+
+        from PIL import Image
+        source = tmp_path / "photo.png"
+        Image.new("RGB", (400, 300), (0, 0, 0)).save(source)
+        first = client.get("/cloud-panel/api/files/thumbnail", params={"path": "photo.png"})
+
+        Image.new("RGB", (400, 300), (255, 255, 255)).save(source)
+        os.utime(source, (source.stat().st_atime + 10, source.stat().st_mtime + 10))
+        second = client.get("/cloud-panel/api/files/thumbnail", params={"path": "photo.png"})
+
+        assert first.content != second.content
+
+    def test_download_uses_dedicated_stream_limiter(self, tmp_path, monkeypatch):
+        app, _client = self._client(tmp_path, monkeypatch)
+        (tmp_path / "f.txt").write_text("x")
+
+        from fastapi.testclient import TestClient
+        with TestClient(app) as client:
+            response = client.get("/cloud-panel/api/files/download", params={"path": "f.txt"})
+
+        assert response.status_code == 200
+        assert app.state.download_limiter is not None
+
+
+class TestStreamingFileResponse:
+    """The streaming response must never truncate a successful download."""
+
+    @staticmethod
+    def _call(response):
+        messages = []
+
+        async def send(message):
+            messages.append(message)
+
+        asyncio.run(response({"type": "http", "method": "GET", "headers": []}, None, send))
+        return messages
+
+    def test_streams_the_whole_file(self, tmp_path):
+        from cloud_panel.file_response import StreamingFileResponse
+
+        path = tmp_path / "payload.bin"
+        payload = b"z" * (3 * 1024 * 1024 + 7)
+        path.write_bytes(payload)
+        response = StreamingFileResponse(path, stat_result=os.stat(path))
+
+        messages = self._call(response)
+
+        assert messages[0]["status"] == 200
+        body = b"".join(message.get("body", b"") for message in messages[1:])
+        assert body == payload
+        assert messages[-1]["more_body"] is False
+
+    def test_reports_404_when_the_file_vanishes_after_stat(self, tmp_path):
+        from cloud_panel.file_response import StreamingFileResponse
+
+        path = tmp_path / "gone.bin"
+        path.write_bytes(b"data")
+        response = StreamingFileResponse(path, stat_result=os.stat(path))
+        path.unlink()
+
+        messages = self._call(response)
+
+        assert messages[0]["status"] == 404
+
+    def test_single_range_reads_only_the_requested_slice(self, tmp_path):
+        from cloud_panel.file_response import StreamingFileResponse
+
+        path = tmp_path / "range.bin"
+        path.write_bytes(bytes(range(256)) * 8192)
+        response = StreamingFileResponse(path, stat_result=os.stat(path))
+
+        async def send(message):
+            messages.append(message)
+
+        messages = []
+
+        async def run():
+            await response(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "headers": [(b"range", b"bytes=100-203")],
+                },
+                None,
+                send,
+            )
+
+        asyncio.run(run())
+        assert messages[0]["status"] == 206
+        body = b"".join(message.get("body", b"") for message in messages[1:])
+        assert body == (bytes(range(256)) * 8192)[100:204]
+

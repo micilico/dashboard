@@ -334,6 +334,116 @@ input:focus { border-color: var(--accent); }
 
 .folder-crumbs a:hover { color: var(--accent-hover); }
 
+.folder-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 16px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+.folder-download {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 10px 18px;
+  font-size: 14px;
+}
+
+.folder-hint {
+  flex: 1 1 260px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.download-panel {
+  margin: 0 0 20px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+.download-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.download-head span[role="status"] {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.download-bar {
+  position: relative;
+  height: 8px;
+  margin: 14px 0 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.download-bar-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width .2s var(--ease-standard);
+}
+
+.download-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.download-error {
+  margin-top: 10px;
+  color: var(--danger-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.download-error p { margin: 0; }
+.download-error ul { margin: 6px 0 0; padding-left: 18px; }
+
+.download-fallback {
+  margin: 0 0 20px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+}
+
+.download-fallback summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.download-fallback p {
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.folder-download:disabled,
+.mini-btn:disabled {
+  opacity: .6;
+  cursor: progress;
+}
+
 .folder-parent { margin: 0 0 14px; }
 
 .folder-table {
@@ -424,6 +534,8 @@ input:focus { border-color: var(--accent); }
   .meta-grid { grid-template-columns: 1fr; }
   .folder-card { padding: 24px 16px; }
   .folder-head { align-items: flex-start; }
+  .folder-toolbar { align-items: stretch; }
+  .folder-download { width: 100%; }
   .folder-table thead { display: none; }
   .folder-table,
   .folder-table tbody,

@@ -4,14 +4,23 @@ import json
 import logging
 import os
 import secrets
+
+import anyio
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile, File, Form, Response, Query
-from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 
 from common import error_detail
 
-from ..config import INTERNAL_TOKEN, MOUNT_PATH, SEARCH_MAX_RESULTS, SEARCH_MIN_LENGTH
+from ..config import (
+    INTERNAL_TOKEN,
+    MOUNT_PATH,
+    SEARCH_MAX_RESULTS,
+    SEARCH_MIN_LENGTH,
+    THUMBNAIL_WIDTH,
+)
+from ..file_response import StreamingFileResponse
 from ..security import resolve_path_within
+from ..services.thumbnails import build_thumbnail
 from ..storage import (
     list_directory,
     upload_file_streaming,
@@ -127,16 +136,54 @@ async def upload_file(
 
 
 @router.get("/files/download")
-async def download_file_endpoint(path: str):
-    """Download file."""
+@router.head("/files/download")
+async def download_file_endpoint(request: Request, path: str):
+    """Stream a file with one stat on the mount and 1 MiB reads."""
     try:
-        file_path = await run_in_threadpool(download_file, path)
-        return FileResponse(file_path, filename=os.path.basename(file_path))
+        file_path, stat_result = await run_in_threadpool(download_file, path)
     except ValueError:
         raise HTTPException(
             status_code=403,
             detail=error_detail("path_error", "Fichier non autorisé ou introuvable.", "Vérifier le chemin"),
         )
+    return StreamingFileResponse(
+        file_path,
+        filename=os.path.basename(file_path),
+        stat_result=stat_result,
+        limiter=getattr(request.app.state, "download_limiter", None),
+    )
+
+
+@router.get("/files/thumbnail")
+async def file_thumbnail(
+    request: Request,
+    path: str,
+    w: int = Query(THUMBNAIL_WIDTH, ge=32, le=1024),
+):
+    """Serve a small cached preview instead of the full image for grid tiles."""
+    limiter = getattr(request.app.state, "thumbnail_limiter", None)
+    if limiter is not None and not limiter.allow(request.client.host if request.client else "unknown"):
+        raise HTTPException(
+            status_code=429,
+            detail=error_detail("rate_limited", "Trop de requêtes en peu de temps.", "Réessayer"),
+        )
+    try:
+        data, content_type = await anyio.to_thread.run_sync(
+            build_thumbnail,
+            path,
+            w,
+            limiter=getattr(request.app.state, "thumbnail_encoder_limiter", None),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail=error_detail("thumbnail_unavailable", "Aperçu indisponible pour ce fichier.", "Télécharger le fichier"),
+        )
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/files/mkdir")
