@@ -219,7 +219,12 @@ def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
 
     items = []
     for entry in sorted(os.scandir(current_dir), key=lambda item: (not item.is_dir(), item.name.lower())):
-        stat = entry.stat()
+        try:
+            stat = entry.stat()
+        except OSError:
+            # Broken symlink or entry removed between scandir and stat: keep it
+            # listed so the page stays usable, without failing the whole folder.
+            stat = None
         rel_path = os.path.relpath(entry.path, shared_root)
         item_path = "" if rel_path == "." else rel_path.replace(os.sep, "/")
         category = "folder" if entry.is_dir() else _get_file_category(entry.name)
@@ -230,9 +235,9 @@ def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
             # Symlinks can escape the share or create loops; the browser
             # downloader skips them even though they stay browsable.
             "is_symlink": entry.is_symlink(),
-            "size": "" if entry.is_dir() else _format_size(stat.st_size),
-            "size_bytes": 0 if entry.is_dir() else stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M"),
+            "size": "" if entry.is_dir() or stat is None else _format_size(stat.st_size),
+            "size_bytes": 0 if entry.is_dir() or stat is None else stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%d/%m/%Y %H:%M") if stat else "",
             "category": category,
             "previewable": (not entry.is_dir()) and category in ("video", "audio", "image", "pdf"),
         })

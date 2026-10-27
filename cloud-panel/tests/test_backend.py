@@ -1252,6 +1252,7 @@ class TestShareFolderDownload:
         try:
             (Path(tmp_path) / "outside.txt").write_text("outside")
             (Path(tmp_path) / "shared" / "link.txt").symlink_to(Path(tmp_path) / "outside.txt")
+            (Path(tmp_path) / "shared" / "broken").symlink_to(Path(tmp_path) / "missing.txt")
         except OSError:
             pytest.skip("symlinks are not available on this platform")
 
@@ -1260,6 +1261,7 @@ class TestShareFolderDownload:
         items = {item["name"]: item for item in body["items"]}
         assert items["link.txt"]["is_symlink"] is True
         assert items["note.txt"]["is_symlink"] is False
+        assert items["broken"]["size_bytes"] == 0
 
     def test_listing_count_is_opt_out(self, tmp_path, monkeypatch):
         self._seed(tmp_path)
