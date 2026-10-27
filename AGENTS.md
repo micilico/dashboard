@@ -111,6 +111,7 @@ dashboard/
 │   │   │   ├── relink.py       # Plan + application de réparation des torrents en fichiers manquants
 │   │   │   ├── auto_relink.py  # Auto-réparation planifiée (env TORRENT_PANEL_AUTO_RELINK_ENABLED)
 │   │   │   ├── stats.py        # Statistiques persistantes quotidiennes
+│   │   │   ├── flows.py        # Flux serveur/page (HTTP, SSE, réseau hôte, rclone)
 │   │   │   └── ratio_monitor.py # Surveillance du ratio UP/DL (seuil réglable)
 │   │   └── static/             # Frontend
 │   │       ├── index.html      # App principale (vues : home, torrents, prowlarr)
@@ -270,6 +271,7 @@ curl -I http://127.0.0.1:3130/healthz
 | GET | `/api/activity` | Activité récente |
 | GET | `/api/storage` | Statistiques stockage |
 | GET | `/api/stats` | Statistiques persistantes (volumes, disque, activité, ratio) |
+| GET | `/api/data` | Flux serveur (qBittorrent, rclone, réseau hôte) et flux de la page (HTTP/SSE) |
 | POST | `/api/stats/ratio-threshold` | Modifier le seuil du moniteur de ratio UP/DL |
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Readiness (vérifie qBittorrent) |
@@ -372,6 +374,10 @@ La whitelist `basic_auth` de Caddy doit inclure `/cloud-panel/static/share.js`.
 | `TORRENT_PANEL_STATS_HISTORY_DAYS` | Fenêtre d'historique en jours (défaut 60) |
 | `TORRENT_PANEL_RATIO_MONITOR_STATE_PATH` | Fichier d'état du seuil de ratio (défaut `data/ratio-monitor-state.json`) |
 | `TORRENT_PANEL_RATIO_ALERT_THRESHOLD` | Seuil initial du moniteur de ratio (défaut 10 ; réglable dans l'interface) |
+| `TORRENT_PANEL_LIVE_DATA_INTERVAL_SECONDS` | Cadence du topic SSE `data` (défaut 2 s) |
+| `TORRENT_PANEL_FLOWS_WINDOW_SECONDS` | Fenêtre glissante des métriques HTTP/SSE (défaut 60 s) |
+| `TORRENT_PANEL_FLOWS_SAMPLE_LIMIT` | Nombre de points du graphique de débits (défaut 120) |
+| `TORRENT_PANEL_FLOWS_HOST_INTERFACE` | Interface réseau à mesurer (défaut auto : route par défaut) |
 | `TORRENT_PANEL_AUTO_RELINK_ENABLED` | Auto-réparation planifiée des torrents en fichiers manquants (défaut `false`) |
 | `TORRENT_PANEL_AUTO_RELINK_INTERVAL_SECONDS` | Intervalle de l'auto-réparation en secondes (défaut 3600) |
 | `TORRENT_PANEL_ORGANIZER_RECHECK_ENABLED` | Revérification qBittorrent après « ranger la bibliothèque » (défaut `false` ; `true` pour la réactiver) |

@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -29,6 +30,9 @@ from .config import (  # noqa: E402
     AUTO_RELINK_INTERVAL_SECONDS,
     AUTOMATION_RULES_STATE_PATH,
     CONSOLE_PREFIXES,
+    FLOWS_HOST_INTERFACE,
+    FLOWS_SAMPLE_LIMIT,
+    FLOWS_WINDOW_SECONDS,
     HEALTH_PUBLIC_PREFIX,
     JOB_MAX_PENDING,
     JOB_MAX_WORKERS,
@@ -77,6 +81,12 @@ from .routes.torrents import (  # noqa: E402
 )
 from .services.automations import AutomationRuleStore  # noqa: E402
 from .services.auto_relink import AutoRelinkManager  # noqa: E402
+from .services.flows import (  # noqa: E402
+    FlowHistory,
+    HostNetworkSampler,
+    LiveFlowMonitor,
+    RequestFlowMonitor,
+)
 from .services.media_automation import (  # noqa: E402
     build_media_automation_config,
     MediaAutomationConfig,
@@ -189,6 +199,13 @@ for prefix in CONSOLE_PREFIXES:
         app.mount(f"{prefix}/static", StaticFiles(directory=STATIC_DIR), name=f"{prefix.strip('/').replace('-', '_')}_static")
 
 app.state.qbit = build_client()
+app.state.flow_monitor = RequestFlowMonitor(
+    window_seconds=FLOWS_WINDOW_SECONDS,
+    prefixes=(*CONSOLE_PREFIXES, PUBLIC_PREFIX),
+)
+app.state.live_flows = LiveFlowMonitor(window_seconds=FLOWS_WINDOW_SECONDS)
+app.state.flow_history = FlowHistory(limit=FLOWS_SAMPLE_LIMIT)
+app.state.host_network = HostNetworkSampler(interface=FLOWS_HOST_INTERFACE)
 
 
 def _job_error(exc: BaseException) -> dict[str, str]:
@@ -275,6 +292,33 @@ async def add_security_headers(request: Request, call_next):
         or request.url.path.endswith("/config.js")
     ):
         response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.middleware("http")
+async def collect_flow_metrics(request: Request, call_next):
+    """Record bounded HTTP aggregates without ever affecting the response."""
+    started = time.perf_counter()
+    response = await call_next(request)
+    try:
+        route = request.scope.get("route")
+        route_path = str(getattr(route, "path", "") or "")
+        content_length = response.headers.get("content-length")
+        try:
+            bytes_out = int(content_length) if content_length else 0
+        except (TypeError, ValueError):
+            bytes_out = 0
+        request.app.state.flow_monitor.record(
+            route_path=route_path,
+            request_path=request.url.path,
+            method=request.method,
+            status=response.status_code,
+            duration_ms=(time.perf_counter() - started) * 1000,
+            bytes_out=bytes_out,
+        )
+    except Exception:
+        # Telemetry is best-effort and must never break a request.
+        pass
     return response
 
 

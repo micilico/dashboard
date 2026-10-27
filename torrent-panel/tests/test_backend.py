@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import tempfile
 import sys
@@ -31,17 +32,25 @@ from torrent_panel.services.monitoring import (
     storage_snapshot,
 )  # noqa: E402
 from torrent_panel.services import relink as relink_service  # noqa: E402
+from torrent_panel.services import flows as flows_service  # noqa: E402
 from torrent_panel.services import organizer as organizer_service  # noqa: E402
 from torrent_panel import config as panel_config  # noqa: E402
 from torrent_panel.services.ratio_monitor import MAX_THRESHOLD, MIN_THRESHOLD, RatioMonitor, RatioThresholdError  # noqa: E402
 from torrent_panel.services.stats import StatsStore  # noqa: E402
+from torrent_panel.services.flows import (  # noqa: E402
+    FlowHistory,
+    HostNetworkSampler,
+    LiveFlowMonitor,
+    RequestFlowMonitor,
+    data_snapshot,
+)
 from torrent_panel.services.tracker_stats import TrackerStatsStore  # noqa: E402
 from torrent_panel.services.organization_runs import OrganizationRunStore  # noqa: E402
 from torrent_panel.services.metadata import MediaMetadataResolver  # noqa: E402
 from torrent_panel.services.notifications import NotificationCenter  # noqa: E402
 from torrent_panel.services.automations import AutomationRuleStore  # noqa: E402
 from torrent_panel.services import metadata as metadata_service  # noqa: E402
-from torrent_panel.services.live import _stable_fingerprint  # noqa: E402
+from torrent_panel.services.live import VALID_TOPICS, _stable_fingerprint, parse_topics  # noqa: E402
 from torrent_panel.routes.jobs import JobRequest, _runner  # noqa: E402
 
 
@@ -67,9 +76,21 @@ class FakeQbit:
         self.files_payload = {}
         self.fail_location_hashes: set[str] = set()
         self.fail_rename_old_paths: set[str] = set()
+        self.transfer_payload = {
+            "connectionStatus": "connected",
+            "downloadSpeedBytes": 0,
+            "uploadSpeedBytes": 0,
+            "sessionDownloadedBytes": 0,
+            "sessionUploadedBytes": 0,
+            "downloadLimitBytes": 0,
+            "uploadLimitBytes": 0,
+        }
 
     async def torrents(self):
         return list(self.torrents_payload)
+
+    async def transfer_info(self):
+        return dict(self.transfer_payload)
 
     async def categories(self):
         return dict(self.categories_payload)
@@ -213,6 +234,10 @@ class BackendTests(unittest.TestCase):
         self.client = TestClient(app)
         session = self.client.get("/torrent-panel/api/session").json()
         self.csrf = session["csrfToken"]
+        app.state.flow_monitor.reset()
+        app.state.live_flows.reset()
+        app.state.flow_history.reset()
+        app.state.host_network.reset()
 
     def tearDown(self):
         self.client.close()
@@ -711,6 +736,246 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(body["ratioThreshold"]["threshold"], 10.0)
         self.assertEqual(len(body["ratioAlerts"]), 1)
         self.assertEqual(body["ratioAlerts"][0]["ratio"], 100.0)
+
+    def test_data_endpoint_reports_server_and_page_flows(self):
+        app.state.qbit.torrents_payload = [
+            {
+                "hash": VALID_HASH,
+                "name": "Film",
+                "state": "downloading",
+                "downloadSpeed": 10,
+                "uploadSpeed": 4,
+                "seeders": 3,
+                "leechers": 2,
+            },
+            {
+                "hash": "b" * 40,
+                "name": "Serie",
+                "state": "stalledUP",
+                "downloadSpeed": 0,
+                "uploadSpeed": 6,
+                "seeders": 1,
+                "leechers": 0,
+            },
+        ]
+        app.state.qbit.transfer_payload = {
+            "connectionStatus": "connected",
+            "downloadSpeedBytes": 1234,
+            "uploadSpeedBytes": 567,
+            "sessionDownloadedBytes": 9000,
+            "sessionUploadedBytes": 1200,
+            "downloadLimitBytes": 0,
+            "uploadLimitBytes": 0,
+        }
+
+        async def fake_storage(_app):
+            return {
+                "rclone": {
+                    "status": "ok",
+                    "speedBytes": 88,
+                    "bytesTransferred": 900,
+                    "transfersActive": 1,
+                    "queue": 0,
+                    "errors": 0,
+                }
+            }
+
+        with mock.patch.object(flows_service, "storage_snapshot", new=fake_storage):
+            response = self.client.get("/torrent-panel/api/data?token=secret")
+            prefixed = self.client.get("/stats-panel/api/data")
+        self.assertEqual(prefixed.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("server", body)
+        self.assertIn("page", body)
+        qbit = body["server"]["qbit"]
+        self.assertEqual(qbit["downloadBytesPerSecond"], 1234)
+        self.assertEqual(qbit["uploadBytesPerSecond"], 567)
+        self.assertEqual(qbit["sessionDownloadedBytes"], 9000)
+        self.assertEqual(qbit["sessionUploadedBytes"], 1200)
+        self.assertEqual(qbit["activeTorrents"], 2)
+        self.assertEqual(qbit["connectedSeeders"], 4)
+        self.assertEqual(qbit["connectedLeechers"], 2)
+        self.assertIn("network", body["server"])
+        self.assertIn("rclone", body["server"])
+        self.assertIn("history", body["server"])
+        self.assertIn("requests", body["page"])
+        self.assertIn("live", body["page"])
+        serialized = json.dumps(body).lower()
+        self.assertNotIn("secret", serialized)
+        self.assertNotIn("http", serialized)
+        self.assertNotIn("?token", serialized)
+
+    def test_data_snapshot_degrades_without_raising(self):
+        async def fail_torrents():
+            raise QbitError(502, "qBittorrent indisponible.")
+
+        async def fail_transfer():
+            raise QbitError(502, "Transfert indisponible.")
+
+        async def fake_storage(_app):
+            return {"rclone": {"status": "ok"}}
+
+        app.state.qbit.torrents = fail_torrents
+        app.state.qbit.transfer_info = fail_transfer
+        with mock.patch.object(flows_service, "storage_snapshot", new=fake_storage):
+            body = asyncio.run(data_snapshot(app))
+        self.assertEqual(body["server"]["status"], "degraded")
+        codes = {item["code"] for item in body["server"]["errors"]}
+        self.assertIn("qbit_unavailable", codes)
+        self.assertIn("qbit_transfer_unavailable", codes)
+        self.assertNotIn("http", json.dumps(body).lower())
+
+    def test_request_flow_monitor_normalizes_routes(self):
+        monitor = RequestFlowMonitor(
+            window_seconds=60,
+            prefixes=("/torrent-panel", "/stats-panel"),
+        )
+        self.assertIsNone(monitor.label_for("/torrent-panel/healthz"))
+        self.assertIsNone(monitor.label_for("/torrent-panel/readyz"))
+        self.assertIsNone(monitor.label_for("/torrent-panel/api/events"))
+        self.assertEqual(
+            monitor.label_for("/torrent-panel/static/dist/app.min.js"),
+            "/static/*",
+        )
+        self.assertEqual(
+            monitor.label_for("/torrent-panel/api/torrents/{hash}"),
+            "/api/torrents/:id",
+        )
+        self.assertEqual(
+            monitor.label_for(
+                "/torrents/{hash}",
+                "/torrent-panel/api/torrents/private-value",
+            ),
+            "/api/torrents/:id",
+        )
+        self.assertEqual(
+            monitor.label_for("/data", "/stats-panel/api/data"),
+            "/api/data",
+        )
+        self.assertEqual(monitor.label_for("/stats-panel/"), "/")
+        monitor.record(
+            route_path="/torrent-panel/api/stats",
+            method="GET",
+            status=200,
+            duration_ms=12.5,
+            bytes_out=2048,
+        )
+        monitor.record(
+            route_path="/torrent-panel/api/missing",
+            method="GET",
+            status=500,
+            duration_ms=4.0,
+            bytes_out=64,
+        )
+        snapshot = monitor.snapshot()
+        self.assertEqual(snapshot["total"], 2)
+        self.assertEqual(snapshot["errors"], 1)
+        self.assertEqual(snapshot["bytesOut"], 2112)
+        routes = {item["route"]: item for item in snapshot["routes"]}
+        self.assertEqual(routes["/api/stats"]["averageLatencyMs"], 12.5)
+        self.assertEqual(routes["/api/stats"]["bytesOut"], 2048)
+        self.assertEqual(routes["/api/missing"]["errors"], 1)
+
+    def test_live_flow_monitor_tracks_connections_and_frames(self):
+        monitor = LiveFlowMonitor(window_seconds=60)
+        token = monitor.open(("stats", "data"))
+        monitor.record_frame(
+            {"event": "section", "data": {"topic": "data"}},
+            128,
+        )
+        monitor.record_frame(
+            {"event": "heartbeat", "data": {"type": "heartbeat"}},
+            64,
+        )
+        snapshot = monitor.snapshot()
+        self.assertEqual(snapshot["connectionsActive"], 1)
+        self.assertEqual(snapshot["connectionsTotal"], 1)
+        self.assertEqual(snapshot["framesTotal"], 2)
+        self.assertEqual(snapshot["framesInWindow"], 2)
+        self.assertEqual(snapshot["bytesTotal"], 192)
+        self.assertEqual(snapshot["byType"], {"heartbeat": 1, "section": 1})
+        self.assertEqual(snapshot["byTopic"], {"data": 1, "system": 1})
+        self.assertEqual(
+            snapshot["subscribersByTopic"],
+            {"data": 1, "stats": 1},
+        )
+        monitor.close(token)
+        self.assertEqual(monitor.snapshot()["connectionsActive"], 0)
+
+    def test_host_network_sampler_reads_proc_counters(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "net").mkdir()
+        (root / "net" / "route").write_text(
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
+            "eth0\t00000000\t0100007F\t0003\t0\t0\t0\t00000000\n",
+            encoding="utf-8",
+        )
+        dev = root / "net" / "dev"
+        dev.write_text(
+            "Inter-|   Receive                                                |  Transmit\n"
+            " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
+            "    lo: 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n"
+            "  eth0: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0\n",
+            encoding="utf-8",
+        )
+        times = iter([100.0, 102.0])
+        sampler = HostNetworkSampler(proc_root=root, clock=lambda: next(times))
+        self.assertEqual(sampler.sample()["receiveBytesPerSecond"], 0)
+        dev.write_text(
+            "Inter-|   Receive                                                |  Transmit\n"
+            " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n"
+            "    lo: 1 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0\n"
+            "  eth0: 3000 0 0 0 0 0 0 0 5000 0 0 0 0 0 0 0\n",
+            encoding="utf-8",
+        )
+        snapshot = sampler.sample()
+        self.assertTrue(snapshot["available"])
+        self.assertEqual(snapshot["interface"], "eth0")
+        self.assertEqual(snapshot["receiveBytesPerSecond"], 1000)
+        self.assertEqual(snapshot["transmitBytesPerSecond"], 1500)
+
+        missing = HostNetworkSampler(proc_root=root / "missing")
+        self.assertFalse(missing.sample()["available"])
+
+    def test_flow_history_is_bounded_and_throttled(self):
+        times = iter([0.0, 0.5, 2.0])
+        history = FlowHistory(
+            limit=2,
+            min_interval_seconds=1.5,
+            clock=lambda: next(times),
+        )
+        self.assertTrue(history.record({"value": 1}))
+        self.assertFalse(history.record({"value": 2}))
+        self.assertTrue(history.record({"value": 3}))
+        self.assertEqual([item["value"] for item in history.snapshot()], [1, 3])
+
+        paused_times = iter([0.0, 40.0])
+        paused = FlowHistory(
+            limit=5,
+            min_interval_seconds=1.5,
+            clock=lambda: next(paused_times),
+        )
+        self.assertTrue(paused.record({"value": 1}))
+        self.assertTrue(paused.record({"value": 2}))
+        self.assertEqual([item["value"] for item in paused.snapshot()], [2])
+
+    def test_flow_middleware_records_api_requests(self):
+        app.state.flow_monitor.reset()
+        self.client.get("/torrent-panel/healthz")
+        self.client.get("/torrent-panel/api/data")
+        routes = {
+            item["route"]: item
+            for item in app.state.flow_monitor.snapshot()["routes"]
+        }
+        self.assertIn("/api/data", routes)
+        self.assertNotIn("/healthz", routes)
+        self.assertGreater(routes["/api/data"]["bytesOut"], 0)
+
+    def test_data_topic_is_available_for_live_streams(self):
+        self.assertIn("data", VALID_TOPICS)
+        self.assertEqual(parse_topics("data"), ("data",))
+        self.assertEqual(parse_topics("stats,data"), ("stats", "data"))
 
 
 class PerformanceCacheTests(unittest.IsolatedAsyncioTestCase):
@@ -2635,6 +2900,36 @@ class QbitMappingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(torrents[0]["eta"], 3600)
         self.assertEqual(torrents[0]["category"], "Films")
         self.assertEqual(torrents[0]["tracker"], "tracker.test")
+
+    async def test_transfer_info_exposes_only_public_counters(self):
+        self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))
+
+        async def fake_request(method, path, **kwargs):
+            self.assertEqual(path, "/api/v2/transfer/info")
+            return FakeResponse(
+                {
+                    "connection_status": "connected",
+                    "dl_info_speed": 1234,
+                    "up_info_speed": 567,
+                    "dl_info_data": 9000,
+                    "up_info_data": 1200,
+                    "dl_rate_limit": 0,
+                    "up_rate_limit": 2048,
+                    "interface": "eth0",
+                    "dht_nodes": 12,
+                }
+            )
+
+        self.client._request = fake_request
+        info = await self.client.transfer_info()
+        self.assertEqual(info["connectionStatus"], "connected")
+        self.assertEqual(info["downloadSpeedBytes"], 1234)
+        self.assertEqual(info["uploadSpeedBytes"], 567)
+        self.assertEqual(info["sessionDownloadedBytes"], 9000)
+        self.assertEqual(info["sessionUploadedBytes"], 1200)
+        self.assertEqual(info["uploadLimitBytes"], 2048)
+        self.assertNotIn("interface", info)
+        self.assertNotIn("dht_nodes", info)
 
     async def test_bulk_actions_join_hashes_for_qbittorrent(self):
         self.client = QBittorrentClient(QbitConfig(url="http://127.0.0.1:1", username="u", password="p"))

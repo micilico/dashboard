@@ -83,6 +83,15 @@ def _sanitize_torrent(item: Any, torrent_hash: str | None = None) -> dict[str, A
     }
 
 
+def _non_negative_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 class QbitError(Exception):
     def __init__(
         self,
@@ -450,6 +459,31 @@ class QBittorrentClient:
     async def torrents(self, *, force: bool = False) -> list[dict[str, Any]]:
         snapshot = await self._torrents_cache.get_or_set(self._fetch_torrents, force=force)
         return snapshot.as_list()
+
+    async def transfer_info(self) -> dict[str, Any]:
+        """Return only public transfer counters and limits.
+
+        qBittorrent exposes session totals and live speeds here. Lifetime
+        counters stay in the torrent list (and in the persistent stats store),
+        so nothing else needs to leave the backend.
+        """
+        response = await self._request("GET", "/api/v2/transfer/info")
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            logger.warning("qBittorrent returned invalid JSON for transfer/info")
+            raise QbitError(502, "Reponse qBittorrent invalide.") from exc
+        if not isinstance(payload, dict):
+            raise QbitError(502, "Reponse qBittorrent invalide.")
+        return {
+            "connectionStatus": str(payload.get("connection_status") or "unknown")[:40],
+            "downloadSpeedBytes": _non_negative_int(payload.get("dl_info_speed")),
+            "uploadSpeedBytes": _non_negative_int(payload.get("up_info_speed")),
+            "sessionDownloadedBytes": _non_negative_int(payload.get("dl_info_data")),
+            "sessionUploadedBytes": _non_negative_int(payload.get("up_info_data")),
+            "downloadLimitBytes": _non_negative_int(payload.get("dl_rate_limit")),
+            "uploadLimitBytes": _non_negative_int(payload.get("up_rate_limit")),
+        }
 
     def invalidate_torrents(self) -> None:
         self._torrents_cache.invalidate()

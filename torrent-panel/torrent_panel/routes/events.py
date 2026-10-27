@@ -13,8 +13,17 @@ router = APIRouter()
 
 async def _frames(request: Request, topics: tuple[str, ...]):
     hub = request.app.state.section_hub
-    async for frame in hub.stream(topics):
-        yield format_sse(frame)
+    monitor = getattr(request.app.state, "live_flows", None)
+    token = monitor.open(topics) if monitor is not None else None
+    try:
+        async for frame in hub.stream(topics):
+            encoded = format_sse(frame)
+            if monitor is not None:
+                monitor.record_frame(frame, len(encoded.encode("utf-8")))
+            yield encoded
+    finally:
+        if monitor is not None and token is not None:
+            monitor.close(token)
 
 
 @router.get("/events")

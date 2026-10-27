@@ -138,6 +138,10 @@ class StatsStore:
         return self.snapshot(state)
 
     def snapshot(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
+        with self._lock:
+            return self._snapshot(state)
+
+    def _snapshot(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         state = state or self._state
         days = state.get("days") if isinstance(state.get("days"), dict) else {}
         daily: list[dict[str, Any]] = []

@@ -100,6 +100,17 @@ const source = fs.readFileSync("torrent-panel/torrent_panel/static/app.js", "utf
 const commonApiSource = fs.readFileSync("common/js/api.js", "utf8");
 const consoleSource = fs.readFileSync("torrent-panel/torrent_panel/static/console.js", "utf8");
 const overviewHtml = fs.readFileSync("torrent-panel/torrent_panel/static/index.html", "utf8");
+const statsHtml = fs.readFileSync("torrent-panel/torrent_panel/static/stats.html", "utf8");
+
+assert.match(statsHtml, /id="flowsGrid"/);
+assert.match(statsHtml, /layout-6-6/);
+assert.match(consoleSource, /function renderFlows/);
+assert.match(consoleSource, /function buildServerFlowsPanel/);
+assert.match(consoleSource, /function buildPageFlowsPanel/);
+assert.match(consoleSource, /function consoleLiveTopics/);
+assert.match(consoleSource, /recordPageFrame/);
+assert.match(consoleSource, /apiPrefix}\/data/);
+assert.match(consoleSource, /topics\.join\(","\)/);
 
 assert.equal(overviewHtml.includes("Votre espace média"), false);
 assert.equal(overviewHtml.includes("overview-storage-card"), false);
@@ -475,7 +486,7 @@ vm.runInNewContext(
 ${fs.readFileSync("common/js/dom.js", "utf8")}
 window.__DASHBOARD_CONSOLE_CONFIG__ = { section: "stats", apiPrefix: "/api", publicPrefix: "/stats-panel" };
 ${consoleSource}
-globalThis.__chartTest = { seriesLineChart, chartEmptyState, renderLiveSection, state, els };`,
+globalThis.__chartTest = { seriesLineChart, chartEmptyState, renderLiveSection, renderFlows, state, els };`,
   chartContext,
 );
 const chartApi = chartContext.__chartTest;
@@ -539,6 +550,42 @@ assert.ok(shortHead.children.some((n) => n.textContent.includes("Du ")), "shorte
 const zeroDays = days.map((d, i) => makeDay(d.date, i % 2 ? { downloaded: 0, uploaded: 0 } : { downloaded: 100, uploaded: 50 }));
 const zeroBox = chartApi.seriesLineChart(zeroDays, chartSeries, { title: "Volumes échangés" });
 assert.equal(zeroBox.className, "chart-box", "zero values must still render a chart");
+
+// Flux serveur et page : les deux panneaux doivent être rendus sans erreur.
+chartApi.renderFlows({
+  server: {
+    status: "ok",
+    network: { available: false, interface: "", receiveBytesPerSecond: 0, transmitBytesPerSecond: 0 },
+    qbit: {
+      downloadBytesPerSecond: 2048,
+      uploadBytesPerSecond: 1024,
+      sessionDownloadedBytes: 4096,
+      sessionUploadedBytes: 2048,
+      activeTorrents: 2,
+      connectedSeeders: 5,
+      connectedLeechers: 3,
+      connectionStatus: "connected",
+    },
+    rclone: { status: "ok", speedBytesPerSecond: 512, transfersActive: 1, queue: 0, errors: 0 },
+    totals: { downloadedBytes: 8192, uploadedBytes: 4096, ratio: 0.5, observedDays: 3 },
+    history: [
+      { at: "2026-10-27T10:00:00Z", downloadBytesPerSecond: 1024, uploadBytesPerSecond: 512, rcloneBytesPerSecond: 0 },
+      { at: "2026-10-27T10:00:02Z", downloadBytesPerSecond: 2048, uploadBytesPerSecond: 1024, rcloneBytesPerSecond: 512 },
+    ],
+    errors: [],
+  },
+  page: {
+    status: "ok",
+    requests: { perMinute: 12, errors: 0, bytesOut: 4096, averageLatencyMs: 8.5, p95LatencyMs: 12, routes: [{ method: "GET", route: "/api/data", count: 6, averageLatencyMs: 8, bytesOut: 2048 }] },
+    live: { connectionsActive: 1, framesPerMinute: 30, framesTotal: 12, lastFrameAt: "2026-10-27T10:00:02Z", byTopic: { data: 6 }, subscribersByTopic: { data: 1 } },
+    processUptimeSeconds: 60,
+  },
+});
+const flowsText = collectText(chartApi.els.flowsGrid);
+assert.ok(flowsText.includes("Flux serveur"), "server flow panel required");
+assert.ok(flowsText.includes("Flux de la page"), "page flow panel required");
+assert.ok(flowsText.includes("qBittorrent"), "qBittorrent rates must be rendered");
+assert.ok(flowsText.includes("/api/data"), "top API routes must be rendered");
 
 console.log("chart svg ok");
 

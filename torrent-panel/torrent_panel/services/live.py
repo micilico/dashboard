@@ -9,10 +9,12 @@ from .monitoring import now_iso
 
 from ..config import (
     LIVE_DASHBOARD_INTERVAL_SECONDS,
+    LIVE_DATA_INTERVAL_SECONDS,
     LIVE_SLOW_INTERVAL_SECONDS,
     LIVE_STATUS_INTERVAL_SECONDS,
     LIVE_TORRENTS_INTERVAL_SECONDS,
 )
+from .flows import data_snapshot
 from .monitoring import (
     activity_snapshot,
     dashboard_snapshot,
@@ -32,6 +34,7 @@ VALID_TOPICS = frozenset(
         "health",
         "media",
         "stats",
+        "data",
         "relink",
     }
 )
@@ -114,6 +117,11 @@ def build_live_hub(app: FastAPI, job_manager: JobManager) -> SharedSectionHub:
         fingerprints["stats"] = _stable_fingerprint(result)
         return result
 
+    async def data() -> dict[str, Any]:
+        result = await data_snapshot(app)
+        fingerprints["data"] = _stable_fingerprint(result)
+        return result
+
     async def relink() -> dict[str, int]:
         return await relink_status(app.state.qbit)
 
@@ -144,6 +152,10 @@ def build_live_hub(app: FastAPI, job_manager: JobManager) -> SharedSectionHub:
     hub.register(
         "stats", stats, interval=LIVE_SLOW_INTERVAL_SECONDS,
         fingerprint_factory=lambda: fingerprints.get("stats"),
+    )
+    hub.register(
+        "data", data, interval=LIVE_DATA_INTERVAL_SECONDS,
+        fingerprint_factory=lambda: fingerprints.get("data"),
     )
     hub.register("relink", relink, interval=LIVE_STATUS_INTERVAL_SECONDS)
     return hub

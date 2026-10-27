@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from common import error_detail
 
 from ..models import RatioThresholdUpdate
+from ..services.flows import data_snapshot
 from ..services.monitoring import (
     activity_snapshot,
     dashboard_snapshot,
@@ -56,6 +57,11 @@ async def health_overview(request: Request) -> dict[str, Any]:
 @router.get("/stats")
 async def stats(request: Request) -> dict[str, Any]:
     return await stats_snapshot(request.app)
+
+
+@router.get("/data")
+async def data(request: Request) -> dict[str, Any]:
+    return await data_snapshot(request.app)
 
 
 @router.post("/stats/ratio-threshold", dependencies=[Depends(require_action_guard)])
