@@ -7,6 +7,7 @@ import os
 import secrets
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, Form, Path as FPath, Query
@@ -36,7 +37,24 @@ from .csrf_guard import client_key, require_action_guard
 
 router = APIRouter()
 
-_SHARE_ASSET_VERSION = "20261027-a"
+
+def _share_asset_version() -> str:
+    """Content hash of the public share assets.
+
+    The folder page and ``share.js`` share ids and data attributes; forgetting
+    to bump a hand-written version would run stale JS against new markup.
+    """
+    digest = hashlib.sha256()
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    for name in ("share.css", "share.js"):
+        try:
+            digest.update((static_dir / name).read_bytes())
+        except OSError:
+            digest.update(name.encode())
+    return digest.hexdigest()[:12]
+
+
+_SHARE_ASSET_VERSION = _share_asset_version()
 
 _BASE = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title} · Cloud</title><link rel="stylesheet" href="{assets}/static/share.css?v=""" + _SHARE_ASSET_VERSION + """"><script src="{assets}/static/share.js?v=""" + _SHARE_ASSET_VERSION + """" defer></script></head><body class="{body_class}"><main class="share-shell">{body}</main></body></html>"""
 
@@ -194,10 +212,10 @@ def _download_page(filename: str, size: str, category: str, file_type: str, down
         filename,
         '<section class="share-card">'
         + _DOWNLOAD_BODY.format(
-            category=category, icon=icon_svg, filename=filename,
+            category=category, icon=icon_svg, filename=html.escape(filename),
             size=size, dl_count=str(download_count),
             expires_row=expires_row, file_type=file_type,
-            dl_url=dl_url,
+            dl_url=html.escape(dl_url, quote=True),
         )
         + "</section>",
     )
@@ -253,7 +271,9 @@ def _shared_folder_listing(shared_root: str, current_relative: str) -> dict:
         "items": items,
         "current_path": current_relative,
         "parent_path": "/".join(parts[:-1]) if parts else "",
-        "folder_name": os.path.basename(current_dir.rstrip(os.sep)) or "Racine",
+        # Use the requested segment (e.g. a symlink alias) rather than the
+        # resolved basename, so the download folder matches the breadcrumb.
+        "folder_name": parts[-1] if parts else (os.path.basename(current_dir.rstrip(os.sep)) or "Racine"),
         "breadcrumbs": breadcrumbs,
     }
 
@@ -338,11 +358,11 @@ def _folder_page(token: str, link: dict, listing: dict, password: Optional[str])
         '<span id="downloadStatus" role="status" aria-live="polite">Préparation…</span>'
         '<button type="button" class="mini-btn" id="downloadCancel">Annuler</button>'
         '</div>'
-        '<div class="download-bar" id="downloadBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">'
+        '<div class="download-bar" id="downloadBar" role="progressbar" aria-label="Progression du téléchargement" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">'
         '<span class="download-bar-fill" id="downloadBarFill"></span>'
         '</div>'
         '<p class="download-detail" id="downloadDetail"></p>'
-        '<div class="download-error" id="downloadError" hidden></div>'
+        '<div class="download-error" id="downloadError" role="alert" hidden></div>'
         '</div>'
         '<details class="download-fallback" id="downloadFallback" hidden>'
         '<summary>Autre méthode : téléchargement multiple</summary>'
@@ -497,11 +517,12 @@ async def download_share(
     dl: bool = Query(default=False),
     preview: bool = Query(default=False),
     list_only: bool = Query(default=False, alias="list"),
-    count: int = Query(default=1, ge=0, le=1),
+    count: int = Query(default=1),
     path: str = Query(default=""),
     password: Optional[str] = Query(default=None),
 ):
     wants_json = bool(list_only)
+    count = 1 if count else 0
     try:
         link = _get_share_link(token)
         if not link:
@@ -557,6 +578,13 @@ async def download_share(
                     "Ce dossier n'est plus disponible.", "error", 404,
                 )
 
+            if list_only and not _share_list_allowed(request, token):
+                return _share_error(
+                    wants_json, "share_rate_limited", "Trop de requêtes",
+                    "Trop de listes de dossiers en peu de temps. Réessayez dans un instant.",
+                    "error", 429,
+                )
+
             requested_path = (path or "").strip("/")
             current_target = resolve_path_within(shared_root, requested_path or ".", must_exist=True)
             if os.path.isfile(current_target):
@@ -582,16 +610,11 @@ async def download_share(
             if list_only:
                 if count:
                     increment_download_count(token)
-                folder_name = (
-                    os.path.basename(current_target.rstrip(os.sep)) or link["filename"]
-                    if requested_path
-                    else link["filename"]
-                )
                 return JSONResponse(
                     {
                         "current_path": listing["current_path"],
                         "parent_path": listing["parent_path"],
-                        "folder_name": folder_name,
+                        "folder_name": listing["folder_name"] if requested_path else link["filename"],
                         "items": [
                             {
                                 "name": item["name"],
@@ -605,7 +628,10 @@ async def download_share(
                     },
                     headers={"Cache-Control": "no-store"},
                 )
-            return HTMLResponse(content=_folder_page(token, link, listing, password))
+            return HTMLResponse(
+                content=_folder_page(token, link, listing, password),
+                headers={"Cache-Control": "no-store"},
+            )
 
         if list_only:
             return _share_error(
@@ -632,12 +658,10 @@ async def download_share(
         if expires_at:
             expires_str = datetime.fromtimestamp(expires_at).strftime("%d/%m/%Y à %H:%M")
 
-        dl_url = str(request.url)
-        sep = "&" if "?" in dl_url else "?"
-        dl_url += f"{sep}dl=1"
+        dl_url = _public_download_path(token) + "?dl=1"
 
         page = _download_page(filename, size_formatted, category, file_type, download_count, expires_str, dl_url)
-        return HTMLResponse(content=page)
+        return HTMLResponse(content=page, headers={"Cache-Control": "no-store"})
     except ValueError:
         return _share_error(
             wants_json, "share_invalid_path", "Lien invalide",
@@ -709,3 +733,11 @@ def _share_attempt_allowed(request: Request, token: str) -> bool:
     if limiter is None:
         return True
     return limiter.allow(f"share:{token}:{client_key(request)}")
+
+
+def _share_list_allowed(request: Request, token: str) -> bool:
+    """Rate-limit the per-directory listings used by the folder downloader."""
+    limiter = getattr(request.app.state, "share_list_limiter", None)
+    if limiter is None:
+        return True
+    return limiter.allow(f"share-list:{token}:{client_key(request)}")

@@ -144,7 +144,8 @@ dashboard/
 │   │       └── dist/
 │   └── tests/
 │       ├── test_backend.py
-│       └── frontend_logic.test.js
+│       ├── frontend_logic.test.js
+│       └── share_logic.test.js
 ├── prowlarr-panel/
 ├── autossh/
 │   ├── autossh-ultra.service   # Unité systemd
@@ -182,6 +183,7 @@ pytest cloud-panel/tests/test_backend.py
 node torrent-panel/tests/frontend_logic.test.js
 node prowlarr-panel/tests/frontend_logic.test.js
 node cloud-panel/tests/frontend_logic.test.js
+node cloud-panel/tests/share_logic.test.js
 ```
 
 ### Vérification
@@ -433,6 +435,8 @@ pour alimenter le bouton « Réparer les fichiers manquants (N) ».
 | `CLOUD_PANEL_RATE_LIMIT_SECONDS` | Fenêtre de temps (défaut 60) |
 | `CLOUD_PANEL_CSRF_TOKEN_TTL_SECONDS` | Durée de vie du token CSRF (défaut 43200) |
 | `CLOUD_PANEL_SHARE_PASSWORD_COOKIE_SECONDS` | Durée du cookie après mot de passe d'un lien partagé (défaut 43200 = 12 h) |
+| `CLOUD_PANEL_SHARE_LIST_RATE_LIMIT_CALLS` | Listes JSON de dossiers partagés par fenêtre (défaut 600) |
+| `CLOUD_PANEL_SHARE_LIST_RATE_LIMIT_SECONDS` | Fenêtre du limiteur de listes de dossiers (défaut 60 s) |
 | `CLOUD_PANEL_DOWNLOAD_CHUNK_SIZE` | Taille des lectures de téléchargement (défaut 1 Mio) |
 | `CLOUD_PANEL_DOWNLOAD_STREAM_LIMIT` | Transferts simultanés sur le pool dédié (défaut 6) |
 | `CLOUD_PANEL_RESOLVE_CACHE_TTL` | Durée du cache de résolution de chemin (défaut 15 s) |

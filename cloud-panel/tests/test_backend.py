@@ -1207,6 +1207,7 @@ class TestShareFolderDownload:
         from cloud_panel.routes.share import _hash_password
 
         token = self._share(password_hash=_hash_password("secret"))
+        from cloud_panel.config import SHARE_PASSWORD_COOKIE_SECONDS
 
         locked = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
         assert locked.status_code == 401
@@ -1218,7 +1219,7 @@ class TestShareFolderDownload:
             follow_redirects=False,
         )
         assert unlocked.status_code == 303
-        assert "Max-Age=43200" in unlocked.headers["set-cookie"]
+        assert f"Max-Age={SHARE_PASSWORD_COOKIE_SECONDS}" in unlocked.headers["set-cookie"]
 
         allowed = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
         assert allowed.status_code == 200
@@ -1262,6 +1263,80 @@ class TestShareFolderDownload:
         assert items["link.txt"]["is_symlink"] is True
         assert items["note.txt"]["is_symlink"] is False
         assert items["broken"]["size_bytes"] == 0
+
+    def test_symlink_alias_keeps_the_requested_folder_name(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+        try:
+            (Path(tmp_path) / "shared" / "alias").symlink_to(
+                Path(tmp_path) / "shared" / "Saison 1", target_is_directory=True
+            )
+        except OSError:
+            pytest.skip("symlinks are not available on this platform")
+
+        body = client.get(
+            f"/cloud-panel/download/{token}", params={"list": 1, "path": "alias"}
+        ).json()
+
+        assert body["folder_name"] == "alias"
+        assert body["current_path"] == "alias"
+
+    def test_folder_page_escapes_hostile_folder_names(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        hostile = 'a"><b>'
+        (Path(tmp_path) / "shared" / hostile).mkdir()
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+
+        response = client.get(f"/cloud-panel/download/{token}")
+
+        assert response.status_code == 200
+        assert 'data-folder-name="a&quot;&gt;&lt;b&gt;"' in response.text
+        assert "<b>" not in response.text
+
+    def test_listing_is_rate_limited(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        client = self._app(tmp_path, monkeypatch)
+        token = self._share()
+        from common.rate_limiter import RateLimiter
+
+        client.app.state.share_list_limiter = RateLimiter(
+            max_calls=1, period_seconds=60, max_keys=64
+        )
+
+        first = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+        assert first.status_code == 200
+
+        second = client.get(f"/cloud-panel/download/{token}", params={"list": 1})
+        assert second.status_code == 429
+        assert second.json()["error"]["code"] == "share_rate_limited"
+
+    def test_file_page_escapes_hostile_names_and_drops_the_password(self, tmp_path, monkeypatch):
+        hostile = 'evil"><b>.txt'
+        (Path(tmp_path) / hostile).write_text("x")
+        client = self._app(tmp_path, monkeypatch)
+        from cloud_panel.models import create_share_link, _get_conn
+
+        _get_conn()
+        token = "file_" + secrets.token_hex(6)
+        create_share_link(
+            path=hostile,
+            filename=hostile,
+            is_dir=False,
+            size_bytes=1,
+            token=token,
+            password_hash=None,
+            expiry_days=7,
+        )
+
+        response = client.get(f"/cloud-panel/download/{token}")
+
+        assert response.status_code == 200
+        assert "evil&quot;&gt;&lt;b&gt;.txt" in response.text
+        assert "<b>" not in response.text
+        assert "?dl=1" in response.text
+        assert "password=" not in response.text
 
     def test_listing_count_is_opt_out(self, tmp_path, monkeypatch):
         self._seed(tmp_path)

@@ -16,6 +16,7 @@
 
   var UPDATE_INTERVAL_MS = 200;
   var CASCADE_DELAY_MS = 350;
+  var MAX_CONSECUTIVE_FAILURES = 20;
 
   function formatBytes(value) {
     var bytes = Number(value) || 0;
@@ -76,14 +77,20 @@
 
   function httpError(response) {
     if (response.status === 401 || response.status === 403) {
-      return new Error(
+      var error = new Error(
         "L'accès à ce partage a expiré. Rechargez la page puis relancez le téléchargement."
       );
+      error.sessionExpired = true;
+      return error;
     }
     if (response.status === 404) {
       return new Error("Le contenu n'existe plus sur le partage.");
     }
     return new Error("Le serveur a refusé la demande (" + response.status + ").");
+  }
+
+  function normalizedEntryKey(name) {
+    return String(name || "").normalize("NFC").toLowerCase();
   }
 
   async function fetchListing(base, path, first, signal) {
@@ -104,6 +111,7 @@
   async function collectPlan(base, rootPath, signal, onProgress) {
     var files = [];
     var dirs = [];
+    var skipped = [];
     var totalBytes = 0;
     var listed = 0;
 
@@ -111,11 +119,30 @@
       var data = await fetchListing(base, currentPath, first, signal);
       listed += 1;
       var entries = Array.isArray(data.items) ? data.items : [];
+      // APFS/NTFS are case-insensitive and may normalise Unicode: two distinct
+      // source names can map to the same destination entry. Detect that here,
+      // before writing, instead of silently overwriting one of them.
+      var seenNames = new Set();
       for (var index = 0; index < entries.length; index += 1) {
         var item = entries[index];
-        var name = sanitizeEntryName(item.name);
-        if (!name || item.is_symlink) continue;
-        var relative = joinRelPath(prefix, name);
+        var rawName = String(item.name || "");
+        var relative = joinRelPath(prefix, rawName);
+        if (item.is_symlink) {
+          skipped.push({ relative: relative, reason: "lien symbolique ignoré" });
+          continue;
+        }
+        var name = sanitizeEntryName(rawName);
+        if (!name) {
+          skipped.push({ relative: relative, reason: "nom non pris en charge" });
+          continue;
+        }
+        var key = normalizedEntryKey(name);
+        if (seenNames.has(key)) {
+          skipped.push({ relative: relative, reason: "conflit de casse ou d'Unicode" });
+          continue;
+        }
+        seenNames.add(key);
+        relative = joinRelPath(prefix, name);
         if (item.is_dir) {
           dirs.push(relative);
           await walk(item.path, relative, false);
@@ -126,12 +153,22 @@
         }
       }
       if (onProgress) {
-        onProgress({ dirs: listed, files: files.length, bytes: totalBytes });
+        onProgress({
+          dirs: listed,
+          files: files.length,
+          bytes: totalBytes,
+          skipped: skipped.length,
+        });
       }
     }
 
     await walk(rootPath, "", true);
-    return { files: files, dirs: dirs, totalBytes: totalBytes };
+    return {
+      files: files,
+      dirs: dirs,
+      totalBytes: totalBytes,
+      skipped: skipped,
+    };
   }
 
   function createDirResolver(rootHandle) {
@@ -173,20 +210,28 @@
       throw error;
     }
 
-    var exists = false;
-    try {
-      await parent.getDirectoryHandle(folderName);
-      exists = true;
-    } catch (error) {
-      if (!error || error.name !== "NotFoundError") throw error;
+    // The picker remembers the previous parent (id). After an interruption the
+    // original folder already exists: reuse it as a suffix instead of refusing,
+    // otherwise the documented "reload and retry" advice could never work.
+    for (var attempt = 1; attempt <= 99; attempt += 1) {
+      var candidate = attempt === 1 ? folderName : folderName + " (" + attempt + ")";
+      var exists = false;
+      try {
+        await parent.getDirectoryHandle(candidate);
+        exists = true;
+      } catch (error) {
+        if (error && error.name === "TypeMismatchError") {
+          exists = true;
+        } else if (!error || error.name !== "NotFoundError") {
+          throw error;
+        }
+      }
+      if (!exists) {
+        var handle = await parent.getDirectoryHandle(candidate, { create: true });
+        return { handle: handle, name: candidate };
+      }
     }
-    if (exists) {
-      throw new Error(
-        "Le dossier « " + folderName + " » existe déjà à cet emplacement. " +
-        "Choisissez un autre dossier ou renommez l'existant."
-      );
-    }
-    return parent.getDirectoryHandle(folderName, { create: true });
+    throw new Error("Impossible de créer un dossier de destination (trop de doublons).");
   }
 
   function abortError() {
@@ -275,11 +320,12 @@
         error.textContent = message;
         cancel.hidden = true;
       },
-      showFailures: function (failures) {
+      showFailures: function (failures, title) {
         error.hidden = false;
         error.replaceChildren();
         var intro = document.createElement("p");
-        intro.textContent = failures.length + " fichier(s) n'ont pas pu être téléchargés :";
+        intro.textContent =
+          title || failures.length + " fichier(s) n'ont pas pu être téléchargés :";
         var list = document.createElement("ul");
         failures.slice(0, 8).forEach(function (failure) {
           var item = document.createElement("li");
@@ -316,11 +362,24 @@
     ui.show();
     setTriggersDisabled(true);
     global.addEventListener("beforeunload", warnBeforeUnload);
+    try {
+      ui.cancel.focus();
+    } catch (_error) {
+      /* focus is best effort */
+    }
   }
 
-  function endRun() {
+  function endRun(state) {
     setTriggersDisabled(false);
     global.removeEventListener("beforeunload", warnBeforeUnload);
+    var trigger = state && state.lastTrigger;
+    if (trigger && document.contains(trigger)) {
+      try {
+        trigger.focus();
+      } catch (_error) {
+        /* focus is best effort */
+      }
+    }
   }
 
   async function runDirectoryDownload(trigger, ui, state) {
@@ -332,32 +391,44 @@
     var controller = new AbortController();
     state.controller = controller;
     state.running = true;
+    state.lastTrigger = trigger;
     beginRun(ui);
 
     try {
       ui.setStatus("Choisissez un dossier de destination…");
-      var rootHandle = await pickDestination(folderName);
-      if (controller.signal.aborted) return;
+      var picked = await pickDestination(folderName);
+      if (controller.signal.aborted) throw abortError();
+      var rootHandle = picked.handle;
+      var destinationName = picked.name;
 
       ui.setStatus("Analyse du dossier…");
       var plan = await collectPlan(base, folderPath, controller.signal, function (progress) {
         ui.setStatus(
-          "Analyse du dossier… " + progress.dirs + " dossier(s), " + progress.files + " fichier(s)"
+          "Analyse du dossier… " + progress.dirs + " dossier(s), " + progress.files +
+            " fichier(s)" + (progress.skipped ? ", " + progress.skipped + " ignoré(s)" : "")
         );
       });
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) throw abortError();
 
       var ensureDir = createDirResolver(rootHandle);
       for (var d = 0; d < plan.dirs.length; d += 1) {
         await ensureDir(plan.dirs[d]);
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) throw abortError();
       }
+
+      var skippedIssues = plan.skipped.map(function (entry) {
+        return { relative: entry.relative, message: entry.reason };
+      });
 
       if (!plan.files.length) {
         ui.finish(
-          "Dossier vide",
-          "Le dossier « " + folderName + " » a été créé, sans fichier à télécharger."
+          "Aucun fichier à télécharger",
+          "Le dossier « " + destinationName + " » a été créé" +
+            (skippedIssues.length ? ", " + skippedIssues.length + " élément(s) ignoré(s)." : ".")
         );
+        if (skippedIssues.length) {
+          ui.showFailures(skippedIssues, skippedIssues.length + " élément(s) ignoré(s) :");
+        }
         return;
       }
 
@@ -368,14 +439,25 @@
       var currentLoaded = 0;
       var lastPaint = 0;
       var failures = [];
+      var sessionExpired = false;
+      var abortedByFailures = false;
+      var consecutiveFailures = 0;
 
       function paint() {
-        var fraction = currentSize > 0 ? Math.min(1, currentLoaded / currentSize) : 0;
-        var percent = ((completed + fraction) / totalFiles) * 100;
-        ui.setPercent(percent);
+        var percent;
+        if (plan.totalBytes > 0) {
+          // A single 20 GB movie must move the bar during the transfer, not
+          // jump from 0 to 100 once the file count flips.
+          percent = (loadedBytes / plan.totalBytes) * 100;
+        } else {
+          var fraction = currentSize > 0 ? Math.min(1, currentLoaded / currentSize) : 0;
+          percent = ((completed + fraction) / totalFiles) * 100;
+        }
+        ui.setPercent(Math.min(100, Math.max(0, percent)));
         ui.setDetail(
           completed + " / " + totalFiles + " fichiers · " +
-          formatBytes(loadedBytes) + " / " + formatBytes(plan.totalBytes)
+            formatBytes(loadedBytes) + " / " + formatBytes(plan.totalBytes) +
+            (skippedIssues.length ? " · " + skippedIssues.length + " ignoré(s)" : "")
         );
       }
 
@@ -393,15 +475,21 @@
         currentSize = file.size;
         currentLoaded = 0;
 
+        var parentHandle = null;
+        var fileCreated = false;
         try {
-          var handle = await ensureDir(parentOf(file.relative));
-          var fileHandle = await handle.getFileHandle(file.name, { create: true });
+          parentHandle = await ensureDir(parentOf(file.relative));
           var response = await fetch(
             buildShareUrl(base, { path: file.path, dl: 1, count: 0 }),
             { credentials: "same-origin", signal: controller.signal }
           );
           if (!response.ok) throw httpError(response);
           if (!response.body) throw new Error("Flux de téléchargement indisponible.");
+
+          // Create the destination entry only once the server has answered:
+          // an HTTP/network failure must not leave a 0-byte file behind.
+          var fileHandle = await parentHandle.getFileHandle(file.name, { create: true });
+          fileCreated = true;
           var writable = await fileHandle.createWritable();
           var counter = new TransformStream({
             transform: function (chunk, control) {
@@ -421,12 +509,31 @@
             }
             throw error;
           }
+          consecutiveFailures = 0;
         } catch (error) {
+          if (fileCreated && parentHandle) {
+            try {
+              await parentHandle.removeEntry(file.name);
+            } catch (_removeError) {
+              /* best effort: keep the original error */
+            }
+          }
           if (controller.signal.aborted) break;
+          if (error && error.sessionExpired) {
+            sessionExpired = true;
+            controller.abort();
+            break;
+          }
+          consecutiveFailures += 1;
           failures.push({
             relative: file.relative,
             message: error && error.message ? error.message : "Erreur inconnue",
           });
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            abortedByFailures = true;
+            controller.abort();
+            break;
+          }
         } finally {
           completed += 1;
           currentLoaded = currentSize;
@@ -434,23 +541,50 @@
         }
       }
 
+      if (sessionExpired) {
+        ui.fail(
+          "L'accès à ce partage a expiré. Rechargez la page puis relancez le téléchargement."
+        );
+        return;
+      }
+
+      var issues = failures.concat(skippedIssues);
+
+      if (abortedByFailures) {
+        ui.finish(
+          "Téléchargement interrompu",
+          "Trop d'échecs consécutifs (" + MAX_CONSECUTIVE_FAILURES + ")."
+        );
+        if (issues.length) {
+          ui.showFailures(issues, issues.length + " élément(s) non téléchargé(s) :");
+        }
+        return;
+      }
+
       if (controller.signal.aborted) {
         ui.finish(
           "Téléchargement annulé",
           completed + " fichier(s) traité(s) avant l'annulation."
         );
+        if (issues.length) {
+          ui.showFailures(issues, issues.length + " élément(s) non téléchargé(s) :");
+        }
         return;
       }
 
-      if (failures.length) {
+      if (issues.length) {
         ui.finish(
-          "Terminé avec " + failures.length + " erreur(s)",
-          (completed - failures.length) + " / " + totalFiles +
+          "Terminé avec " + issues.length + " élément(s) non téléchargé(s)",
+          (totalFiles - failures.length) + " / " + totalFiles +
             " fichiers téléchargés · " + formatBytes(loadedBytes)
         );
-        ui.showFailures(failures);
+        ui.showFailures(issues, issues.length + " élément(s) non téléchargé(s) :");
       } else {
-        ui.finish("Téléchargement terminé", totalFiles + " fichiers · " + formatBytes(loadedBytes));
+        ui.finish(
+          "Téléchargement terminé",
+          totalFiles + " fichiers · " + formatBytes(loadedBytes) +
+            " dans « " + destinationName + " »"
+        );
       }
     } catch (error) {
       if (error && error.pickerCancelled) {
@@ -473,7 +607,7 @@
     } finally {
       state.running = false;
       state.controller = null;
-      endRun();
+      endRun(state);
     }
   }
 
@@ -483,16 +617,32 @@
     var controller = new AbortController();
     state.controller = controller;
     state.running = true;
+    state.lastTrigger = trigger;
     beginRun(ui);
 
     try {
       ui.setStatus("Analyse du dossier…");
       var plan = await collectPlan(base, folderPath, controller.signal, function (progress) {
-        ui.setStatus("Analyse du dossier… " + progress.files + " fichier(s)");
+        ui.setStatus(
+          "Analyse du dossier… " + progress.files + " fichier(s)" +
+            (progress.skipped ? ", " + progress.skipped + " ignoré(s)" : "")
+        );
+      });
+
+      var skippedIssues = plan.skipped.map(function (entry) {
+        return { relative: entry.relative, message: entry.reason };
       });
 
       if (!plan.files.length) {
-        ui.finish("Dossier vide", "Aucun fichier à télécharger.");
+        ui.finish(
+          "Aucun fichier à télécharger",
+          skippedIssues.length
+            ? skippedIssues.length + " élément(s) ignoré(s)."
+            : "Aucun fichier à télécharger."
+        );
+        if (skippedIssues.length) {
+          ui.showFailures(skippedIssues, skippedIssues.length + " élément(s) ignoré(s) :");
+        }
         return;
       }
 
@@ -522,8 +672,12 @@
       ui.finish(
         plan.files.length + " téléchargements lancés",
         "Les fichiers arrivent à plat dans le dossier de téléchargements du navigateur. " +
-          "Si certains manquent, autorisez les téléchargements multiples pour ce site puis relancez."
+          "Si certains manquent, autorisez les téléchargements multiples pour ce site puis relancez." +
+          (skippedIssues.length ? " " + skippedIssues.length + " élément(s) ignoré(s)." : "")
       );
+      if (skippedIssues.length) {
+        ui.showFailures(skippedIssues, skippedIssues.length + " élément(s) ignoré(s) :");
+      }
     } catch (error) {
       if (controller.signal.aborted) {
         ui.finish("Téléchargement annulé", "");
@@ -533,7 +687,7 @@
     } finally {
       state.running = false;
       state.controller = null;
-      endRun();
+      endRun(state);
     }
   }
 
@@ -545,7 +699,7 @@
     var ui = createUi();
     if (!ui) return;
 
-    var state = { running: false, controller: null, pendingTrigger: null };
+    var state = { running: false, controller: null, pendingTrigger: null, lastTrigger: null };
     var supported = typeof global.showDirectoryPicker === "function";
     var fallback = document.getElementById("downloadFallback");
     var cascadeButton = document.getElementById("downloadCascade");
@@ -557,6 +711,7 @@
       trigger.addEventListener("click", function () {
         if (state.running) return;
         state.pendingTrigger = trigger;
+        state.lastTrigger = trigger;
         if (supported) {
           runDirectoryDownload(trigger, ui, state);
           return;
@@ -567,11 +722,19 @@
         }
         ui.reset();
         ui.show();
+        ui.cancel.hidden = true;
         ui.setStatus("Ce navigateur ne peut pas enregistrer un dossier complet.");
         ui.setDetail(
           "Utilisez « Télécharger les fichiers un par un » ci-dessous. " +
             "Les fichiers seront téléchargés à plat, sans les sous-dossiers."
         );
+        if (cascadeButton) {
+          try {
+            cascadeButton.focus();
+          } catch (_error) {
+            /* focus is best effort */
+          }
+        }
       });
     });
 
@@ -600,8 +763,10 @@
       formatBytes: formatBytes,
       folderNameFromPath: folderNameFromPath,
       sanitizeEntryName: sanitizeEntryName,
+      normalizedEntryKey: normalizedEntryKey,
       buildShareUrl: buildShareUrl,
       joinRelPath: joinRelPath,
+      collectPlan: collectPlan,
     };
   }
 })(typeof window !== "undefined" ? window : globalThis);

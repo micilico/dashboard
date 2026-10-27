@@ -43,6 +43,8 @@ from .config import (  # noqa: E402
     READ_RATE_LIMIT_SECONDS,
     SHARE_RATE_LIMIT_CALLS,
     SHARE_RATE_LIMIT_SECONDS,
+    SHARE_LIST_RATE_LIMIT_CALLS,
+    SHARE_LIST_RATE_LIMIT_SECONDS,
     STATIC_DIR,
     DOWNLOAD_STREAM_LIMIT,
     THUMBNAIL_CONCURRENCY,
@@ -133,6 +135,11 @@ app.state.action_limiter = RateLimiter(
 app.state.share_limiter = RateLimiter(
     max_calls=SHARE_RATE_LIMIT_CALLS,
     period_seconds=SHARE_RATE_LIMIT_SECONDS,
+    max_keys=MAX_RATE_KEYS,
+)
+app.state.share_list_limiter = RateLimiter(
+    max_calls=SHARE_LIST_RATE_LIMIT_CALLS,
+    period_seconds=SHARE_LIST_RATE_LIMIT_SECONDS,
     max_keys=MAX_RATE_KEYS,
 )
 app.state.read_limiter = RateLimiter(
