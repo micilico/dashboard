@@ -10,6 +10,7 @@ from .monitoring import now_iso
 from ..config import (
     LIVE_DASHBOARD_INTERVAL_SECONDS,
     LIVE_DATA_INTERVAL_SECONDS,
+    LIVE_MEDIA_INTERVAL_SECONDS,
     LIVE_SLOW_INTERVAL_SECONDS,
     LIVE_STATUS_INTERVAL_SECONDS,
     LIVE_TORRENTS_INTERVAL_SECONDS,
@@ -146,7 +147,7 @@ def build_live_hub(app: FastAPI, job_manager: JobManager) -> SharedSectionHub:
         fingerprint_factory=lambda: fingerprints.get("health"),
     )
     hub.register(
-        "media", media, interval=LIVE_SLOW_INTERVAL_SECONDS,
+        "media", media, interval=LIVE_MEDIA_INTERVAL_SECONDS,
         fingerprint_factory=lambda: fingerprints.get("media"),
     )
     hub.register(

@@ -374,6 +374,9 @@ La whitelist `basic_auth` de Caddy doit inclure `/cloud-panel/static/share.js`.
 | `TORRENT_PANEL_STATS_HISTORY_DAYS` | Fenêtre d'historique en jours (défaut 60) |
 | `TORRENT_PANEL_RATIO_MONITOR_STATE_PATH` | Fichier d'état du seuil de ratio (défaut `data/ratio-monitor-state.json`) |
 | `TORRENT_PANEL_RATIO_ALERT_THRESHOLD` | Seuil initial du moniteur de ratio (défaut 10 ; réglable dans l'interface) |
+| `TORRENT_PANEL_LIVE_MEDIA_INTERVAL_SECONDS` | Cadence du topic SSE `media` (défaut 30 s, minimum 15 s) — évite le polling Jellyfin toutes les 0,5 s |
+| `TORRENT_PANEL_MONITOR_JELLYFIN_CACHE_TTL_SECONDS` | Cache du snapshot Jellyfin (défaut 30 s, minimum 30 s) |
+| `TORRENT_PANEL_MONITOR_JELLYFIN_STATUS_CACHE_TTL_SECONDS` | Cache du check `/health` Jellyfin (défaut 30 s, minimum 15 s) |
 | `TORRENT_PANEL_LIVE_DATA_INTERVAL_SECONDS` | Cadence du topic SSE `data` (défaut 2 s) |
 | `TORRENT_PANEL_FLOWS_WINDOW_SECONDS` | Fenêtre glissante des métriques HTTP/SSE (défaut 60 s) |
 | `TORRENT_PANEL_FLOWS_SAMPLE_LIMIT` | Nombre de points du graphique de débits (défaut 120) |

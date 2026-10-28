@@ -31,6 +31,7 @@ from torrent_panel.services.monitoring import (
     _disk_unavailable,
     storage_snapshot,
 )  # noqa: E402
+from torrent_panel.services import monitoring as monitoring_service  # noqa: E402
 from torrent_panel.services import relink as relink_service  # noqa: E402
 from torrent_panel.services import flows as flows_service  # noqa: E402
 from torrent_panel.services import organizer as organizer_service  # noqa: E402
@@ -976,6 +977,55 @@ class BackendTests(unittest.TestCase):
         self.assertIn("data", VALID_TOPICS)
         self.assertEqual(parse_topics("data"), ("data",))
         self.assertEqual(parse_topics("stats,data"), ("stats", "data"))
+
+    def test_jellyfin_polling_intervals_are_throttled(self):
+        self.assertGreaterEqual(panel_config.MONITOR_JELLYFIN_CACHE_TTL_SECONDS, 30.0)
+        self.assertGreaterEqual(
+            panel_config.MONITOR_JELLYFIN_STATUS_CACHE_TTL_SECONDS, 15.0
+        )
+        self.assertGreaterEqual(panel_config.LIVE_MEDIA_INTERVAL_SECONDS, 15.0)
+        media_section = app.state.section_hub._sections["media"]
+        self.assertGreaterEqual(media_section.interval, 15.0)
+
+    def test_jellyfin_status_probe_is_cached(self):
+        cache = monitoring_service._JELLYFIN_STATUS_CACHE
+        cache.invalidate()
+        calls = []
+
+        async def fake_http_status(app_, name, url, **kwargs):
+            calls.append((name, url))
+            return {"name": name, "status": "operational"}
+
+        async def run_twice():
+            first = await monitoring_service._jellyfin_service_status(app)
+            second = await monitoring_service._jellyfin_service_status(app)
+            return first, second
+
+        with mock.patch.object(
+            monitoring_service, "http_service_status", new=fake_http_status
+        ):
+            first, second = asyncio.run(run_twice())
+        cache.invalidate()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first["name"], "Jellyfin")
+        self.assertEqual(second["name"], "Jellyfin")
+
+    def test_activity_snapshot_does_not_contact_jellyfin(self):
+        jellyfin = mock.AsyncMock(return_value={"recentItems": [{"name": "Film"}]})
+        dashboard = mock.AsyncMock(
+            return_value={"generatedAt": "2026-10-28T00:00:00+00:00", "services": [], "alerts": []}
+        )
+        storage = mock.AsyncMock(return_value={"rclone": {}, "disk": {}})
+        prowlarr = mock.AsyncMock(return_value=({}, []))
+        with (
+            mock.patch.object(monitoring_service, "jellyfin_snapshot", new=jellyfin),
+            mock.patch.object(monitoring_service, "dashboard_snapshot", new=dashboard),
+            mock.patch.object(monitoring_service, "storage_snapshot", new=storage),
+            mock.patch.object(monitoring_service, "prowlarr_snapshot", new=prowlarr),
+        ):
+            body = asyncio.run(monitoring_service._activity_snapshot_uncached(app))
+        jellyfin.assert_not_awaited()
+        self.assertEqual(body["summary"]["jellyfinRecentItems"], 0)
 
 
 class PerformanceCacheTests(unittest.IsolatedAsyncioTestCase):

@@ -22,6 +22,7 @@ from ..config import (
     MONITOR_DASHBOARD_CACHE_TTL_SECONDS,
     MONITOR_HEALTH_CACHE_TTL_SECONDS,
     MONITOR_JELLYFIN_CACHE_TTL_SECONDS,
+    MONITOR_JELLYFIN_STATUS_CACHE_TTL_SECONDS,
     MONITOR_HTTP_TIMEOUT_SECONDS,
     MONITOR_PROWLARR_CACHE_TTL_SECONDS,
     MONITOR_STATS_CACHE_TTL_SECONDS,
@@ -44,6 +45,7 @@ from .media_automation import now_iso
 
 _PROWLARR_CACHE = AsyncTTLCache(MONITOR_PROWLARR_CACHE_TTL_SECONDS)
 _JELLYFIN_CACHE = AsyncTTLCache(MONITOR_JELLYFIN_CACHE_TTL_SECONDS)
+_JELLYFIN_STATUS_CACHE = AsyncTTLCache(MONITOR_JELLYFIN_STATUS_CACHE_TTL_SECONDS)
 _LOCAL_HTTP_CLIENT: httpx.AsyncClient | None = None
 _JELLYFIN_HTTP_CLIENT: httpx.AsyncClient | None = None
 _HTTP_CLIENTS_MANAGED = False
@@ -207,6 +209,19 @@ async def http_service_status(
             action=action or {"kind": "retry", "label": "Réessayer", "url": f"{PUBLIC_PREFIX or ''}/?view=home"},
             details={"url": url},
         )
+
+
+async def _jellyfin_service_status(app: FastAPI) -> dict[str, Any]:
+    """Keep the Jellyfin health probe out of the 0.5 s dashboard loop."""
+    return await _JELLYFIN_STATUS_CACHE.get_or_set(
+        lambda: http_service_status(
+            app,
+            "Jellyfin",
+            JELLYFIN_STATUS_URL,
+            ok_statuses={200, 204},
+            action={"kind": "open", "label": "Ouvrir le service", "url": JELLYFIN_PUBLIC_URL},
+        )
+    )
 
 
 async def socket_service_status(
@@ -407,13 +422,7 @@ async def _dashboard_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
             action={"kind": "open", "label": "Ouvrir le service", "url": prowlarr_indexers_url},
         ),
         prowlarr_snapshot(),
-        http_service_status(
-            app,
-            "Jellyfin",
-            JELLYFIN_STATUS_URL,
-            ok_statuses={200, 204},
-            action={"kind": "open", "label": "Ouvrir le service", "url": JELLYFIN_PUBLIC_URL},
-        ),
+        _jellyfin_service_status(app),
         socket_service_status(
             app,
             "Tunnel SSH qBittorrent",
@@ -713,7 +722,6 @@ async def _activity_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
     automation_rules = app.state.automation_rules
     dashboard = await dashboard_snapshot(app)
     storage = await storage_snapshot(app)
-    media = await jellyfin_snapshot()
     torrents = []
     try:
         torrents = await qbit.torrents()
@@ -732,7 +740,7 @@ async def _activity_snapshot_uncached(app: FastAPI) -> dict[str, Any]:
         "transfersRcloneActive": int(storage.get("rclone", {}).get("transfersActive", 0) or 0),
         "rcloneErrors": int(storage.get("rclone", {}).get("errors", 0) or 0),
         "diskFreeBytes": int(storage.get("disk", {}).get("freeBytes", 0) or 0),
-        "jellyfinRecentItems": len(media.get("recentItems", [])),
+        "jellyfinRecentItems": 0,
         "backendUnavailable": len([item for item in dashboard.get("services", []) if item.get("status") == "unavailable"]),
     }
     timeline: list[dict[str, Any]] = []
